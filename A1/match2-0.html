@@ -1,0 +1,1218 @@
+<HTML>
+<HEAD>
+<TITLE>./A1_processed_new/combined_DBJMZ.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A1_processed_new/combined_DBJMZ.py<p><PRE>
+
+
+#!/usr/bin/env python
+# coding: utf-8
+
+# ### Analysis Notebook for Q1 (Linear Regressor):
+# Library imports.
+
+# In[ ]:
+
+
+import numpy as np
+import pandas as pd 
+import matplotlib
+matplotlib.use('Qt5Agg')  
+import matplotlib.pyplot as plt
+from Q1.linear_regression import LinearRegressor
+
+
+# **X** : Feature Vector for the m samples, shape(m,n)  
+# **y** : Actual values corresponding to each X, shape(m,)  
+# *(where m : number of examples, n : number of features)*
+
+# In[ ]:
+
+
+X = pd.read_csv('data/Q1/linearX.csv',header=None).values 
+y = pd.read_csv('data/Q1/linearY.csv',header=None).values
+
+
+# **Model** : an instance of the *Linear Regressor* class, defined in *linear_regression.py*
+
+# In[ ]:
+
+
+model = LinearRegressor()
+
+
+# Q1. The *fit* method is run to train the model on data (X,y), which are passed as arguments. I also define *learning_rate* to be the learning rate hyperparameter, which is also passed as an argument. It returns the list of parameters after each iteration of the training loop.
+
+# In[ ]:
+
+
+learning_rate = 0.1
+list_parameters = model.fit(X,y,learning_rate)
+theta_final = list_parameters[-1]
+print("Learning Rate : ",learning_rate)
+print("Final Parameters : ", theta_final)
+
+
+# Plotting Class.
+
+# In[ ]:
+
+
+class q1plots:
+    def __init__(self,model):
+        self.model = model
+
+    def compute_loss_for_theta(self,X, y, theta):
+        """Compute the cost function J(θ) for given theta values."""
+        m,n = X.shape
+        loss = 0
+        for i in range(m):
+            x_i = np.insert(X[i],0,1)
+            h_i = np.dot(theta, x_i)        # Hypothesis function
+            loss += (y[i] - h_i) ** 2       # Compute loss
+        avg_loss = loss / (2 * m)           # Compute final loss
+        return avg_loss
+
+    def regression(self,X, y, theta_final):
+        plt.scatter(X, y, color='blue', label="Training Data")
+        y_pred = theta_final[0] + theta_final[1] * X      # Hypothesis: h(x) = theta0 + theta1 * x
+
+        # Plot the hypothesis function
+        plt.plot(X, y_pred, color='red', label="Learned Hypothesis")
+        plt.xlabel("X values")
+        plt.ylabel("y values")
+        plt.title("Linear Regression Fit")
+        plt.legend()
+        plt.grid()
+        plt.show()
+
+    def error_surface(self, X, y):
+        """Plots the 3D error surface (non-vectorized)."""
+
+        theta0_vals = np.linspace(self.model.theta[0] - 10, self.model.theta[0] + 10, 100)
+        theta1_vals = np.linspace(self.model.theta[1] - 10, self.model.theta[1] + 10, 100)
+
+        num_theta0 = len(theta0_vals)
+        num_theta1 = len(theta1_vals)
+
+        J_vals = np.zeros((num_theta0, num_theta1))
+
+        for i in range(num_theta0):
+            for j in range(num_theta1):
+                theta0 = theta0_vals[i]
+                theta1 = theta1_vals[j]
+                theta = np.array([theta0, theta1])
+                cost = self.compute_loss_for_theta(X, y, theta)  
+                J_vals[i, j] = cost
+
+        T0, T1 = np.meshgrid(theta0_vals, theta1_vals)
+
+        fig = plt.figure(figsize=(10, 7))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot_surface(T0, T1, J_vals, cmap='coolwarm', edgecolor='none')
+        ax.set_xlabel(r'$\theta_0$')
+        ax.set_ylabel(r'$\theta_1$')
+        ax.set_zlabel(r'$J(\theta)$')
+        ax.set_title('Error Function Surface')
+        plt.show()
+            
+    def error_surface_with_trajectory(self, X, y, list_parameters):
+        # Create a grid of theta values for the error surface.
+        theta0_vals = np.linspace(self.model.theta[0] - 30, self.model.theta[0] + 30, 100)
+        theta1_vals = np.linspace(self.model.theta[1] - 30, self.model.theta[1] + 30, 100)
+        num_theta0 = len(theta0_vals)
+        num_theta1 = len(theta1_vals)
+        
+        # Compute the cost for each pair (theta0, theta1)
+        J_vals = np.zeros((num_theta0, num_theta1))
+        for i in range(num_theta0):
+            for j in range(num_theta1):
+                theta = np.array([theta0_vals[i], theta1_vals[j]])
+                J_vals[i, j] = self.compute_loss_for_theta(X, y, theta)
+        
+        # Create the meshgrid for plotting
+        T0, T1 = np.meshgrid(theta0_vals, theta1_vals)
+        
+        # Set up the figure and 3D axis
+        fig = plt.figure(figsize=(10, 7))
+        ax = fig.add_subplot(111, projection='3d')
+        surface = ax.plot_surface(T0, T1, J_vals.T, cmap='coolwarm', edgecolor='none', alpha=0.7)
+        ax.set_xlabel(r'$\theta_0$')
+        ax.set_ylabel(r'$\theta_1$')
+        ax.set_zlabel(r'$J(\theta)$')
+        ax.set_title('Error Surface with Gradient Descent Trajectory')
+        
+        # Fix for pane transparency using current Matplotlib attributes
+        ax.xaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))  # x pane transparent
+        ax.yaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))  # y pane transparent
+        ax.zaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))  # z pane transparent
+        
+        # Initialize lists to hold the trajectory coordinates
+        traj_theta0 = []
+        traj_theta1 = []
+        traj_cost = []
+        
+        # Animate the trajectory over the error surface
+        for theta in list_parameters:
+            cost = self.compute_loss_for_theta(X, y, theta)
+            traj_theta0.append(theta[0])
+            traj_theta1.append(theta[1])
+            traj_cost.append(cost)
+            
+            # Plot the current parameter as a red dot
+            ax.scatter(theta[0], theta[1], cost, c='r', marker='o', s=50)
+            
+            # Connect the current dot with the previous one
+            if len(traj_theta0) &gt; 1:
+                ax.plot(traj_theta0[-2:], traj_theta1[-2:], traj_cost[-2:], c='r', lw=2)
+            
+            plt.draw()
+            plt.pause(0.2)  # Pause for 0.2 seconds to visualize the update
+        
+        plt.show()
+
+    def contour_with_trajectory(self, X, y, list_parameters):
+        """Plots the 2D contour and simulates the moving dot with its trajectory using plt.pause()."""
+
+        # 1. Prepare data for the contour plot
+        theta0_vals = np.linspace(self.model.theta[0] - 30, self.model.theta[0] + 30, 100)
+        theta1_vals = np.linspace(self.model.theta[1] - 30, self.model.theta[1] + 30, 100)
+<A NAME="10"></A><FONT color = #FF0000><A HREF="match2-1.html#10" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        T0, T1 = np.meshgrid(theta0_vals, theta1_vals, indexing='ij')
+        J_vals = np.zeros(T0.shape)
+
+        for i in range(len(theta0_vals)):
+            for j in range(len(theta1_vals)):
+</FONT>                theta = np.array([theta0_vals[i], theta1_vals[j]])
+                J_vals[i, j] = self.compute_loss_for_theta(X, y, theta)
+
+        # 2. Create the contour plot
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match2-1.html#2" TARGET="1"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        contour = ax.contour(T0, T1, J_vals, levels=50, cmap='viridis')
+        ax.clabel(contour, inline=True, fontsize=8)
+        ax.set_xlabel(r'$\theta_0$', fontsize=12)
+        ax.set_ylabel(r'$\theta_1$', fontsize=12)
+        ax.set_title('Gradient Descent Path on Error Contour', fontsize=15)
+</FONT><A NAME="15"></A><FONT color = #FF0000><A HREF="match2-1.html#15" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+
+        # 3. Prepare the gradient descent parameters
+        list_parameters = np.array(list_parameters)
+        theta0_history = list_parameters[:, 0]
+        theta1_history = list_parameters[:, 1]
+
+        # Initialize the moving dot and an empty line for the trajectory.
+        # Note: wrap the initial points in a list to satisfy set_data requirements.
+        moving_dot, = ax.plot([theta0_history[0]], [theta1_history[0]], 'rx', markersize=8, label="Gradient Descent Path")
+</FONT>        trajectory_line, = ax.plot([], [], 'rx', markersize=4)
+
+        # Draw the initial frame and pause briefly
+        plt.draw()
+        plt.pause(0.5)
+
+        # 4. Loop over the gradient descent history to update the plot
+        for i in range(1, len(list_parameters)):
+            # Update the moving dot's position (wrap single values in lists)
+            moving_dot.set_data([theta0_history[i]], [theta1_history[i]])
+            # Update the trajectory line to show all previous points
+            trajectory_line.set_data(theta0_history[:i+1], theta1_history[:i+1])
+            
+            # Redraw and pause for a short duration to simulate movement
+            plt.draw()
+            plt.pause(0.2)  # Adjust pause duration for speed
+
+        plt.show()
+
+    def validation_curve(self, X , y , split_ratio, lr_range):
+        def MSE(y_true, y_pred):
+            """Compute Mean Squared Error (MSE)"""
+            cur_loss = 0
+            for i in range(len(y_true)):
+                cur_loss = cur_loss + (y_true[i] - y_pred[i])**2
+            cur_loss /= (2*len(y_true))
+            return cur_loss
+
+        loss_train = []
+        loss_test = []
+<A NAME="12"></A><FONT color = #0000FF><A HREF="match2-1.html#12" TARGET="1"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        split_idx = int(len(X) * split_ratio)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+</FONT><A NAME="8"></A><FONT color = #00FFFF><A HREF="match2-1.html#8" TARGET="1"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        for lr in lr_range:
+            # Create a new instance of the model for each learning rate
+            current_model = LinearRegressor() 
+            tmp = current_model.fit(X_train, y_train, learning_rate=lr)
+            
+            # Predict on training and test sets
+            y0_train = current_model.predict(X_train)
+            y0_test = current_model.predict(X_test)
+
+            # Compute MSE loss
+            loss_train.append(MSE(y_train, y0_train))
+</FONT>            loss_test.append(MSE(y_test, y0_test))
+
+        # Plot the validation curve
+<A NAME="9"></A><FONT color = #FF00FF><A HREF="match2-1.html#9" TARGET="1"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(lr_range, loss_train, marker='o', color='green', label='Training Loss (MSE)')
+        plt.plot(lr_range, loss_test, marker='s', color='blue', label='Validation Loss (MSE)')
+        plt.xlabel('Learning Rate')
+        plt.ylabel('Mean Squared Error (MSE)')
+        plt.title('Validation Curve')
+</FONT>        plt.legend(loc='best')
+        plt.grid()
+        plt.xscale('log')  # Log scale helps if learning rates span multiple magnitudes
+        plt.show()
+        
+plot = q1plots(model)
+
+
+# Q2. Plot of data on a two-dimensional graph and plot of hypothesis function learned by algorithm in the previous part.
+
+# In[ ]:
+
+
+plot.regression(X,y,theta_final)
+
+
+# In[ ]:
+
+
+lr_range = np.logspace(-3, 0, 10)
+plot.validation_curve(X,y,0.8,lr_range)
+
+
+# Q3(a). A 3-dimensional mesh showing the error function (J(θ)) on z axis and the parameters in the x − y plane. Used a colour gradient for different values of the error function.
+
+# In[ ]:
+
+
+plot.error_surface(X, y)
+
+
+# Q3(b). On the plot of 3(a), displayed the error value using the current set of parameters at each iteration of the gradient descent. Included a time gap of 0.2 seconds in display for each iteration so that the change in the function value can be observed by the human eye.
+
+# In[ ]:
+
+
+plot.error_surface_with_trajectory(X, y, list_parameters)
+
+
+# Q4. Contours of the error function at each iteration of the gradient descent. Once again, chosen a time gap of 0.2 seconds so that the change be perceived by the human eye.(Note here plot will be 2-D)
+# 
+
+# In[ ]:
+
+
+plot.contour_with_trajectory(X, y, list_parameters)
+
+
+# ### Analysis Notebook for Q2 (Stochastic Gradient Descent):
+# Library imports.
+
+# In[ ]:
+
+
+import numpy as np
+import pandas as pd 
+import matplotlib
+matplotlib.use('Qt5Agg')  
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from Q2.sampling_sgd import StochasticLinearRegressor, generate
+
+
+# Q1. Sampled 1 million data points taking values as given in question, and then split the data into train and test data sets in ratio 80:20.
+
+# In[ ]:
+
+
+N = 1000000
+theta, input_mean, input_sigma, noise_sigma = np.array([3,1,2]), np.array([3,4]), np.array([4,4]), float(2) 
+X,y = generate(N,theta,input_mean,input_mean,noise_sigma)
+split_idx = int(len(X) * 0.8)
+<A NAME="11"></A><FONT color = #00FF00><A HREF="match2-1.html#11" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+X_train, X_test = X[:split_idx], X[split_idx:]
+y_train, y_test = y[:split_idx], y[split_idx:]
+
+
+# Q2(b). SGD implementation in .py file, below is code for training for learning_rate = 0.001 on X_train, y_train. Batch size defined in the .py file.
+
+# In[ ]:
+
+
+model = StochasticLinearRegressor()
+list_parameters = model.fit(X_train,y_train,0.001)
+</FONT>theta_final = list_parameters[-1]
+
+
+# In[ ]:
+
+
+print(list_parameters)
+print(model.theta)
+
+
+# Q3(b). Closed form solution for Linear Regression.
+
+# In[ ]:
+
+
+X_bias = np.c_[np.ones(X_train.shape[0]), X_train]
+theta = np.linalg.inv(X_bias.T @ X_bias) @ X_bias.T @ y_train
+print("Closed form parameters : ",theta)
+
+
+# Q4. Test Error : mean squared error on the test set.
+
+# In[ ]:
+
+
+m, n = X_train.shape
+y_pred_train = model.predict(X_train)
+train_error = np.sum((y_train - y_pred_train[2])**2)/(2*m)
+m, n = X_test.shape
+y_pred_test = model.predict(X_test)
+test_error = np.sum((y_test - y_pred_test[2])**2)/(2*m)
+print("Test Error : ", test_error)
+print("Train Error : ",train_error)
+
+
+# Q5. Plot of movement of θ as the parameters are updated (until convergence) for varying batch sizes, on 3-dimensional parameter space (θj on each axis).
+
+# In[ ]:
+
+
+def plot_q2(list_parameters):
+    fig = plt.figure(figsize=(10, 7))
+    ax = fig.add_subplot(111, projection='3d')
+
+    theta0, theta1, theta2 = zip(*list_parameters)  # Unpacking tuples
+
+    ax.plot(theta0, theta1, theta2, marker='x', markersize=2, c='g', linestyle='-')  # Green plot
+
+    ax.set_xlabel(r'$\theta_0$')
+    ax.set_ylabel(r'$\theta_1$')
+    ax.set_zlabel(r'$\theta_2$')
+    ax.set_title('Theta Movement')
+
+    plt.show()
+
+plot_q2(list_parameters[3])
+
+
+# ### Analysis Notebook for Q3 (Logistic Regression):
+# Library imports.
+
+# In[ ]:
+
+
+import numpy as np
+import pandas as pd 
+import matplotlib
+matplotlib.use('Qt5Agg')  
+import matplotlib.pyplot as plt
+from Q3.logistic_regression import LogisticRegressor
+
+
+# **X** : Feature Vector for the m samples, shape(m,n)  
+# **y** : Actual labels corresponding to each X, shape(m,)  
+# *(where m : number of examples, n : number of features)*
+
+# In[ ]:
+
+
+X = pd.read_csv('data/Q3/logisticX.csv',header=None).values 
+y = pd.read_csv('data/Q3/logisticY.csv',header=None).values
+X_mean, X_std = X.mean(axis=0), X.std(axis=0)
+X_n = (X - X_mean) / X_std
+
+
+# **Model** : an instance of the *Logistic Regressor* class, defined in *logistic_regression.py*
+
+# In[ ]:
+
+
+model = LogisticRegressor()
+
+
+# Q1. The *fit* method is run to train the model on data (X,y), which are passed as arguments. It returns the list of parameters after each iteration of the training loop.
+
+# In[ ]:
+
+
+list_parameters = model.fit(X,y,0.01)
+theta_final = list_parameters[-1]
+print("Final Parameters : ", theta_final)
+
+
+# Q2. Plot of training data and decision boundary.
+
+# In[ ]:
+
+
+def plot_data_with_logistic_boundary(X_n, y, theta_final):
+    """Plots the training data and the logistic regression decision boundary."""
+
+    # Ensure y is a 1D array (important!)
+    y = np.ravel(y)
+
+    # Separate data points by class (Corrected indexing)
+    X_class0 = X_n[y == 0]  # Use boolean indexing along the first dimension (rows)
+    X_class1 = X_n[y == 1]  # Use boolean indexing along the first dimension (rows)
+
+    # Plot the data points
+    plt.figure(figsize=(8, 6))
+    plt.scatter(X_class0[:, 0], X_class0[:, 1], marker='o', label='Class 0')
+    plt.scatter(X_class1[:, 0], X_class1[:, 1], marker='x', label='Class 1')
+
+    # Calculate decision boundary line
+    x1_min, x1_max = X_n[:, 0].min() - 1, X_n[:, 0].max() + 1  # Range for x1
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match2-1.html#5" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    x2_min, x2_max = X_n[:, 1].min() - 1, X_n[:, 1].max() + 1  # Range for x2
+
+    x1_line = np.linspace(x1_min, x1_max, 100)  # Create points for x1
+    x2_line = - (theta_final[0] + theta_final[1] * x1_line) / theta_final[2] #x2 = (-theta0 - theta1*x1)/theta2
+
+    # Plot the decision boundary
+    plt.plot(x1_line, x2_line, color='red', label='Decision Boundary')
+
+    plt.xlabel('x1')
+</FONT>    plt.ylabel('x2')
+    plt.title('Training Data with Logistic Regression Boundary')
+    plt.legend()
+    plt.grid(True)
+    plt.xlim(x1_min, x1_max) #Set x limit of the plot.
+    plt.ylim(x2_min, x2_max) #Set y limit of the plot.
+    plt.show()
+
+plot_data_with_logistic_boundary(X_n, y, theta_final)
+
+
+# ### Analysis Notebook for Q4 (Gaussian Discriminant Analysis):
+# Library imports.
+
+# In[ ]:
+
+
+import numpy as np
+import pandas as pd 
+import matplotlib
+matplotlib.use('Qt5Agg')  
+import matplotlib.pyplot as plt
+<A NAME="6"></A><FONT color = #00FF00><A HREF="match2-1.html#6" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+from Q4.gda import GaussianDiscriminantAnalysis
+
+
+# **X** : Feature Vector for the m samples, shape(m,n)  
+# **y** : Actual values corresponding to each X, shape(m,)  
+# *(where m : number of examples, n : number of features)*
+
+# In[ ]:
+
+
+X = np.loadtxt('data/Q4/q4x.dat')
+y = pd.read_csv('data/Q4/q4y.dat', header=None).values
+X_mean, X_std = X.mean(axis=0), X.std(axis=0)
+X_n = (X - X_mean) / X_std
+
+
+# Q1. GDA assuming covariance is same.
+
+# In[ ]:
+
+
+model_cs = GaussianDiscriminantAnalysis()
+mu_0_cs, mu_1_cs, sigma_cs = model_cs.fit(X,y,True)
+</FONT>print("mu_0 : ",mu_0_cs)
+print("mu_1 : ",mu_1_cs)
+print("sigma : ",sigma_cs)
+
+
+# In[ ]:
+
+
+class q4plots:
+    def __init__(self):
+        pass
+
+    def data(self, X, y, title="GDA Training Data Plot"):
+        """
+        Plots the training data and returns the figure and axes.
+
+        Parameters:
+            X (np.ndarray): Data points with shape (m, 2).
+            y (np.ndarray): Class labels.
+            title (str): Plot title.
+
+        Returns:
+            fig, ax: The matplotlib figure and axes objects.
+        """
+        y = np.ravel(y)
+        classes = np.unique(y)
+        markers = {'Alaska': '^', 'Canada': 's'}
+        colors = {'Alaska': 'darkgreen', 'Canada': 'purple'}
+        fig, ax = plt.subplots(figsize=(8, 6))
+        for cl in classes:
+            idx = (y == cl)
+            ax.scatter(X[idx, 0], X[idx, 1], marker=markers[cl], color=colors[cl], edgecolors='black', s=80, label=f"Class: {cl}")
+        ax.set_xlabel("X1 Coordinate")
+        ax.set_ylabel("X2 Coordinate")
+        ax.set_title(title)
+        ax.legend()
+        ax.grid(True, linestyle='--', alpha=0.7)
+        return fig, ax
+
+    def _draw_linear_boundary(self, ax, X, mu_0, mu_1, sigma, phi, color='orange', label="Linear Boundary"):
+        """ Computes and plots the linear decision boundary using the given equation. """
+        sigma_inv = np.linalg.pinv(sigma)
+        term1 = np.dot((mu_1 - mu_0).T, sigma_inv)
+<A NAME="14"></A><FONT color = #FF00FF><A HREF="match2-1.html#14" TARGET="1"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        term2 = -0.5 * (np.dot(mu_1.T, np.dot(sigma_inv, mu_1)) - np.dot(mu_0.T, np.dot(sigma_inv, mu_0)))
+</FONT>        term3 = -np.log((1 - phi) / phi)
+        
+        x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+        x_vals = np.linspace(x_min, x_max, 100)
+        y_vals = -(term1[0] * x_vals + (term2 + term3)) / term1[1]
+        
+        ax.plot(x_vals, y_vals, color=color, linewidth=2, label=label)
+
+    def _draw_quadratic_boundary(self, ax, X, mu_0, mu_1, sigma_0, sigma_1, phi, color='cyan', label="Quadratic Boundary"):
+        """ Computes and plots the quadratic decision boundary using the given equation. """
+        x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+        y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match2-1.html#1" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        xx, yy = np.meshgrid(np.linspace(x_min, x_max, 200), np.linspace(y_min, y_max, 200))
+        Z = np.zeros(xx.shape)
+        
+        sigma_0_inv = np.linalg.pinv(sigma_0)
+        sigma_1_inv = np.linalg.pinv(sigma_1)
+        
+        for i in range(xx.shape[0]):
+            for j in range(xx.shape[1]):
+</FONT>                point = np.array([xx[i, j], yy[i, j]])
+                term1 = 0.5 * np.dot(point.T, np.dot(sigma_1_inv - sigma_0_inv, point))
+                term2 = -np.dot((mu_1.T @ sigma_1_inv - mu_0.T @ sigma_0_inv), point)
+                term3 = 0.5 * (mu_1.T @ sigma_1_inv @ mu_1 - mu_0.T @ sigma_0_inv @ mu_0)
+<A NAME="13"></A><FONT color = #00FFFF><A HREF="match2-1.html#13" TARGET="1"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+                term4 = np.log((1 - phi) / phi) + 0.5 * np.log(np.linalg.det(sigma_1) / np.linalg.det(sigma_0))
+                Z[i, j] = term1 + term2 + term3 + term4
+</FONT>
+        ax.contour(xx, yy, Z, levels=[0], colors=color, linewidths=2, label=label)
+    
+    def data_with_boundary(self, X, y, mu_0_cs, mu_1_cs, sigma_cs, phi):
+        """
+        Plots the training data with one decision boundary:
+          - A linear boundary (using shared covariance), and
+        """
+        fig, ax = self.data(X, y, title="GDA: Linear & Quadratic Decision Boundaries")
+        
+        # Linear decision boundary (shared covariance)
+        self._draw_linear_boundary(ax, X, mu_0_cs, mu_1_cs, sigma_cs, phi, color='magenta', label="Linear (Shared Cov)")
+        
+        ax.legend()
+        return fig, ax
+
+    def data_with_boundaries(self, X, y, mu_0_cs, mu_1_cs, sigma_cs, mu_0_cd, mu_1_cd, sigma_0_cd, sigma_1_cd, phi):
+        """
+        Plots the training data with two decision boundaries:
+          - A linear boundary (using shared covariance), and
+          - A quadratic boundary (using different covariances).
+        """
+        fig, ax = self.data(X, y, title="GDA: Linear & Quadratic Decision Boundaries")
+        
+        # Linear decision boundary (shared covariance)
+        self._draw_linear_boundary(ax, X, mu_0_cs, mu_1_cs, sigma_cs, phi, color='magenta', label="Linear (Shared Cov)")
+        
+        # Quadratic decision boundary (different covariances)
+        self._draw_quadratic_boundary(ax, X, mu_0_cd, mu_1_cd, sigma_0_cd, sigma_1_cd, phi, color='cyan', label="Quadratic (Diff Cov)")
+        
+        ax.legend()
+        return fig, ax
+    
+plot = q4plots()
+
+
+# Q2. Plot of training data corresponding to the two coordinates of the input features, where I used a different symbol for each point plotted to indicate whether that example had label Canada or Alaska.
+# 
+
+# In[ ]:
+
+
+fig,ax = plot.data(X_n, y)
+plt.show()
+
+
+# Q3. Along with the data points plotted in the part above, plot (on the same figure) of decision boundary fit by GDA.
+
+# In[ ]:
+
+
+fig,ax = plot.data_with_boundary(X_n, y, mu_0_cs, mu_1_cs, sigma_cs, model_cs.phi)
+plt.show()
+
+
+# Q4. GDA assuming covariance is different.
+
+# In[ ]:
+
+
+model_cd = GaussianDiscriminantAnalysis()
+mu_0_cd, mu_1_cd, sigma_0_cd, sigma_1_cd = model_cd.fit(X,y,False)
+print("mu_0 : ",mu_0_cd)
+print("mu_1 : ",mu_1_cd)
+print("sigma_0 : ",sigma_0_cd)
+print("sigma_1 : ",sigma_1_cd)
+
+
+# Q5. Plot of data points, linear separator and quadratic boundary.
+
+# In[ ]:
+
+
+fig,ax = plot.data_with_boundaries(X_n, y, mu_0_cs, mu_1_cs, sigma_cs, mu_0_cd, mu_1_cd, sigma_0_cd, sigma_1_cd, model_cd.phi)
+plt.show()
+
+
+
+
+
+# Imports - you can add any other permitted libraries
+import numpy as np
+
+# You may add any other functions to make your code more modular. However,
+# do not change the function signatures (name and arguments) of the given functions,
+# as these functions will be called by the autograder.
+
+class LinearRegressor:
+    def __init__(self):
+        # Initialize model parameters (theta) to None
+        self.theta = None       
+        
+    def fit(self, X, y, learning_rate=0.01):
+        """
+        Fit the linear regression model to the data using Gradient Descent.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        y : numpy array of shape (n_samples,)
+            The target values.
+
+        learning_rate : float
+            The learning rate to use in the update rule.
+            
+        Returns
+        -------
+        List of Parameters: numpy array of shape (n_iter, n_features+1,)
+            The list of parameters obtained after each iteration of Gradient Descent.
+        """
+        _, n = X.shape  # Get number of features
+
+        # Initialize theta parameters to zero
+        self.theta = np.zeros(n + 1)    
+        iteration_theta = []             # List to store theta values per iteration
+        J = [float('inf'), 0]            # [Previous loss, Current loss]
+        epsilon_prime = 1e-5             # Stopping criterion threshold
+
+        while True:
+            if abs(J[1] - J[0]) &lt; epsilon_prime:
+                break
+
+            avg_loss, avg_grad = self.compute_loss(X, y)     
+            self.theta += learning_rate * avg_grad          
+            iteration_theta.append(self.theta.copy())       
+            J = [J[1], avg_loss]                            
+
+        final_val = np.array(iteration_theta)               
+        return final_val  
+
+    def compute_loss(self, X, y):
+        """
+        Computes average loss and average gradient assuming linear hypothesis
+
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        y : numpy array of shape (n_samples,)
+            The target values.
+
+        Returns
+        -------
+        Average loss, average gradient : float, float
+            Average loss and average gradient for all examples for current value of parameters theta
+        """
+        m, n = X.shape  
+        loss = 0
+        grad = np.zeros(n + 1)  
+
+        for i in range(m):
+            x_i = np.insert(X[i], 0, 1)  
+            h_i = np.dot(self.theta, x_i)   
+            loss += (y[i] - h_i) ** 2       
+            grad += x_i * (y[i] - h_i)      
+        
+        avg_loss = loss / (2 * m)         
+        avg_grad = grad / m                
+
+        return avg_loss, avg_grad
+    
+    def predict(self, X):
+        """
+        Predict the target values for the input data.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        Returns
+        -------
+        y_pred : numpy array of shape (n_samples,)
+            The predicted target values.
+        """
+        m, _ = X.shape 
+        y_pred = np.zeros(m)  
+        for i in range(m):
+            x_i = np.insert(X[i], 0, 1)  
+            y_pred[i] = np.dot(self.theta, x_i)  
+
+        return y_pred
+
+
+
+
+# Imports - you can add any other permitted libraries
+<A NAME="16"></A><FONT color = #00FF00><A HREF="match2-1.html#16" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+import numpy as np
+
+# You may add any other functions to make your code more modular. However,
+# do not change the function signatures (name and arguments) of the given functions,
+# as these functions will be called by the autograder.
+
+def generate(N, theta, input_mean, input_sigma, noise_sigma):
+    """
+    Generate normally distributed input data and target values
+    Note that we have 2 input features
+</FONT>    """
+    X = np.random.normal(loc=input_mean, scale=input_sigma, size=(N, 2))  
+    epsilon = np.random.normal(loc=0, scale=noise_sigma, size=N) 
+    y = np.zeros(N)  
+    
+    for i in range(N):
+        x_i = np.insert(X[i], 0, 1)  
+        noise = epsilon[i]  
+        y[i] = np.dot(theta, x_i) + noise  
+    
+    return X, y
+
+class StochasticLinearRegressor:
+    def __init__(self):
+        self.theta = None
+
+    def fit(self, X, y, learning_rate=0.01):
+        """
+        Fit the linear regression model to the data using Gradient Descent.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        y : numpy array of shape (n_samples,)
+            The target values.
+
+        learning_rate : float
+            The learning rate to use in the update rule.
+            
+        Returns
+        -------
+        List of Parameters: numpy array of shape (n_iter, n_features+1,)
+            The list of parameters obtained after each iteration of Gradient Descent.
+        """
+        m, n = X.shape
+        indices = np.random.permutation(m)  
+        X, y = X[indices], y[indices]      
+        self.theta = [np.zeros(n+1),np.zeros(n+1),np.zeros(n+1),np.zeros(n+1)]
+        batches_to_iterate = [1,80,8000,800000]
+        final_return = []
+        epsilon_primes = [1e-6, 1e-6, 0.5 * 1e-6, 1e-5]
+
+        for i00 in range(4):
+            r , b, t, k = batches_to_iterate[i00], 0, 0, 25   
+            upper_limit = 100 if i00 == 3 else 50000      
+
+            last_r = m%r                       
+            if last_r == 0:
+                last_r = r
+
+            epoch_size = int(np.ceil(m/r))     
+            iteration_loss = []               
+            J = [float('inf'), 0]              
+            epsilon_prime = epsilon_primes[i00]             
+            iteration_theta = []           
+    
+            while True:
+                if (abs(J[1] - J[0]) &lt; epsilon_prime) or (t&gt;=upper_limit):         
+                    break
+
+                batch_size = r              
+                if b == epoch_size - 1:
+                    batch_size = last_r
+
+                avg_batch_loss, avg_batch_grad = self.compute_loss(X,y,batch_size,r*b,i00)     
+
+                self.theta[i00] = self.theta[i00] + learning_rate * avg_batch_grad          
+                iteration_theta.append(self.theta[i00].copy()) 
+
+                t, b = t+1, (b+1)%epoch_size           
+                iteration_loss.append(avg_batch_loss)   
+                if t &gt;= k:                              
+                    val = 0                            
+                    for i in range(k):
+                        val += iteration_loss[t-i-1]
+                    val/=k
+                    J = [J[1], val]
+
+            final_return.append(np.array(iteration_theta))  
+
+        return final_return  
+    
+    def compute_loss(self, X, y, batch_size, offset, i):
+        indices = range(offset, offset + batch_size)
+        X_batch = np.array([np.concatenate(([1], X[j])) for j in indices])
+        y_batch = y[offset:offset + batch_size]
+        predictions = np.dot(X_batch, self.theta[i])
+        errors = y_batch - predictions
+        avg_loss = np.sum(np.square(errors)) / (2 * batch_size)
+        avg_grad = np.dot(X_batch.T, errors) / batch_size
+        return avg_loss, avg_grad
+
+    
+    def predict(self, X):
+        """
+        Predict the target values for the input data.
+        """
+        m, n = X.shape 
+        y_pred = [np.zeros(m),np.zeros(m),np.zeros(m),np.zeros(m)]  
+        
+        for ii in range(4):
+            for i in range(m):
+                x_i = np.insert(X[i], 0, 1)  
+                y_pred[ii][i] = np.dot(self.theta[ii], x_i)  
+        
+        return y_pred  
+
+
+
+
+# Imports - you can add any other permitted libraries
+import numpy as np
+
+# You may add any other functions to make your code more modular. However,
+# do not change the function signatures (name and arguments) of the given functions,
+# as these functions will be called by the autograder.
+
+class LogisticRegressor:
+    def __init__(self):
+        self.theta = None           
+    
+    def fit(self, X, y, learning_rate=0.1):
+        """
+        Fit the logistic regression model to the data using Newton's Method.
+        Remember to normalize the input data X before fitting the model.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        y : numpy array of shape (n_samples,)
+            The target labels - 0 or 1.
+        
+        learning_rate : float
+            The learning rate to use in the update rule.
+        
+        Returns
+        -------
+        List of Parameters: numpy array of shape (n_iter, n_features+1,)
+<A NAME="7"></A><FONT color = #0000FF><A HREF="match2-1.html#7" TARGET="1"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            The list of parameters obtained after each iteration of Newton's Method.
+        """
+        # Normalize the input data
+        X_mean, X_std = X.mean(axis=0), X.std(axis=0)
+        X_n = (X - X_mean) / X_std
+        
+        # Get the number of samples (m) and features (n)
+        m, n = X_n.shape  
+        
+        # Initialize parameters (including bias term)
+        self.theta = np.zeros(n + 1)                            
+</FONT>        iteration_theta = []                                    
+        epsilon_prime = 0.000001            # Stopping threshold    
+        J = [float('inf'), 0]  # Previous and current loss
+
+        # Iterate until convergence
+        while True:
+            if abs(J[1] - J[0]) &lt; epsilon_prime:      # Check for convergence
+                break
+
+            # Compute Hessian matrix and gradient
+            H = self.compute_hessian(X_n)
+            grad, loss = self.compute_grad(X_n, y)
+            delta = np.linalg.inv(H) @ grad                   
+            
+            # Update parameters using Newton's Method
+            new_theta = self.theta - delta      
+            iteration_theta.append(new_theta)                   
+            self.theta = new_theta
+            J = [J[1], loss]  # Update loss tracking
+
+        return np.array(iteration_theta)
+    
+    def compute_hessian(self, X):
+        """
+        Compute the Hessian matrix for Newton's Method.
+        """
+        m, n = X.shape
+        H = np.zeros((n+1, n+1))
+        
+        # Compute second derivatives for Hessian matrix
+        for i in range(m):
+            x_i = np.insert(X[i], 0, 1)  # Add bias term
+            e_term = np.exp(-np.dot(self.theta, x_i))
+            x_i = x_i.reshape(-1, 1)
+            mat = x_i @ x_i.T
+            H -= mat * (e_term * ((1 / (1 + e_term)) ** 2))
+        
+        return H
+
+    def compute_grad(self, X, y):
+        """
+        Compute the gradient and loss for Newton's Method.
+        """
+        m, n = X.shape
+        loss = 0
+        grad = np.zeros(n + 1)
+        
+        # Compute gradient and loss for all samples
+        for i in range(m):
+            x_i = np.insert(X[i], 0, 1)  # Add bias term    
+            e_term = np.exp(-np.dot(self.theta, x_i))
+            h_i = (1/(1+e_term))
+            grad += x_i * (y[i] - h_i)
+            loss += y[i] * np.log(h_i) + (1-y[i]) * np.log(1-h_i)
+        
+        loss = loss / (2 * m)  # Compute average loss
+        grad /= m
+        return grad, loss
+    
+    def predict(self, X):
+        """
+        Predict the target values for the input data.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        Returns
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match2-1.html#3" TARGET="1"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        -------
+        y_pred : numpy array of shape (n_samples,)
+            The predicted target label.
+        """
+        # Normalize input data
+        X_mean, X_std = X.mean(axis=0), X.std(axis=0)
+        X_n = (X - X_mean) / X_std
+        
+        # Get the number of samples
+        m, _ = X_n.shape
+        y_pred = np.zeros(m)
+</FONT>        
+        # Compute predictions for all samples
+        for i in range(m):
+            x_i = np.insert(X_n[i], 0, 1)  # Add bias term
+            e_term = np.exp(-np.dot(self.theta, x_i))                 
+            sigma = 1.0 / (1.0 + e_term)  # Compute sigmoid function
+            y_pred[i] = 1 if sigma &gt; 0.5 else 0  # Convert probabilities to binary output
+
+        return y_pred
+
+
+
+
+# Imports - you can add any other permitted libraries
+import numpy as np
+
+# You may add any other functions to make your code more modular. However,
+# do not change the function signatures (name and arguments) of the given functions,
+# as these functions will be called by the autograder.
+
+
+class GaussianDiscriminantAnalysis:
+    # Assume Binary Classification
+    def __init__(self):
+        # Initialize model parameters
+        self.num_samples = None
+        self.phi = 0
+        self.mu = None
+        self.sigma = None
+    
+    def fit(self, X, y, assume_same_covariance=False):
+        """
+        Fit the Gaussian Discriminant Analysis model to the data.
+        Remember to normalize the input data X before fitting the model.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        y : numpy array of shape (n_samples,)
+            The target labels - 0 or 1.
+        
+        Returns
+        -------
+        Parameters: 
+            If assume_same_covariance = True - 3-tuple of numpy arrays mu_0, mu_1, sigma 
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match2-1.html#0" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_1.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            If assume_same_covariance = False - 4-tuple of numpy arrays mu_0, mu_1, sigma_0, sigma_1
+            The parameters learned by the model.
+        """
+        # Normalize input data
+        X_mean, X_std = X.mean(axis=0), X.std(axis=0)
+        X_n = (X - X_mean) / X_std
+        m, n = X_n.shape 
+        
+        # Convert labels from categorical to numerical
+        y_n = np.zeros(m)
+        for i in range(m):
+            if y[i] == 'Alaska':
+                y_n[i] = 1       
+        y_n = y_n.astype(int)
+</FONT>
+        # Compute model parameters
+        self.compute_phi(X_n, y_n)
+        self.compute_mu(X_n, y_n)
+        self.compute_sigma(X_n, y_n, assume_same_covariance)          
+        
+        # Return computed parameters
+        if assume_same_covariance:
+            return self.mu[0], self.mu[1], self.sigma[0]
+        return self.mu[0], self.mu[1], self.sigma[0], self.sigma[1]
+    
+    def compute_phi(self, X, y):
+        """
+        Compute prior probability of class 1.
+        """
+        m, n = X.shape
+        self.num_samples = [0, 0]
+        for i in range(m):
+            self.num_samples[y[i]] += 1                      
+        
+        self.phi = self.num_samples[1] / m
+        return
+    
+    def compute_mu(self, X, y):
+        """
+        Compute mean vectors for both classes.
+        """
+        m, n = X.shape
+        self.mu = [np.zeros(n), np.zeros(n)]
+        for i in range(m):
+            self.mu[y[i]] += X[i]
+        
+        self.mu[0] = self.mu[0] / self.num_samples[0]
+        self.mu[1] = self.mu[1] / self.num_samples[1]
+        return    
+        
+    def compute_sigma(self, X, y, assume_same_covariance):
+        """
+        Compute covariance matrices for both classes.
+        """
+        m, n = X.shape  
+        self.sigma = [np.zeros((n, n)), np.zeros((n, n))]
+
+        for i in range(m):
+            mat = X[i].reshape(-1, 1) - self.mu[y[i]].reshape(-1, 1)
+            self.sigma[y[i]] +=  mat @ mat.T  
+            
+        if not assume_same_covariance:
+            self.sigma[0] /= self.num_samples[0]
+            self.sigma[1] /= self.num_samples[1]
+        else:
+            self.sigma[0] = (self.sigma[0] + self.sigma[1]) / m
+            self.sigma[1] = self.sigma[0]
+        
+        return
+
+    def predict(self, X):
+        """
+        Predict the target values for the input data.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        Returns
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match2-1.html#4" TARGET="1"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        -------
+        y_pred : numpy array of shape (n_samples,)
+            The predicted target label.
+        """
+        # Normalize input data
+        X_mean, X_std = X.mean(axis=0), X.std(axis=0)
+        X_n = (X - X_mean) / X_std
+        m, _ = X_n.shape
+        
+        # Initialize prediction array
+        y_pred = np.zeros(m)
+</FONT>        
+        # Compute log-likelihood for classification
+        for i in range(m):
+            x = X[i].reshape(-1, 1)  # Reshape x to column vector (n x 1)
+            c = np.log((1 - self.phi) / self.phi) + 0.5 * (np.log(np.linalg.det(self.sigma[1]) / np.linalg.det(self.sigma[0])))
+            s1, s0 = np.linalg.inv(self.sigma[1]), np.linalg.inv(self.sigma[0])
+            m1, m0 = self.mu[1].reshape(-1, 1), self.mu[0].reshape(-1, 1)  # Reshape mu to column vectors
+            fx = x.T @ (s1 - s0) @ x - 2 * ((m1.T @ s1 - m0.T @ s0) @ x) + (m1.T @ s1 @ m1 - m0.T @ s0 @ m0)
+            log_A = 0.5 * fx + c
+
+            # Classify based on threshold
+            if log_A &lt; 0:
+                y_pred[i] = 1
+            else:
+                y_pred[i] = 0
+
+        return y_pred
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
