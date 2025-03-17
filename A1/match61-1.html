@@ -1,0 +1,932 @@
+<HTML>
+<HEAD>
+<TITLE>./A1_processed_new/combined_6DF52.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A1_processed_new/combined_XA187.py<p><PRE>
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+class LinearRegressor:
+    def __init__(self):
+        self.theta = None
+
+
+    def fit(self, X, y, learning_rate=0.02 , criteria = 1e-5):
+        m, n = X.shape
+        X = np.hstack([np.ones((m, 1)), X])  
+        y = y.reshape(-1, 1)
+        
+        self.theta = np.zeros((n+1, 1))
+        parameters_history = [self.theta.copy()]
+        
+        prev_cost = float('inf')
+        cnt=0
+        while True:
+            cnt+=1
+            h = X @ self.theta
+            error = h - y
+            cost = (1/(2*m)) * np.sum(error**2)
+            if abs(prev_cost - cost) &lt; criteria  :
+                break
+            prev_cost = cost
+            
+            # Update parameters
+            gradient = (1/m) * X.T @ error
+            self.theta -= learning_rate * gradient
+            parameters_history.append(self.theta.copy())
+        print(f'Converged after {cnt} iterations')    
+        return parameters_history
+
+    def predict(self, X):
+        X = np.hstack([np.ones((X.shape[0], 1)), X])
+        return X @ self.theta
+
+
+
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from linear_regression import LinearRegressor
+
+X = pd.read_csv('../data/Q1/linearX.csv',header=None).values
+y = pd.read_csv('../data/Q1/linearY.csv',header=None).values
+L = LinearRegressor()
+L.fit(X, y)
+print(f'Optimal parameters: {L.theta.ravel()}')
+def plot_data_and_regression(X, y, theta):
+    plt.figure(figsize=(10, 6))
+    plt.scatter(X.flatten(), y,  
+                color='blue', 
+                marker='o', 
+                edgecolor='k',
+                label='All Data Points (xᵢ, yᵢ)',
+                alpha=0.7)
+    x_min, x_max = X.min(), X.max()
+    x_line = np.linspace(x_min, x_max, 100)
+    y_line = theta[0] + theta[1] * x_line
+    plt.plot(x_line, y_line, 
+             color='red', 
+             linewidth=2.5,
+             label=f'Regression Line: y = {theta[0]:.2f} + {theta[1]:.2f}x')
+    plt.xlabel('Acidity (Normalized)', fontsize=12)
+    plt.ylabel('Density', fontsize=12)
+    plt.title('Linear Regression: All Data Points with Hypothesis Function', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.legend()
+    plt.xlim(x_min - 0.1, x_max + 0.1)
+    plt.ylim(y.min() - 0.1, y.max() + 0.1)
+    
+    plt.show()
+
+plot_data_and_regression(X, y, L.theta.ravel())
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import cm
+from matplotlib.animation import FuncAnimation
+
+def plot_error_surface_and_gradient_descent(X_original, y, parameters_history, learning_rate=0.1):
+    m = X_original.shape[0]
+    X_aug = np.hstack([np.ones((m, 1)), X_original])
+
+    theta0_vals = np.linspace(-10, 22, 100)
+    theta1_vals = np.linspace(-20, 80, 100)
+    theta0_mesh, theta1_mesh = np.meshgrid(theta0_vals, theta1_vals)
+    J_vals = np.zeros_like(theta0_mesh)
+    for i in range(theta0_vals.size):
+        for j in range(theta1_vals.size):
+            theta = np.array([theta0_vals[i], theta1_vals[j]])
+            predictions = X_aug @ theta
+            J_vals[i, j] = (1 / (2 * m)) * np.sum((predictions - y) ** 2)
+
+    fig = plt.figure(figsize=(13, 7))
+    ax = fig.add_subplot(111, projection='3d')
+
+    surf = ax.plot_surface(theta0_mesh, theta1_mesh, J_vals.T,
+                           cmap=cm.coolwarm, alpha=0.6,
+                           linewidth=0, antialiased=False)
+
+    ax.text2D(0.05, 0.95, f'Learning Rate: {learning_rate}', transform=ax.transAxes,
+              fontsize=14, color='black')
+    
+    loss_text = ax.text2D(0.05, 0.90, 'Loss: 0.0000', transform=ax.transAxes,
+                          fontsize=14, color='black')
+
+    trail_x, trail_y, trail_z = [], [], []
+    point, = ax.plot([], [], [], 'ro', markersize=8, label='Current Point')
+    trail, = ax.plot([], [], [], 'r-', linewidth=2, label='Gradient Descent Path')
+
+    def init():
+        point.set_data([], [])
+        point.set_3d_properties([])
+        trail.set_data([], [])
+        trail.set_3d_properties([])
+        loss_text.set_text('Loss: 0.0000')
+        return point, trail, loss_text
+
+    def animate(i):
+        theta = parameters_history[i].flatten()
+        J = (1 / (2 * m)) * np.sum((X_aug @ theta - y) ** 2)
+
+        trail_x.append(theta[0])
+        trail_y.append(theta[1])
+        trail_z.append(J)
+
+        point.set_data(theta[0], theta[1])
+        point.set_3d_properties(J)
+
+        trail.set_data(trail_x, trail_y)
+        trail.set_3d_properties(trail_z)
+
+        loss_text.set_text(f'Loss: {J:.4f}')
+
+        ax.set_title(f'Gradient Descent Iteration: {i+1}', fontsize=14)
+        return point, trail, loss_text
+
+    ani = FuncAnimation(fig, animate, frames=len(parameters_history),
+                        init_func=init, blit=True, interval=2000)
+
+    ax.set_xlabel(r'$\theta_0$', fontsize=12)
+    ax.set_ylabel(r'$\theta_1$', fontsize=12)
+    ax.set_zlabel(r'$J(\theta)$', fontsize=12)
+    ax.view_init(30, 45)
+    fig.colorbar(surf, shrink=0.5, aspect=5)
+    ax.legend()
+    plt.tight_layout()
+
+    plt.show()
+    
+    return ani
+
+
+if __name__ == "__main__":
+    X = np.loadtxt('../data/Q1/linearX.csv').reshape(-1, 1) 
+    y = np.loadtxt('../data/Q1/linearY.csv')                 
+
+    from linear_regression import LinearRegressor
+    model = LinearRegressor()
+    learning_rate = 0.1
+
+    params_history = model.fit(X, y, learning_rate=learning_rate)  
+    plot_error_surface_and_gradient_descent(X, y, params_history, learning_rate=learning_rate)
+
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+def plot_contour_gradient_descent(X_original, y, params_history, learning_rate=0.1):
+    m = X_original.shape[0]
+    X_aug = np.hstack([np.ones((m, 1)), X_original])
+    
+    theta0_vals = [theta[0][0] for theta in params_history]
+    theta1_vals = [theta[1][0] for theta in params_history]
+    
+    J_vals = []
+    for theta in params_history:
+        theta_flat = theta.flatten()
+        predictions = X_aug @ theta_flat
+        J_vals.append((1/(2*m)) * np.sum((predictions - y)**2))
+    
+    min_loss = np.min(J_vals)  
+
+    t0_min, t0_max = -10, 22
+    t1_min, t1_max = -15, 60
+    t0 = np.linspace(t0_min, t0_max, 100)
+    t1 = np.linspace(t1_min, t1_max, 100)
+    T0, T1 = np.meshgrid(t0, t1)
+    
+    J_surface = np.zeros_like(T0)
+    for i in range(T0.shape[0]):
+        for j in range(T0.shape[1]):
+            theta = np.array([T0[i,j], T1[i,j]])
+            J_surface[i,j] = (1/(2*m)) * np.sum((X_aug @ theta - y)**2)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    plt.xlabel(r'$\theta_0$', fontsize=12)
+    plt.ylabel(r'$\theta_1$', fontsize=12)
+    
+    contour = ax.contour(T0, T1, J_surface, levels=50, cmap='viridis')
+    plt.colorbar(contour, label='Cost J(θ)')
+    
+    learning_rate_text = ax.text(0.05, 0.90, f'Learning Rate: {learning_rate}', 
+                                 transform=ax.transAxes, fontsize=12, color='black')
+    
+    min_loss_text = ax.text(0.5, 0.85, f'Minimum Loss: {min_loss:.4f}',
+                            transform=ax.transAxes, ha='center',
+                            fontsize=12, bbox=dict(facecolor='white', alpha=0.8))
+    
+    path_line, = ax.plot([], [], 'r-', lw=1.5, alpha=0.7)
+    current_point, = ax.plot([], [], 'ro', markersize=8)
+    iteration_text = ax.text(0.05, 0.95, '', transform=ax.transAxes)
+    
+    def init():
+        path_line.set_data([], [])
+        current_point.set_data([], [])
+        iteration_text.set_text('')
+        return path_line, current_point, iteration_text, min_loss_text, learning_rate_text
+
+    def animate(i):
+        path_line.set_data(theta0_vals[:i+1], theta1_vals[:i+1])
+        current_point.set_data(theta0_vals[i], theta1_vals[i])
+        iteration_text.set_text(f'Iteration: {i+1}')
+        return path_line, current_point, iteration_text, min_loss_text, learning_rate_text
+
+    ani = FuncAnimation(fig, animate, frames=len(params_history),
+                        init_func=init, blit=True, interval=100,
+                        repeat_delay=100)
+
+    plt.tight_layout()
+    return ani
+
+if __name__ == "__main__":
+    X = np.loadtxt('../data/Q1/linearX.csv').reshape(-1, 1)
+    y = np.loadtxt('../data/Q1/linearY.csv')
+    l=0.025
+    from linear_regression import LinearRegressor
+    model = LinearRegressor()
+    params_history = model.fit(X, y, learning_rate=l)
+    
+    ani = plot_contour_gradient_descent(X, y, params_history, learning_rate=l)
+    plt.show()
+
+
+
+
+import numpy as np
+
+from  sampling_sgd import generate
+
+N=1000000
+X,y = generate(N, [3, 1, 2], [3, -1], [2, 2], np.sqrt(2))
+
+<A NAME="6"></A><FONT color = #00FF00><A HREF="match61-0.html#6" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+indices = np.arange(N)
+np.random.shuffle(indices)
+X_shuffled = X[indices]
+y_shuffled = y[indices]
+
+split_idx = int(0.8 * N)
+</FONT>X_train, X_test = X_shuffled[:split_idx], X_shuffled[split_idx:]
+y_train, y_test = y_shuffled[:split_idx], y_shuffled[split_idx:]
+
+np.savetxt('train_X.csv', X_train, delimiter=',')
+np.savetxt('train_y.csv', y_train, delimiter=',')
+np.savetxt('test_X.csv', X_test, delimiter=',')
+np.savetxt('test_y.csv', y_test, delimiter=',')
+
+
+
+
+
+from sampling_sgd import StochasticLinearRegressor
+import numpy as np
+
+X_train = np.loadtxt('train_X.csv', delimiter=',')
+y_train = np.loadtxt('train_y.csv', delimiter=',')
+
+lrs = [0.001,0.001,0.001,0.001]
+batch_sizes = [1, 80, 8000, 800000]
+epochs = [1,10,1000,20000]
+results = []
+for i in range(4):
+    ep = epochs[i]
+    lr = lrs[i]
+    bs = batch_sizes[i]
+    model = StochasticLinearRegressor()
+    params_history = model.fit(X_train, y_train, learning_rate=lr,epoch=ep,batch_size=bs)
+    final_theta = params_history[-1].flatten()
+    results.append((bs, final_theta))
+    print(f"Batch Size: {bs}, θ₀ = {final_theta[0]:.4f}, θ₁ = {final_theta[1]:.4f}, θ₂ = {final_theta[2]:.4f}")
+
+print("Learned Parameters:")
+for bs, theta in results:
+    print(f"Batch Size {bs:&gt;7}: θ₀ = {theta[0]:.4f}, θ₁ = {theta[1]:.4f}, θ₂ = {theta[2]:.4f}")
+    
+
+
+
+import numpy as np
+
+def closed_form_solution(X, y):
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match61-0.html#1" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    X_aug = np.hstack([np.ones((X.shape[0], 1)), X]) 
+    theta = np.linalg.inv(X_aug.T @ X_aug) @ X_aug.T @ y
+</FONT>    return theta
+
+X_train = np.loadtxt('train_X.csv', delimiter=',')
+y_train = np.loadtxt('train_y.csv', delimiter=',')
+
+theta_closed_form = closed_form_solution(X_train, y_train)
+print(f"Closed-form θ: {theta_closed_form}")
+
+
+
+
+import numpy as np
+from sampling_sgd import StochasticLinearRegressor
+
+def compute_mse(y_true, y_pred):
+    """Compute Mean Squared Error (MSE)"""
+    return np.mean((y_true - y_pred.flatten()) ** 2)
+
+def closed_form_solution(X, y):
+    X_aug = np.hstack([np.ones((X.shape[0], 1)), X])  
+    theta = np.linalg.inv(X_aug.T @ X_aug) @ X_aug.T @ y
+    return theta
+
+def main():
+    X_train = np.loadtxt('train_X.csv', delimiter=',')
+    y_train = np.loadtxt('train_y.csv', delimiter=',')
+    X_test = np.loadtxt('test_X.csv', delimiter=',')
+    y_test = np.loadtxt('test_y.csv', delimiter=',')
+
+    lrs = [0.01,0.01,0.05,0.1]
+    batch_sizes = [1, 80, 8000, 800000]
+    epochs = [4,10,100,500]
+    results = []
+
+    for i in range(4):
+        lr = lrs[i]
+        bs = batch_sizes[i]
+        ep = epochs[i]
+        print(f"Training model with batch size: {bs}")
+        model = StochasticLinearRegressor()
+        model.fit(X_train, y_train, learning_rate=lr,epoch=ep,batch_size=bs)
+        
+        y_pred_train = model.predict(X_train)
+        mse_train = compute_mse(y_train, y_pred_train)
+        
+        y_pred_test = model.predict(X_test)
+        mse_test = compute_mse(y_test, y_pred_test)
+        
+        results.append((bs, model.theta.flatten(), mse_train, mse_test))
+    
+    print("\nBatch Size | θ₀      | θ₁      | θ₂      | Train MSE | Test MSE")
+    print("------------------------------------------------------------------------")
+    for bs, theta, mse_train, mse_test in results:
+        print(f"{bs:&gt;9} | {theta[0]:.4f} | {theta[1]:.4f} | {theta[2]:.4f} | {mse_train:.6f} | {mse_test:.6f}")
+    
+    theta = closed_form_solution(X_train, y_train)
+
+    model = StochasticLinearRegressor(theta=theta)
+    y_pred_train = model.predict(X_train)
+    mse_train = compute_mse(y_train, y_pred_train)
+    
+    print("")
+    print("For closed form solution : ")
+    y_pred_test = model.predict(X_test)
+    mse_test = compute_mse(y_test, y_pred_test)
+    print("Theta : ",theta[0],theta[1],theta[2])
+    print("MSE train",mse_train,"MSE test", mse_test)
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+from sampling_sgd import StochasticLinearRegressor
+def plot_3d_parameter_trajectories(param_histories, true_theta):
+    """
+    Plot parameter trajectories in 3D space
+    param_histories: dict {batch_size: [theta0_history, theta1_history, theta2_history]}
+    true_theta: array-like, true parameter values
+    """
+    fig = plt.figure(figsize=(14, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    colors = ['r', 'g', 'b', 'm']
+    batch_sizes = sorted(param_histories.keys())
+    
+    for bs, color in zip(batch_sizes, colors):
+        theta0, theta1, theta2 = param_histories[bs]
+
+        ax.plot(theta0, theta1, theta2, 
+                color=color, linewidth=1.5, 
+                label=f'Batch Size {bs}')
+        
+        ax.scatter(theta0[0], theta1[0], theta2[0], 
+                  color=color, marker='*', s=200)
+        ax.scatter(theta0[-1], theta1[-1], theta2[-1],
+                  color=color, marker='X', s=200)
+    ax.scatter(*true_theta, color='k', s=300, marker='D',
+              label='True Parameters')
+    
+    ax.set_xlabel(r'$\theta_0$', fontsize=14, labelpad=10)
+    ax.set_ylabel(r'$\theta_1$', fontsize=14, labelpad=10)
+    ax.set_zlabel(r'$\theta_2$', fontsize=14, labelpad=10)
+    ax.view_init(25, -120)
+    ax.legend(fontsize=12)
+    plt.title('Parameter Trajectories in 3D Space', fontsize=16, pad=20)
+    
+    ax.xaxis.pane.fill = False
+    ax.yaxis.pane.fill = False
+    ax.zaxis.pane.fill = False
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
+true_theta = np.array([3, 1, 2])
+param_histories = {}
+
+
+X_train = np.loadtxt('train_X.csv', delimiter=',')
+y_train = np.loadtxt('train_y.csv', delimiter=',')
+
+lrs = [0.01,0.01,0.05,0.1]
+batch_sizes = [1, 80, 8000, 800000]
+epochs = [4,10,100,500]
+for i in range(4):
+    bs = batch_sizes[i]
+    lr = lrs[i]
+    ep = epochs[i]
+    model = StochasticLinearRegressor()
+    history = model.fit(X_train, y_train, learning_rate=lr,epoch=ep,batch_size=bs)
+    
+    theta0 = [theta[0][0] for theta in history]
+    theta1 = [theta[1][0] for theta in history]
+    theta2 = [theta[2][0] for theta in history]
+    
+    param_histories[bs] = (theta0, theta1, theta2)
+
+plot_3d_parameter_trajectories(param_histories, true_theta)
+
+
+
+
+import numpy as np
+
+def generate(N, theta, input_mean, input_sigma, noise_sigma):
+    x1 = np.random.normal(input_mean[0], np.sqrt(input_sigma[0]), N)
+    x2 = np.random.normal(input_mean[1], np.sqrt(input_sigma[1]), N)
+    
+    X = np.column_stack((x1, x2))
+    
+    noise = np.random.normal(0, noise_sigma, N)
+    y = theta[0] + theta[1]*x1 + theta[2]*x2 + noise
+    
+    return X, y 
+
+class StochasticLinearRegressor:
+    def __init__(self,theta=None):
+        self.theta = theta
+
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match61-0.html#5" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    def fit(self, X, y, learning_rate=0.01,epoch=10,batch_size=1):
+        m, n_features = X.shape
+        X_aug = np.hstack([np.ones((m, 1)), X]) 
+        y = y.reshape(-1, 1)
+</FONT>        
+        self.theta = np.zeros((n_features + 1, 1))  
+        parameters_history = [self.theta.copy()]
+        max_epochs = epoch
+        tolerance = 1e-5
+        prev_theta = None
+
+        for epoch in range(max_epochs):
+            indices = np.random.permutation(m)
+            X_shuffled, y_shuffled = X_aug[indices], y[indices]
+            
+            num_batches = m // batch_size
+            for i in range(num_batches):
+                start = i * batch_size
+                end = start + batch_size
+                X_batch = X_shuffled[start:end]
+                y_batch = y_shuffled[start:end]
+                
+                error = X_batch @ self.theta - y_batch
+                gradient = (X_batch.T @ error) / len(X_batch)
+                self.theta -= learning_rate * gradient
+                parameters_history.append(self.theta.copy())
+            
+            if prev_theta is not None and np.linalg.norm(self.theta - prev_theta) &lt; tolerance:
+                print(f"Converged after {epoch} epochs with batch size {batch_size}")
+                break
+            prev_theta = self.theta.copy()
+        
+        return np.array(parameters_history)
+
+    def predict(self, X):
+        """Predict target values."""
+        X_aug = np.hstack([np.ones((X.shape[0], 1)), X])
+        return X_aug @ self.theta
+    
+
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match61-0.html#3" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+class LogisticRegressor:
+    def __init__(self):
+        self.theta = None
+        self.mean = None
+        self.std = None
+
+    def fit(self, X, y, learning_rate=0.01, max_iter=10000, tol=1e-6):
+</FONT>        self.mean = np.mean(X, axis=0)
+        self.std = np.std(X, axis=0)
+        X_norm = (X - self.mean) / self.std
+        
+        X_aug = np.c_[np.ones(X_norm.shape[0]), X_norm]
+        m, n = X_aug.shape
+        
+        self.theta = np.zeros(n)
+        theta_history = [self.theta.copy()]
+        
+        for _ in range(max_iter):
+            z = X_aug @ self.theta
+            h = 1 / (1 + np.exp(-z))
+            gradient = X_aug.T @ (y - h)
+            
+            D = h * (1 - h)
+            hessian = X_aug.T @ (D.reshape(-1, 1) * X_aug) + 1e-5*np.eye(n)
+            
+            delta = np.linalg.inv(hessian) @ gradient
+            self.theta += delta * learning_rate
+            theta_history.append(self.theta.copy())
+            
+            if np.linalg.norm(delta) &lt; tol:
+                break
+                
+        return np.array(theta_history)
+
+    def predict(self, X):
+        X_norm = (X - self.mean) / self.std
+        X_aug = np.c_[np.ones(X_norm.shape[0]), X_norm]
+        return (1 / (1 + np.exp(-X_aug @ self.theta))) &gt;= 0.5
+
+    def plot_decision_boundary(self, X, y):
+        plt.figure(figsize=(10, 6))
+        
+        plt.scatter(X[y==0][:, 0], X[y==0][:, 1], marker='o', label='Class 0', alpha=0.7)
+        plt.scatter(X[y==1][:, 0], X[y==1][:, 1], marker='x', label='Class 1', alpha=0.7)
+    
+        x1_min, x1_max = X[:, 0].min(), X[:, 0].max()
+        x1_vals = np.linspace(x1_min, x1_max, 100)
+        x1_norm = (x1_vals - self.mean[0]) / self.std[0]
+        x2_norm = (-self.theta[0] - self.theta[1] * x1_norm) / self.theta[2]
+<A NAME="7"></A><FONT color = #0000FF><A HREF="match61-0.html#7" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        x2_vals = x2_norm * self.std[1] + self.mean[1]
+        
+        plt.plot(x1_vals, x2_vals, 'r--', label='Decision Boundary')
+        plt.xlabel('Feature x₁', fontsize=12)
+</FONT>        plt.ylabel('Feature x₂', fontsize=12)
+        plt.title('Logistic Regression Decision Boundary (Unnormalized)', fontsize=14)
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.show()
+
+
+
+
+import numpy as np
+from logistic_regression import LogisticRegressor
+X = np.loadtxt('../data/Q3/logisticX.csv', delimiter=',')
+y = np.loadtxt('../data/Q3/logisticY.csv')
+
+model = LogisticRegressor()
+theta_history = model.fit(X, y)
+
+print("Final parameters:")
+print(f"θ₀ = {model.theta[0]:.4f}")
+print(f"θ₁ = {model.theta[1]:.4f}")
+print(f"θ₂ = {model.theta[2]:.4f}")
+
+
+
+
+
+import numpy as np
+from logistic_regression import LogisticRegressor
+X = np.loadtxt('../data/Q3/logisticX.csv', delimiter=',')
+y = np.loadtxt('../data/Q3/logisticY.csv')
+
+model = LogisticRegressor()
+theta_history = model.fit(X, y)
+model.plot_decision_boundary(X, y)
+
+
+
+import numpy as np
+
+class GaussianDiscriminantAnalysis:
+    def __init__(self):
+        self.mu_0 = None       
+        self.mu_1 = None       
+        self.sigma = None      
+        self.sigma_0 = None   
+        self.sigma_1 = None   
+        self.phi = None       
+        self.mean = None      
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match61-0.html#2" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        self.std = None     
+
+    def fit(self, X, y, assume_same_covariance=False):
+
+        self.mean = np.mean(X, axis=0)
+        self.std = np.std(X, axis=0)
+        X_norm = (X - self.mean) / self.std
+</FONT>        self.phi = np.mean(y)
+        
+        self.mu_0 = np.mean(X_norm[y == 0], axis=0)
+<A NAME="8"></A><FONT color = #00FFFF><A HREF="match61-0.html#8" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        self.mu_1 = np.mean(X_norm[y == 1], axis=0)
+        
+        if assume_same_covariance:
+            sigma = np.zeros((X_norm.shape[1], X_norm.shape[1]))
+            for i in range(X_norm.shape[0]):
+</FONT>                x_i = X_norm[i].reshape(-1, 1)
+                mu = self.mu_1.reshape(-1, 1) if y[i] == 1 else self.mu_0.reshape(-1, 1)
+                sigma += (x_i - mu) @ (x_i - mu).T
+            self.sigma = sigma / X_norm.shape[0]
+            return self.mu_0, self.mu_1, self.sigma
+        else:
+            self.sigma_0 = np.cov(X_norm[y == 0], rowvar=False, bias=True)
+            self.sigma_1 = np.cov(X_norm[y == 1], rowvar=False, bias=True)
+            return self.mu_0, self.mu_1, self.sigma_0, self.sigma_1
+
+    def predict(self, X):
+        X_norm = (X - self.mean) / self.std
+        
+        if self.sigma is not None:
+            sigma_inv = np.linalg.inv(self.sigma)
+            log_prob_0 = -0.5 * np.sum((X_norm - self.mu_0) @ sigma_inv * (X_norm - self.mu_0), axis=1) + np.log(1 - self.phi)
+            log_prob_1 = -0.5 * np.sum((X_norm - self.mu_1) @ sigma_inv * (X_norm - self.mu_1), axis=1) + np.log(self.phi)
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match61-0.html#4" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            y_pred = (log_prob_1 &gt; log_prob_0).astype(int)
+            return y_pred
+        else:
+            sigma0_inv = np.linalg.inv(self.sigma_0)
+            sigma1_inv = np.linalg.inv(self.sigma_1)
+</FONT>            log_prob_0 = (-0.5 * np.log(np.linalg.det(self.sigma_0))
+                          - 0.5 * np.sum((X_norm - self.mu_0) @ sigma0_inv * (X_norm - self.mu_0), axis=1)
+                          + np.log(1 - self.phi))
+            log_prob_1 = (-0.5 * np.log(np.linalg.det(self.sigma_1))
+                          - 0.5 * np.sum((X_norm - self.mu_1) @ sigma1_inv * (X_norm - self.mu_1), axis=1)
+                          + np.log(self.phi))
+            y_pred = (log_prob_1 &gt; log_prob_0).astype(int)
+            return y_pred
+
+
+    def get_original_scale_parameters(self):
+        if self.mean is None or self.std is None or self.sigma is None:
+            raise ValueError("Model must be fitted with shared covariance before converting parameters.")
+    
+        mu_alaska = self.mu_0 * self.std + self.mean
+        mu_canada = self.mu_1 * self.std + self.mean
+    
+        D = np.diag(self.std)
+        sigma_original = D @ self.sigma @ D
+        
+        return mu_alaska, mu_canada, sigma_original
+    
+    def display_original_parameters(self):
+        try:
+            mu_alaska, mu_canada, sigma_original = self.get_original_scale_parameters()
+            print("Alaska (label 0) Mean (original scale):", mu_alaska)
+            print("Canada (label 1) Mean (original scale):", mu_canada)
+            print("Shared Covariance Matrix (original scale):\n", sigma_original)
+        except ValueError as e:
+            print(e)
+
+
+
+
+import numpy as np
+from gda import GaussianDiscriminantAnalysis
+X = np.loadtxt('../data/Q4/q4x.dat', dtype=float)
+y_raw = np.loadtxt('../data/Q4/q4y.dat', dtype=str)
+
+# Mapping the string labels to numeric values (Alaska: 0, Canada: 1)
+label_map = {'Alaska': 0, 'Canada': 1}
+y = np.array([label_map[label] for label in y_raw], dtype=int)
+
+gda = GaussianDiscriminantAnalysis()
+gda.fit(X, y, assume_same_covariance=True)
+gda.display_original_parameters()
+
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+X = np.loadtxt('../data/Q4/q4x.dat', dtype=float)
+y_raw = np.loadtxt('../data/Q4/q4y.dat', dtype=str)
+label_map = {'Alaska': 0, 'Canada': 1}
+y = np.array([label_map[label] for label in y_raw], dtype=int)
+
+def plot_training_data(X, y):
+
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match61-0.html#0" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_1.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    alaska = X[y == 0]
+    canada = X[y == 1]
+    
+    plt.figure(figsize=(8, 6))
+    plt.scatter(alaska[:, 0], alaska[:, 1], marker='o', color='blue', label='Alaska')
+    plt.scatter(canada[:, 0], canada[:, 1], marker='x', color='red', label='Canada')
+    
+    plt.xlabel('Fresh Water Growth Ring Diameter (x1)')
+    plt.ylabel('Marine Water Growth Ring Diameter (x2)')
+    plt.title('Training Data: Alaska vs Canada')
+</FONT>    plt.legend()
+    plt.grid(True)
+    plt.show()
+plot_training_data(X, y)    
+
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from gda import GaussianDiscriminantAnalysis
+
+X = np.loadtxt('../data/Q4/q4x.dat', dtype=float)
+y_raw = np.loadtxt('../data/Q4/q4y.dat', dtype=str)
+label_map = {'Alaska': 0, 'Canada': 1}
+y = np.array([label_map[label] for label in y_raw], dtype=int)
+
+def plot_training_data_with_boundary(X, y, gda):
+    alaska = X[y == 0]
+    canada = X[y == 1]
+    
+    plt.figure(figsize=(8, 6))
+    plt.scatter(alaska[:, 0], alaska[:, 1], marker='o', color='blue', label='Alaska')
+    plt.scatter(canada[:, 0], canada[:, 1], marker='x', color='red', label='Canada')
+    
+    sigma_inv = np.linalg.inv(gda.sigma)
+    w = sigma_inv @ (gda.mu_1 - gda.mu_0)
+    b = np.log(gda.phi/(1 - gda.phi)) - 0.5 * (gda.mu_1.T @ sigma_inv @ gda.mu_1 - gda.mu_0.T @ sigma_inv @ gda.mu_0)
+    
+    w_prime = np.array([w[0] / gda.std[0], w[1] / gda.std[1]])
+    b_prime = b - (w[0] * gda.mean[0] / gda.std[0] + w[1] * gda.mean[1] / gda.std[1])
+    
+    x1_vals = np.linspace(X[:, 0].min() - 1, X[:, 0].max() + 1, 200)
+    
+    if np.abs(w_prime[1]) &gt; 1e-6:
+        x2_vals = -(w_prime[0] * x1_vals + b_prime) / w_prime[1]
+        plt.plot(x1_vals, x2_vals, 'k-', label='Decision Boundary')
+    else:
+        x1_line = -b_prime / w_prime[0]
+        plt.axvline(x=x1_line, color='k', linestyle='-', label='Decision Boundary')
+    
+    plt.xlabel('Fresh Water Growth Ring Diameter (x1)')
+    plt.ylabel('Marine Water Growth Ring Diameter (x2)')
+    plt.title('Training Data and GDA Decision Boundary')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+# X = np.loadtxt('q4x.dat', dtype=float)
+# y_raw = np.loadtxt('q4y.dat', dtype=str)
+# label_map = {'Alaska': 0, 'Canada': 1}
+# y = np.array([label_map[label] for label in y_raw], dtype=int)
+
+gda = GaussianDiscriminantAnalysis()
+gda.fit(X, y, assume_same_covariance=True)
+
+plot_training_data_with_boundary(X, y, gda)
+
+
+
+
+import numpy as np
+from gda import GaussianDiscriminantAnalysis
+
+
+X = np.loadtxt('../data/Q4/q4x.dat', dtype=float)
+y_raw = np.loadtxt('../data/Q4/q4y.dat', dtype=str)
+label_map = {'Alaska': 0, 'Canada': 1}
+y = np.array([label_map[label] for label in y_raw], dtype=int)
+
+gda = GaussianDiscriminantAnalysis()
+mu_0, mu_1, sigma_0, sigma_1 = gda.fit(X, y, assume_same_covariance=False)
+
+print("Learned Parameters (on normalized data):")
+print("Alaska (class 0) mean, μ0:", mu_0)
+print("Canada (class 1) mean, μ1:", mu_1)
+print("\nCovariance matrix for Alaska (class 0), Σ0:\n", sigma_0)
+print("\nCovariance matrix for Canada (class 1), Σ1:\n", sigma_1)
+
+mu_0_orig = mu_0 * gda.std + gda.mean
+mu_1_orig = mu_1 * gda.std + gda.mean
+
+D = np.diag(gda.std)
+sigma_0_orig = D @ sigma_0 @ D
+sigma_1_orig = D @ sigma_1 @ D
+
+print("\nLearned Parameters (in original scale):")
+print("Alaska (class 0) mean, μ0 (original):", mu_0_orig)
+print("Canada (class 1) mean, μ1 (original):", mu_1_orig)
+print("\nCovariance matrix for Alaska (class 0), Σ0 (original):\n", sigma_0_orig)
+print("\nCovariance matrix for Canada (class 1), Σ1 (original):\n", sigma_1_orig)
+
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from gda import GaussianDiscriminantAnalysis
+
+def plot_training_data_with_boundaries(X, y, gda):
+
+    alaska = X[y == 0]
+    canada = X[y == 1]
+    
+    plt.figure(figsize=(8, 6))
+    plt.scatter(alaska[:, 0], alaska[:, 1], marker='o', color='blue', label='Alaska')
+    plt.scatter(canada[:, 0], canada[:, 1], marker='x', color='red', label='Canada')
+    
+
+    m0 = np.sum(y == 0)
+    m1 = np.sum(y == 1)
+    sigma_shared = (m0 * gda.sigma_0 + m1 * gda.sigma_1) / (m0 + m1)
+
+    sigma_shared_inv = np.linalg.inv(sigma_shared)
+    w = sigma_shared_inv @ (gda.mu_1 - gda.mu_0)
+    b = np.log(gda.phi/(1 - gda.phi)) - 0.5 * (gda.mu_1.T @ sigma_shared_inv @ gda.mu_1 - gda.mu_0.T @ sigma_shared_inv @ gda.mu_0)
+
+    w_prime = np.array([w[0] / gda.std[0], w[1] / gda.std[1]])
+    b_prime = b - (w[0] * gda.mean[0] / gda.std[0] + w[1] * gda.mean[1] / gda.std[1])
+    
+    x1_vals = np.linspace(X[:, 0].min() - 1, X[:, 0].max() + 1, 200)
+    if np.abs(w_prime[1]) &gt; 1e-6:
+        x2_vals = -(w_prime[0] * x1_vals + b_prime) / w_prime[1]
+        plt.plot(x1_vals, x2_vals, 'k-', label='Linear Boundary')
+    else:
+        plt.axvline(x=-b_prime / w_prime[0], color='k', linestyle='-', label='Linear Boundary')
+
+    x1_min, x1_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+    x2_min, x2_max = X[:, 1].min() - 1, X[:, 1].max() + 1
+    x1_range = np.linspace(x1_min, x1_max, 300)
+    x2_range = np.linspace(x2_min, x2_max, 300)
+    xx, yy = np.meshgrid(x1_range, x2_range)
+    Z = np.zeros(xx.shape)
+
+    for i in range(xx.shape[0]):
+        for j in range(xx.shape[1]):
+            x_orig = np.array([xx[i, j], yy[i, j]])
+            x_norm = (x_orig - gda.mean) / gda.std
+            sigma0_inv = np.linalg.inv(gda.sigma_0)
+            sigma1_inv = np.linalg.inv(gda.sigma_1)
+            term1 = -0.5 * (x_norm - gda.mu_1).T @ sigma1_inv @ (x_norm - gda.mu_1)
+            term2 = 0.5 * (x_norm - gda.mu_0).T @ sigma0_inv @ (x_norm - gda.mu_0)
+            term3 = -0.5 * np.log(np.linalg.det(gda.sigma_1) / np.linalg.det(gda.sigma_0))
+            term4 = np.log(gda.phi / (1 - gda.phi))
+            Z[i, j] = term1 + term2 + term3 + term4
+    
+    cs = plt.contour(xx, yy, Z, levels=[0], colors='green', linewidths=2, linestyles='--')
+    cs.collections[0].set_label('Quadratic Boundary')
+    
+    plt.xlabel('Fresh Water Growth Ring Diameter (x1)')
+    plt.ylabel('Marine Water Growth Ring Diameter (x2)')
+    plt.title('Training Data with Linear and Quadratic Boundaries')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+X = np.loadtxt('../data/Q4/q4x.dat', dtype=float)
+y_raw = np.loadtxt('../data/Q4/q4y.dat', dtype=str)
+label_map = {'Alaska': 0, 'Canada': 1}
+y = np.array([label_map[label] for label in y_raw], dtype=int)
+
+gda = GaussianDiscriminantAnalysis()
+mu_0, mu_1, sigma_0, sigma_1 = gda.fit(X, y, assume_same_covariance=False)
+
+plot_training_data_with_boundaries(X, y, gda)
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
