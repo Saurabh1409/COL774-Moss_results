@@ -1,0 +1,1158 @@
+<HTML>
+<HEAD>
+<TITLE>./A2_processed_new_hash_2/combined_71W6W.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A2_processed_new_hash_2/combined_71W6W.py<p><PRE>
+
+
+import numpy as np
+import pandas as pd
+import math
+
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+
+import nltk
+from nltk.stem import PorterStemmer
+from nltk.corpus import stopwords
+
+import random
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+# nltk.download('stopwords')
+
+def tokenize1(text):
+    text = text.lower()
+    text = ''.join(char for char in text if char.isalnum() or char.isspace())
+    tokens = text.split()
+    return tokens
+
+def tokenize2(text):
+    tokens = text
+    stop_words = set(stopwords.words('english'))
+    stemmer = PorterStemmer()
+    tokens = [stemmer.stem(token) for token in tokens if token not in stop_words]
+    return tokens
+
+def create_bigrams_unigram(tokens):
+    bigrams = []
+    for i in range(len(tokens) - 1):
+        bigrams.append(tokens[i] + " " + tokens[i + 1])
+    
+    return tokens+bigrams
+
+def create_bigrams(tokens):
+    bigrams = []
+    for i in range(len(tokens) - 1):
+        bigrams.append(tokens[i] + " " + tokens[i + 1])
+    
+    return bigrams
+
+def create_trigrams(tokens):
+    trigram =[]
+    for i in range(len(tokens) - 2):
+        trigram.append(tokens[i] + " " + tokens[i + 1])
+
+    return trigram
+
+def create_fourgrams(tokens):
+    four = []
+    for i in range(len(tokens) - 3):
+        four.append(tokens[i] + " " + tokens[i + 1])
+    return four
+
+
+def merge_two_features(df , feature1 , feature2 , name):
+    df[name] = df[feature1] + df[feature2]
+    return df
+
+class NaiveBayes:
+
+    def __init__(self):
+        self.priors = None
+        self.likelihood = None  
+        
+    def fit(self, df, smoothening, class_col = "Class Index", text_col = "Tokenized Description"):
+        """Learn the parameters of the model from the training data.
+        Classes are 1-indexed
+
+        Args:
+            df (pd.DataFrame): The training data containing columns class_col and text_col.
+                each entry of text_col is a list of tokens.
+            smoothening (float): The Laplace smoothening parameter.
+        """
+        lables = df[class_col].unique()
+        self.priors = df[class_col].value_counts(normalize = True)
+        for c in lables:
+            self.priors[c] = math.log(self.priors[c])
+       
+        # print(type(priors))
+
+        self.likelihood = {c : {}  for c in lables}
+        vocablary = set()
+        
+        for index , row in df.iterrows():
+            vocablary.update(row[text_col])
+            for token in row[text_col]:
+                if token not in self.likelihood[row[class_col]]:
+                    self.likelihood[row[class_col]][token] = 1
+                else:
+                    self.likelihood[row[class_col]][token] += 1
+
+        # print(likelihood)
+
+        for c in lables:
+            total_words = sum(self.likelihood[c].values())
+            denominator = (total_words + len(vocablary))
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match223-1.html#4" TARGET="1"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            for word in vocablary:
+                if word not in self.likelihood[c]:
+                    self.likelihood[c][word] = 0
+                self.likelihood[c][word] = math.log((self.likelihood[c][word] + smoothening) / (denominator))
+</FONT>
+
+    
+    
+    def predict(self, df, text_col = "Tokenized Description", predicted_col = "Predicted"):
+        """
+        Predict the class of the input data by filling up column predicted_col in the input dataframe.
+
+        Args:
+            df (pd.DataFrame): The testing data containing column text_col.
+                each entry of text_col is a list of tokens.
+        """
+        
+        predictions = []
+        for index , row in df.iterrows():
+            max_prob = float('-inf')
+            prediction = -1
+            for c in self.priors.keys():
+                prob = self.priors[c]
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match223-1.html#0" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+                for token in row[text_col]:
+                    if token in self.likelihood[c]:
+                        prob += self.likelihood[c][token]
+                if prob &gt; max_prob:
+                    max_prob = prob
+                    prediction = c
+            predictions.append(prediction)
+</FONT>
+        df[predicted_col] = predictions
+        return df
+    
+    def accuracy(self, df, class_col = "Class Index", predicted_col = "Predicted"):
+        correct = 0
+        for index , row in df.iterrows():
+            if row[class_col] == row[predicted_col]:
+                correct += 1
+        return correct / len(df)
+    
+    def accuracy_precision_recall_f1score(self, df, class_col = "Class Index", predicted_col = "Predicted"):
+        labels = df[class_col].unique()
+        confusion_martix = {}
+        correct_predictions = 0
+        for c in labels:
+            confusion_martix[c] = {'tp': 0, 'fp': 0, 'fn': 0}
+
+        for index , row in df.iterrows():
+            if row[class_col] == row[predicted_col]:
+                confusion_martix[row[class_col]]['tp'] += 1
+                correct_predictions += 1
+            else:
+                confusion_martix[row[predicted_col]]['fp'] += 1
+                confusion_martix[row[class_col]]['fn'] += 1
+
+        precision = {}
+        recall = {}
+        f1_score = {}
+
+        for c in labels:
+            precision[c] = confusion_martix[c]['tp'] / (confusion_martix[c]['tp'] + confusion_martix[c]['fp']) if (confusion_martix[c]['tp'] + confusion_martix[c]['fp']) &gt; 0 else 0
+            recall[c] = confusion_martix[c]['tp'] / (confusion_martix[c]['tp'] + confusion_martix[c]['fn']) if (confusion_martix[c]['tp'] + confusion_martix[c]['fn']) &gt; 0 else 0
+            f1_score[c] = 2 * precision[c] * recall[c] / (precision[c] + recall[c]) if (precision[c] + recall[c]) &gt; 0 else 0
+
+        accuracy = correct_predictions / len(df)
+        return accuracy, precision, recall, f1_score
+
+    
+    def create_wordcloud(self , df , class_col , text_col):
+        lables = df[class_col].unique()
+        word_frequencies = {}
+        for c in lables:
+            class_df = df[df[class_col] == c]
+            tokens = [token for tokens in class_df[text_col] for token in tokens]
+            freq = {}
+            for t in tokens:
+                if t not in freq:
+                    freq[t] = 1
+                else:
+                    freq[t] += 1   
+            
+            word_frequencies[c] = freq
+
+        
+        for c in lables:
+            wordcloud = WordCloud(width = 800, height = 800, 
+                background_color ='white', 
+                stopwords = None, 
+                min_font_size = 10).generate_from_frequencies(word_frequencies[c])
+            plt.figure(figsize = (10 , 8), facecolor = None) 
+            plt.imshow(wordcloud , interpolation='bilinear') 
+            plt.axis("off") 
+            plt.title(f"Word Cloud for Class: {c}")
+            plt.show()
+
+
+def predict_by_merging(df , model1 , model2 , text_col1 , text_col2 , predicted_col):
+    predictions = []
+    for index , row in df.iterrows():
+        max_prob = float('-inf')
+        prediction = -1
+        for c in model1.priors.keys():
+            prob = model1.priors[c]
+            for token in row[text_col1]:
+                if token in model1.likelihood[c]:
+                    prob += model1.likelihood[c][token]
+            for token in row[text_col2]:
+                if token in model2.likelihood[c]:
+                    prob += model2.likelihood[c][token]
+
+            if prob &gt; max_prob:
+                max_prob = prob
+                prediction = c
+        predictions.append(prediction)
+
+    df[predicted_col] = predictions
+    return df
+
+def random_prediction_accuracy(df, class_col="Class Index"):
+    random.seed(42)
+    unique_classes = df[class_col].unique()
+
+    df['random_predicted'] = [random.choice(unique_classes) for _ in range(len(df))]
+
+    correct = sum(df[class_col] == df['random_predicted'])
+    accuracy = correct / len(df)
+
+    return accuracy
+
+def one_class_accuracy(df, predicted , class_col="Class Index"):
+    correct = 0
+    for index , row in df.iterrows():
+        if row[class_col] == predicted:
+            correct += 1
+    return correct / len(df)
+
+def accuracy_by_merge(df , class_col , predicted_col):
+    correct = 0
+    for index , row in df.iterrows():
+        if row[class_col] == row[predicted_col]:
+            correct += 1
+    return correct / len(df)
+
+
+def main():
+    X_train = pd.read_csv("../data/Q1/train.csv")
+    X_test = pd.read_csv("../data/Q1/test.csv")
+    # print("X_train shape: ", X_train.shape)
+    # print("X_test shape: ", X_test.shape)
+    # print(X_train["Class Index"].value_counts())   # Not Imbalanced Dataset
+    # print(X_test["Class Index"].value_counts()) 
+
+    tX_train = pd.DataFrame()
+    tX_test = pd.DataFrame()
+    tX_train["Labels"] = X_train["Class Index"]
+    tX_test["Labels"] = X_test["Class Index"]   
+    tX_train["Tokenized Description"] = X_train["Description"].apply(tokenize1)
+    tX_test["Tokenized Description"] = X_test["Description"].apply(tokenize1)
+    # print(type(tX_train))
+    # print(tX_test.head())
+    # print(X_test.head())
+
+    # Question - 1
+    naive_bayes = NaiveBayes()
+    naive_bayes.fit(tX_train, 1 , "Labels" , "Tokenized Description")
+
+    training = naive_bayes.predict(tX_train, "Tokenized Description", "Predicted_Uni")
+    testing = naive_bayes.predict(tX_test,  "Tokenized Description", "Predicted_Uni")
+
+    print("Training Accuracy Unigram: ", naive_bayes.accuracy(training, "Labels", "Predicted_Uni"))
+    print("Testing Accuracy Unigram: " , naive_bayes.accuracy(testing , "Labels", "Predicted_Uni"))
+
+    acc_train, pre_train ,recall_train ,f1score_train  = naive_bayes.accuracy_precision_recall_f1score(training , "Labels" , "Predicted_Uni")
+    print("Training Accuracy without Stemming : ", acc_train)
+    print("Training Precision  without Stemming : ", pre_train)
+    print("Training Recall without Stemming : ", recall_train)
+    print("Training f1-score without Stemming : ", f1score_train)
+    acc_test, pre_test ,recall_test ,f1score_test  = naive_bayes.accuracy_precision_recall_f1score(testing , "Labels" , "Predicted_Uni")
+    print("Testing Accuracy without Stemming : ", acc_test)
+    print("Testing Precision without Stemming : ", pre_test)
+    print("Testing Recall without Stemming : ", recall_test)
+    print("Testing f1-score without Stemming : ", f1score_test)
+
+    naive_bayes.create_wordcloud(tX_train , "Labels" , "Tokenized Description")
+
+    
+
+    # Question - 2
+
+    tX_train["Tokenized,Stemming,Stopword Description"] = tX_train["Tokenized Description"].apply(tokenize2)
+    tX_test["Tokenized,Stemming,Stopword Description"] = tX_test["Tokenized Description"].apply(tokenize2)
+
+    naive_bayes_stemming = NaiveBayes() 
+    naive_bayes_stemming.fit(tX_train, 1 , "Labels" , "Tokenized,Stemming,Stopword Description")
+
+    training = naive_bayes_stemming.predict(tX_train, "Tokenized,Stemming,Stopword Description", "Predicted_Uni_Stemming,Stopword")
+    testing = naive_bayes_stemming.predict(tX_test,  "Tokenized,Stemming,Stopword Description", "Predicted_Uni_Stemming,Stopword")
+
+    print("Training Accuracy Stemming,Stopword: ", naive_bayes_stemming.accuracy(training, "Labels", "Predicted_Uni_Stemming,Stopword"))
+    print("Testing Accuracy Stemming,Stopword: " , naive_bayes_stemming.accuracy(testing , "Labels", "Predicted_Uni_Stemming,Stopword"))
+
+    print("Accuracy, Precision, Recall, F1 Score for Unigram with Stemming and Stopword")
+    acc_train, pre_train ,recall_train ,f1score_train  = naive_bayes_stemming.accuracy_precision_recall_f1score(training , "Labels" , "Predicted_Uni_Stemming,Stopword")
+    print("Training Accuracy  with Stemming : ", acc_train)
+    print("Training Precision with Stemming : ", pre_train)
+    print("Training Recall with Stemming : ", recall_train)
+    print("Training f1-score  with Stemming : ", f1score_train)
+    acc_test, pre_test ,recall_test ,f1score_test  = naive_bayes_stemming.accuracy_precision_recall_f1score(testing , "Labels" , "Predicted_Uni_Stemming,Stopword")
+    print("Testing Accuracy with Stemming : ", acc_test)
+    print("Testing Precision with Stemming : ", pre_test)
+    print("Testing Recall with Stemming : ", recall_test)
+    print("Testing f1-score with Stemming : ", f1score_test)  
+
+
+    naive_bayes_stemming.create_wordcloud(tX_train , "Labels" , "Tokenized,Stemming,Stopword Description")
+
+    # Question - 3
+    tX_train["Uni/Birgram Description"] = tX_train["Tokenized,Stemming,Stopword Description"].apply(create_bigrams_unigram)
+    tX_test["Uni/Bigram Description"] = tX_test["Tokenized,Stemming,Stopword Description"].apply(create_bigrams_unigram)
+
+    naive_bayes_bigram = NaiveBayes()
+    naive_bayes_bigram.fit(tX_train, 1 , "Labels" , "Uni/Birgram Description")
+
+    training = naive_bayes_bigram.predict(tX_train, "Uni/Birgram Description", "Predicted_Uni/Bigram_Stemming,Stopword")
+    testing = naive_bayes_bigram.predict(tX_test,  "Uni/Bigram Description", "Predicted_Uni/Bigram_Stemming,Stopword")
+
+    print("Training Accuracy Bigram Unigram : ", naive_bayes_bigram.accuracy(training, "Labels", "Predicted_Uni/Bigram_Stemming,Stopword"))
+    print("Testing Accuracy Bigram Unigram : " , naive_bayes_bigram.accuracy(testing , "Labels", "Predicted_Uni/Bigram_Stemming,Stopword"))
+
+    # Question - 4
+    # Unigram with / without stemming done in Question 1 ,2 respectively
+    print("----------------------------------------------------------------------------------------------------")
+
+    tX_train["Bigram_without_stemming Description"] = tX_train["Tokenized Description"].apply(create_bigrams)
+    tX_test["Bigram_without_stemming Description"] = tX_test["Tokenized Description"].apply(create_bigrams)
+
+    naive_bayes_bigram_without_stemming = NaiveBayes()
+    naive_bayes_bigram_without_stemming.fit(tX_train, 1 , "Labels" , "Bigram_without_stemming Description")
+
+    training = naive_bayes_bigram_without_stemming.predict(tX_train, "Bigram_without_stemming Description", "Predicted_Bigram_without_stemming")
+    testing = naive_bayes_bigram_without_stemming.predict(tX_test,  "Bigram_without_stemming Description", "Predicted_Bigram_without_stemming")
+
+    print("Training Accuracy Bigram without stemming : ", naive_bayes_bigram_without_stemming.accuracy(training, "Labels", "Predicted_Bigram_without_stemming"))
+    print("Testing Accuracy Bigram without stemming : " , naive_bayes_bigram_without_stemming.accuracy(testing , "Labels", "Predicted_Bigram_without_stemming"))
+
+    # print("Available columns in DataFrame:", training.columns)
+
+    acc_train, pre_train ,recall_train ,f1score_train  = naive_bayes_bigram_without_stemming.accuracy_precision_recall_f1score(training , "Labels" , "Predicted_Bigram_without_stemming")
+    print("Training Accuracy Bigram without Stemming : ", acc_train)
+    print("Training Precision Bigram without Stemming : ", pre_train)
+    print("Training Recall Bigram without Stemming : ", recall_train)
+    print("Training f1-score Bigram without Stemming : ", f1score_train)
+    acc_test, pre_test ,recall_test ,f1score_test  = naive_bayes_bigram_without_stemming.accuracy_precision_recall_f1score(testing , "Labels" , "Predicted_Bigram_without_stemming")
+    print("Testing Accuracy Bigram without Stemming : ", acc_test)
+    print("Testing Precision Bigram without Stemming : ", pre_test)
+    print("Testing Recall Bigram without Stemming : ", recall_test)
+    print("Testing f1-score Bigram without Stemming : ", f1score_test)
+
+
+
+    tX_train["Bigram_with_stemming Description"] = tX_train["Tokenized,Stemming,Stopword Description"].apply(create_bigrams)
+    tX_test["Bigram_with_stemming Description"] = tX_test["Tokenized,Stemming,Stopword Description"].apply(create_bigrams)
+
+    naive_bayes_bigram_with_stemming = NaiveBayes()
+    naive_bayes_bigram_with_stemming.fit(tX_train, 1 , "Labels" , "Bigram_with_stemming Description")
+
+    training = naive_bayes_bigram_with_stemming.predict(tX_train, "Bigram_with_stemming Description", "Predicted_Bigram_with_stemming")
+    testing = naive_bayes_bigram_with_stemming.predict(tX_test,  "Bigram_with_stemming Description", "Predicted_Bigram_with_stemming")
+
+    print("Training Accuracy Bigram with stemming : ", naive_bayes_bigram_with_stemming.accuracy(training, "Labels", "Predicted_Bigram_with_stemming"))
+    print("Testing Accuracy Bigram with stemming : " , naive_bayes_bigram_with_stemming.accuracy(testing , "Labels", "Predicted_Bigram_with_stemming"))
+
+    acc_train, pre_train ,recall_train ,f1score_train  = naive_bayes_bigram_with_stemming.accuracy_precision_recall_f1score(training , "Labels" , "Predicted_Bigram_with_stemming")
+    print("Training Accuracy Bigram with Stemming : ", acc_train)
+    print("Training Precision Bigram with Stemming : ", pre_train)
+    print("Training Recall Bigram with Stemming : ", recall_train)
+    print("Training f1-score Bigram with Stemming : ", f1score_train)
+    acc_test, pre_test ,recall_test ,f1score_test  = naive_bayes_bigram_with_stemming.accuracy_precision_recall_f1score(testing , "Labels" , "Predicted_Bigram_with_stemming")
+    print("Testing Accuracy Bigram with Stemming : ", acc_test)
+    print("Testing Precision Bigram with Stemming : ", pre_test)
+    print("Testing Recall Bigram with Stemming : ", recall_test)
+    print("Testing f1-score Bigram with Stemming : ", f1score_test)
+
+    print("----------------------------------------------------------------------------------------------------")
+
+    
+
+
+    # Question - 5
+
+    title_train = pd.DataFrame()
+    title_test = pd.DataFrame()
+    title_train["Labels"] = X_train["Class Index"]
+    title_test["Labels"] = X_test["Class Index"] 
+
+    # Without Stemming and Stopword
+    title_train["Tokenized Title"] = X_train["Title"].apply(tokenize1)
+    title_test["Tokenized Title"] = X_test["Title"].apply(tokenize1)
+
+    title_naive_bayes = NaiveBayes()
+
+    title_naive_bayes.fit(title_train, 1 , "Labels" , "Tokenized Title")
+
+    training = title_naive_bayes.predict(title_train, "Tokenized Title", "Predicted_Uni")
+    testing = title_naive_bayes.predict(title_test,  "Tokenized Title", "Predicted_Uni")
+
+    print("Training Accuracy Unigram(Title): ", title_naive_bayes.accuracy(training, "Labels", "Predicted_Uni"))
+    print("Testing Accuracy Unigram(Title): " , title_naive_bayes.accuracy(testing , "Labels", "Predicted_Uni"))
+    
+
+    # With Stemming and Stopwords
+
+    title_train["Tokenized,Stemming,Stopword Title"] = title_train["Tokenized Title"].apply(tokenize2)
+    title_test["Tokenized,Stemming,Stopword Title"] = title_test["Tokenized Title"].apply(tokenize2)
+
+    title_naive_bayes_stemming = NaiveBayes()
+    title_naive_bayes_stemming.fit(title_train, 1 , "Labels" , "Tokenized,Stemming,Stopword Title")
+
+    training = title_naive_bayes_stemming.predict(title_train, "Tokenized,Stemming,Stopword Title", "Predicted_Uni_Stemming,Stopword")
+    testing = title_naive_bayes_stemming.predict(title_test,  "Tokenized,Stemming,Stopword Title", "Predicted_Uni_Stemming,Stopword")
+
+    print("Training Accuracy Stemming,Stopword Unigram(Title): ", title_naive_bayes_stemming.accuracy(training, "Labels", "Predicted_Uni_Stemming,Stopword"))
+    print("Testing Accuracy Stemming,Stopword Unigram(Title): " , title_naive_bayes_stemming.accuracy(testing , "Labels", "Predicted_Uni_Stemming,Stopword"))
+
+
+    # With Stemming and Stopwords and Bigram
+    title_train["Bigram Tokenized,Stemming,Stopword Title"] = title_train["Tokenized,Stemming,Stopword Title"].apply(create_bigrams)
+    title_test["Bigram Tokenized,Stemming,Stopword Title"] = title_test["Tokenized,Stemming,Stopword Title"].apply(create_bigrams)
+
+    title_bigram_naive_bayes_stemming = NaiveBayes()
+    title_bigram_naive_bayes_stemming.fit(title_train, 1 , "Labels" , "Bigram Tokenized,Stemming,Stopword Title")
+
+    training = title_bigram_naive_bayes_stemming.predict(title_train, "Bigram Tokenized,Stemming,Stopword Title", "Predicted_Bi_Stemming,Stopword")
+    testing = title_bigram_naive_bayes_stemming.predict(title_test,  "Bigram Tokenized,Stemming,Stopword Title", "Predicted_Bi_Stemming,Stopword")
+
+    print("Training Accuracy Bigram Stemming,Stopword(Title): ", title_bigram_naive_bayes_stemming.accuracy(training, "Labels", "Predicted_Bi_Stemming,Stopword"))
+    print("Testing Accuracy Bigram Stemming,Stopword(Title): " , title_bigram_naive_bayes_stemming.accuracy(testing , "Labels", "Predicted_Bi_Stemming,Stopword"))
+
+
+
+    # Without Stemming and Stopwords and Bigram
+    title_train["Bigram Tokenized Title"] = title_train["Tokenized Title"].apply(create_bigrams)
+    title_test["Bigram Tokenized Title"] = title_test["Tokenized Title"].apply(create_bigrams)
+
+    title_bigram_naive_bayes = NaiveBayes()
+    title_bigram_naive_bayes.fit(title_train, 1 , "Labels" , "Bigram Tokenized Title")
+
+    training = title_bigram_naive_bayes.predict(title_train, "Bigram Tokenized Title", "Predicted_Bi")
+    testing = title_bigram_naive_bayes.predict(title_test,  "Bigram Tokenized Title", "Predicted_Bi")
+
+    print("Training Accuracy Bigram (Title): ", title_bigram_naive_bayes.accuracy(training, "Labels", "Predicted_Bi"))
+    print("Testing Accuracy Bigram (Title): " , title_bigram_naive_bayes.accuracy(testing , "Labels", "Predicted_Bi"))
+
+    # Both Bigram and unigram with stemming
+    title_train["Bigram/Uni Tokenized,Stemming,Stopword Title"] = title_train["Tokenized,Stemming,Stopword Title"].apply(create_bigrams_unigram)
+    title_test["Bigram/Uni Tokenized,Stemming,Stopword Title"] = title_test["Tokenized,Stemming,Stopword Title"].apply(create_bigrams_unigram)
+
+    title_bigram_naive_bayes_stemming = NaiveBayes()
+    title_bigram_naive_bayes_stemming.fit(title_train, 1 , "Labels" , "Bigram/Uni Tokenized,Stemming,Stopword Title")
+
+    training = title_bigram_naive_bayes_stemming.predict(title_train, "Bigram/Uni Tokenized,Stemming,Stopword Title", "Predicted_Bi/Uni_Stemming,Stopword")
+    testing = title_bigram_naive_bayes_stemming.predict(title_test,  "Bigram/Uni Tokenized,Stemming,Stopword Title", "Predicted_Bi/Uni_Stemming,Stopword")
+
+    print("Training Accuracy Bigram/Uni Stemming,Stopword (Title): ", title_bigram_naive_bayes_stemming.accuracy(training, "Labels", "Predicted_Bi/Uni_Stemming,Stopword"))
+    print("Testing Accuracy Bigram/Uni Stemming,Stopword (Title): " , title_bigram_naive_bayes_stemming.accuracy(testing , "Labels", "Predicted_Bi/Uni_Stemming,Stopword"))
+
+
+    # Question - 6
+
+    ## PART - A
+
+    # Same set of Parameters 
+    # Title - Bigram with Stemming and Stopword
+    # Description - Bigram with Stemming and Stopword
+
+    title_train["merged_bigram_title_Stemming_bigram_description_stemmed"] = title_train["Bigram/Uni Tokenized,Stemming,Stopword Title"] + tX_train["Bigram_with_stemming Description"]
+    title_test["merged_bigram_title_Stemming_bigram_description_stemmed"] = title_test["Bigram/Uni Tokenized,Stemming,Stopword Title"] + tX_test["Bigram_with_stemming Description"]
+
+    merged_naive_bayes = NaiveBayes()
+    merged_naive_bayes.fit(title_train, 1 , "Labels" , "merged_bigram_title_Stemming_bigram_description_stemmed")
+
+    training_special = merged_naive_bayes.predict(title_train, "merged_bigram_title_Stemming_bigram_description_stemmed", "Predicted_Merged")
+    testing_special = merged_naive_bayes.predict(title_test,  "merged_bigram_title_Stemming_bigram_description_stemmed", "Predicted_Merged")
+
+    print("Training Accuracy Merged Bigram with Stemming and Stopword (Title and Description): ", merged_naive_bayes.accuracy(training_special, "Labels", "Predicted_Merged"))
+    print("Testing Accuracy Merged Bigram with Stemming and Stopword (Title and Description): " , merged_naive_bayes.accuracy(testing_special , "Labels", "Predicted_Merged"))
+
+    # PART - B
+    dff_train = pd.DataFrame()
+    dff_test = pd.DataFrame()
+
+    dff_train["Labels"] = X_train["Class Index"]
+    dff_test["Labels"] = X_test["Class Index"]
+
+    dff_train["Bigram_with_stemming Description"] = tX_train["Bigram_with_stemming Description"]
+    dff_test["Bigram_with_stemming Description"] = tX_test["Bigram_with_stemming Description"]
+
+    dff_train["Bigram/Uni Tokenized,Stemming,Stopword Title"] = title_train["Bigram/Uni Tokenized,Stemming,Stopword Title"]
+    dff_test["Bigram/Uni Tokenized,Stemming,Stopword Title"] = title_test["Bigram/Uni Tokenized,Stemming,Stopword Title"]
+
+    training = predict_by_merging(dff_train , naive_bayes_bigram_with_stemming , title_bigram_naive_bayes_stemming , "Bigram_with_stemming Description" , "Bigram/Uni Tokenized,Stemming,Stopword Title" , "Predicted_div")
+    testing = predict_by_merging(dff_test , naive_bayes_bigram_with_stemming , title_bigram_naive_bayes_stemming , "Bigram_with_stemming Description" , "Bigram/Uni Tokenized,Stemming,Stopword Title" , "Predicted_div")
+
+    print("Training Accuracy Merged Bigram with Stemming and Stopword (Title and Description): ", accuracy_by_merge(training , "Labels" , "Predicted_div"))
+    print("Testing Accuracy Merged Bigram with Stemming and Stopword (Title and Description): " , accuracy_by_merge(testing , "Labels" , "Predicted_div"))
+
+    # Question - 7
+    print("Accuracy of Random Prediction: ", random_prediction_accuracy(X_test , "Class Index"))
+    print("Accuracy by only predicting one class: ", one_class_accuracy(X_test , 1 , "Class Index"))
+
+    # Question - 8
+
+    # print("Confusion Matrix Training Set:")
+    # print(confusion_matrix(training_special["Labels"] , training_special["Predicted_Merged"] , training_special["Labels"].unique()))
+    # print("Confusion Matrix Testing Set:")
+    # confusion_matrix(testing_special["Labels"] , testing_special["Predicted_Merged"] , testing_special["Labels"].unique())
+
+    cm_training = confusion_matrix(training_special["Labels"], training_special["Predicted_Merged"])
+    disp_training = ConfusionMatrixDisplay(confusion_matrix=cm_training, display_labels=[1, 2, 3, 4])
+    disp_training.plot(cmap="Blues", values_format="d")
+    plt.title("Confusion Matrix for Multi-Class Classification")
+    plt.show()
+
+    cm_testing = confusion_matrix(testing_special["Labels"], testing_special["Predicted_Merged"])
+    disp_testing = ConfusionMatrixDisplay(confusion_matrix=cm_testing, display_labels=[1, 2, 3, 4])
+    disp_testing.plot(cmap="Blues", values_format="d")
+    plt.title("Confusion Matrix for Multi-Class Classification")
+    plt.show()
+
+    # Question - 9
+
+    ## Trigram + bigram (both title and description)
+
+
+    dff_train["Trigram Tokenized,Stemming,Stopword Title"] = tX_train["Tokenized,Stemming,Stopword Description"].apply(create_trigrams) + title_train["Tokenized,Stemming,Stopword Title"].apply(create_trigrams) + title_train["merged_bigram_title_Stemming_bigram_description_stemmed"]
+    dff_test["Trigram Tokenized,Stemming,Stopword Title"] = tX_test["Tokenized,Stemming,Stopword Description"].apply(create_trigrams) + title_test["Tokenized,Stemming,Stopword Title"].apply(create_trigrams) + title_test["merged_bigram_title_Stemming_bigram_description_stemmed"]
+
+    title_trigram_naive_bayes_stemming = NaiveBayes()
+    title_trigram_naive_bayes_stemming.fit(dff_train, 1 , "Labels" , "Trigram Tokenized,Stemming,Stopword Title")
+
+    training_tri = title_trigram_naive_bayes_stemming.predict(dff_train, "Trigram Tokenized,Stemming,Stopword Title", "Predicted_Tri")
+    testing_tri = title_trigram_naive_bayes_stemming.predict(dff_test,  "Trigram Tokenized,Stemming,Stopword Title", "Predicted_Tri")
+
+    print("Training Accuracy Trigram Stemming,Stopword(Title): ", title_trigram_naive_bayes_stemming.accuracy(training_tri, "Labels", "Predicted_Tri"))
+    print("Testing Accuracy Trigram Stemming,Stopword(Title): " , title_trigram_naive_bayes_stemming.accuracy(testing_tri , "Labels", "Predicted_Tri"))
+
+    cm_training_tri = confusion_matrix(training_tri["Labels"], training_tri["Predicted_Tri"])
+    disp_training_tri = ConfusionMatrixDisplay(confusion_matrix=cm_training_tri, display_labels=[1, 2, 3, 4])
+    disp_training_tri.plot(cmap="Blues", values_format="d")
+    plt.title("Confusion Matrix for Multi-Class Classification Trigram Training")
+    plt.show()
+
+    cm_testing_tri = confusion_matrix(testing_tri["Labels"], testing_tri["Predicted_Tri"])
+    disp_testing_tri = ConfusionMatrixDisplay(confusion_matrix=cm_testing_tri, display_labels=[1, 2, 3, 4])
+    disp_testing_tri.plot(cmap="Blues", values_format="d")
+    plt.title("Confusion Matrix for Multi-Class Classification Trigram Testing")
+    plt.show()
+
+
+
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+import cvxopt
+from PIL import Image
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+from sklearn import svm
+import time
+from sklearn.linear_model import SGDClassifier
+from sklearn.svm import LinearSVC
+from sklearn.metrics import accuracy_score
+from itertools import combinations
+from sklearn.metrics import confusion_matrix , ConfusionMatrixDisplay
+from sklearn.model_selection import cross_val_score
+from skimage.transform import resize
+
+
+class SupportVectorMachine:
+    '''
+    Binary Classifier using Support Vector Machine
+    '''
+    def __init__(self):
+        self.alphas = None
+        self.sv = None
+        self.sl = None
+        self.b = None
+        self.w = None
+        self.X_sv = None
+
+
+        
+    def fit(self, X, y, kernel = 'linear', C = 1.0, gamma = 0.001):
+        '''
+        Learn the parameters from the given training data
+        Classes are -1 or 1
+        
+        Args:
+            X: np.array of shape (N, D) 
+                where N is the number of samples and D is the flattened dimension of each image
+                
+            y: np.array of shape (N,)
+                where N is the number of samples and y[i] is the class of the ith sample
+                
+            kernel: str
+                The kernel to be used. Can be 'linear' or 'gaussian'
+                
+            C: float
+                The regularization parameter
+                
+            gamma: float
+                The gamma parameter for gaussian kernel, ignored for linear kernel
+        '''
+        P = None
+
+        if kernel == "linear":
+            P = np.outer(y , y) * np.dot(X , X.T)
+        elif kernel == "gaussian":
+            P = np.zeros((len(y), len(y)))
+            for i in range(len(y)):
+                for j in range(len(y)):
+                    P[i, j] = y[i] * y[j] * np.exp(-gamma * np.linalg.norm(X[i] - X[j])**2)
+        else:    
+            raise ValueError("Kernel not supported")    
+        
+        # print(P.shape)
+        P = cvxopt.matrix(P)
+
+        q = cvxopt.matrix(-np.ones(len(y)))
+
+        G = cvxopt.matrix(np.vstack((np.eye(len(y)), -np.eye(len(y)))))
+        h = cvxopt.matrix(np.hstack((C * np.ones(len(y)), np.zeros(len(y)))))
+
+        A = y.astype('float').reshape(1, -1)
+
+        A = cvxopt.matrix(A , tc='d')
+
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match223-1.html#3" TARGET="1"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        b = cvxopt.matrix(0.0)
+
+        solution = cvxopt.solvers.qp(P, q, G, h, A, b)
+        # print(solution['x'])
+        alpha_vector = np.array(solution['x']).flatten()
+
+        self.sv = np.where(alpha_vector &gt; 1e-5)[0]
+</FONT>        self.sl = y[self.sv]
+        self.alphas = alpha_vector[self.sv]
+        self.X_sv = X[self.sv]
+
+
+        if kernel == "linear":
+            self.b = 0
+            print("Alphas - ",self.alphas.shape)
+            print("X - ", X.shape)
+            print("y - " ,y[:, None].shape)
+            self.w = np.sum(alpha_vector[:, None]  * y[:, None] * X, axis=0)
+            print("W - ",self.w)
+            # print(np.linalg.norm(self.w))
+
+            for i in self.sv:
+                self.b += y[i]
+                self.b -= np.sum(self.w * X[i])
+            self.b /= len(self.sv)
+            print("b - ",self.b)
+
+        elif kernel == "gaussian":
+            b_values = []
+            alpha_sv = self.alphas
+            y_sv = self.sl
+            
+            for i in range(len(self.sv)):
+                s = 0
+                for j in range(len(self.sv)):
+                    if i != j:
+                        s += alpha_sv[j] * y_sv[j] * self.gaussian_kernel(self.X_sv[i], self.X_sv[j], gamma)
+                b_values.append(y_sv[i] - s)
+            
+            self.b = np.mean(b_values)
+            print("b - ", self.b)
+
+
+        print("Length of Support Vector - ", len(self.sv))
+        print("Percentage of training Samples Acts as Support Vectors (",kernel,") - ", (len(self.sv) * 100) / len(X)) 
+
+    # def gaussian_kernel(self, X, Y, gamma):
+    #     X_squared = np.sum(X**2, axis = 1).reshape(-1, 1)
+    #     Y_squared = np.sum(Y**2, axis = 1).reshape(1, -1)
+    #     dist = X_squared - 2 * np.dot(X, Y.T) + Y_squared
+    #     return np.exp(-gamma * dist)
+
+    def gaussian_kernel(self, x, sv, gamma):
+        # Compute the Gaussian kernel for a single sample
+        dist = np.linalg.norm(x - sv)**2
+        return np.exp(-gamma * dist)
+
+    
+    def predict(self, X):
+        pred = None
+        if self.w is not None:
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match223-1.html#1" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            pred = np.dot(X, self.w) + self.b
+        else:
+            # print("Alphas - ",self.alphas)
+            # print("SL - ",self.sl)
+            # print("SV - ",self.sv)
+            
+            pred = np.zeros(X.shape[0])
+            for i in range(X.shape[0]):
+                s=0
+</FONT>                for alpha, y, sv in zip(self.alphas, self.sl, self.X_sv):
+                    s += alpha * y * self.gaussian_kernel(X[i] , sv , 0.001)
+                
+                # print(pred[i])
+                pred[i] = s + float(self.b)
+        return np.sign(pred)
+    
+
+
+    def classify_test_using_alphas(self , X_test, y_test ,  X_train, y_train, gamma):
+        predictions = []
+        for x_test in X_test:
+            score = 0
+            for i, alpha_i in enumerate(self.alphas):
+                score += alpha_i * y_train[i] * np.exp(-gamma * np.linalg.norm(x_test - X_train[i])**2)
+            prediction = np.sign(score)
+            predictions.append(prediction)
+
+        if y_test is None:
+            return predictions
+        return np.mean(predictions == y_test)
+
+    
+    def accuracy(self , X , y):
+        y_pred = self.predict(X)
+        return np.mean(y_pred == y)
+    
+    def plot_support_vectors(self , X):
+        top_5_indices = np.argsort(self.alphas)[-5:][::-1]
+       
+        top_5_images = [X[i].reshape(100, 100, 3) for i in top_5_indices]
+
+        for i, img in enumerate(top_5_images):
+            plt.figure(figsize=(4, 4))
+            plt.imshow(img)
+            plt.title("Support Vector Image - " + str(i+1))
+            plt.axis('off')
+            plt.show()
+
+    def plot_w(self):
+        w_image = self.w.reshape(100, 100, 3)
+        w_scaled = (w_image - np.min(w_image)) / (np.max(w_image) - np.min(w_image)) * 255
+        w_scaled = w_scaled.astype(np.uint8)        
+        plt.figure(figsize=(4, 4))
+        plt.imshow(w_scaled)
+        plt.title("Weight Vector")
+        plt.axis('off')
+        plt.show()
+
+
+def preprocessing(image_array, size=(100, 100)):
+    image = Image.fromarray(image_array).convert('RGB')
+    resized_image = image.resize(size)
+    cropped_image = resized_image.crop((0, 0, size[0], size[1]))
+    img = np.array(cropped_image)
+    img = img.flatten()
+    img = img / 255.0
+    
+    return img
+    
+
+def load_and_preprocess_images(directory):
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match223-1.html#2" TARGET="1"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    preprocessed_images = []
+    for filename in os.listdir(directory):
+        if filename.endswith(".jpg"):
+            image_path = os.path.join(directory, filename)
+            image_array = np.array(Image.open(image_path))
+</FONT>            preprocessed_vector = preprocessing(image_array , (100, 100))
+            if preprocessed_vector.shape != (30000,):
+                print(f"Image {filename} has shape {preprocessed_vector.shape}")
+                continue
+            preprocessed_images.append(preprocessed_vector)
+    return np.array(preprocessed_images)
+
+
+def svm_sklearn(X_train, y_train, X_test, y_test):
+    svm_linear = svm.SVC(kernel='linear', C=1.0)
+    start_time_linear = time.time()
+    svm_linear.fit(X_train, y_train.ravel())
+    end_time_linear = time.time()
+    training_time_linear = end_time_linear - start_time_linear
+
+    print("Training Time libsvm (linear) - ", training_time_linear)
+
+    svm_gaussian = svm.SVC(kernel='rbf', C=1.0, gamma=0.001)
+    start_time_gaussian = time.time()
+    svm_gaussian.fit(X_train, y_train.ravel())  
+    end_time_gaussian = time.time()
+    training_time_gaussian = end_time_gaussian - start_time_gaussian
+    print("Training Time libsvm (gaussian) - ", training_time_gaussian)
+
+
+    support_indices_linear = svm_linear.support_
+    support_indices_gaussian = svm_gaussian.support_
+
+    num_support_vectors_linear = len(support_indices_linear)
+    num_support_vectors_gaussian = len(support_indices_gaussian)
+
+    print("Length of Support Vectors (linear) libsvm - " ,num_support_vectors_linear)
+    print("Length of Support Vectors (gaussian) libsvm - " ,num_support_vectors_gaussian)
+    print("Percentage of training Samples Acts as Support Vectors (linear) libsvm - ", (num_support_vectors_linear * 100) / len(X_train))
+    print("Percentage of training Samples Acts as Support Vectors (gaussian) libsvm - ", (num_support_vectors_gaussian * 100) / len(X_train))
+
+
+    matching_support_vectors_linear_gaussian = np.intersect1d(support_indices_linear, support_indices_gaussian)
+    num_matching_support_vectors_linear_gaussian = len(matching_support_vectors_linear_gaussian)
+    print("Number of Matching Support Vectors (Linear & Gaussian) libsvm : " ,num_matching_support_vectors_linear_gaussian)
+
+    w_linear = svm_linear.coef_.flatten()
+    b_linear = svm_linear.intercept_
+
+    print("Weight Vector (Linear) libsvm: " ,w_linear)  
+    print("Bias Term (Linear) libsvm: " , b_linear)
+
+    print("Train Accuracy (linear) libsvm - ", svm_linear.score(X_train, y_train))
+    print("Test Accuracy (linear) libsvm - ", svm_linear.score(X_test, y_test))
+
+    print("Train Accuracy (Guassian) - " ,svm_gaussian.score(X_train, y_train))
+    print("Test Accuracy (Gaussian) - " , svm_gaussian.score(X_test ,y_test))
+    if hasattr(svm_gaussian, 'intercept_'):
+        print("Intercept of the decision function (Gaussian): ", svm_gaussian.intercept_)
+
+
+def svm_sklearn_sgd_liblinear(X_train, y_train, X_test, y_test):
+    sgd_svm = SGDClassifier(loss='hinge', max_iter=1000, tol=1e-3, random_state=42)
+    start_time_sgd = time.time()
+    sgd_svm.fit(X_train, y_train.ravel())
+    end_time_sgd = time.time()
+    sgd_training_time = end_time_sgd - start_time_sgd
+    y_pred_sgd = sgd_svm.predict(X_test)
+    sgd_accuracy = accuracy_score(y_test, y_pred_sgd)
+
+    liblinear_svm = LinearSVC(C=1.0, max_iter=1000, random_state=42)
+    start_time_liblinear = time.time()
+    liblinear_svm.fit(X_train, y_train.ravel())
+    end_time_liblinear = time.time()
+    liblinear_training_time = end_time_liblinear - start_time_liblinear
+    y_pred_liblinear = liblinear_svm.predict(X_test)
+    liblinear_accuracy = accuracy_score(y_test, y_pred_liblinear)
+
+    print(f"SGD SVM Training Time: {sgd_training_time:.4f} seconds")
+    print(f"SGD SVM Accuracy: {sgd_accuracy * 100:.2f}%")
+
+    print(f"LIBLINEAR SVM Training Time: {liblinear_training_time:.4f} seconds")
+    print(f"LIBLINEAR SVM Accuracy: {liblinear_accuracy * 100:.2f}%")
+
+
+def load_all_data(path , class_indexes):
+    images = []
+    labels = []
+    
+    for class_index, class_folder in enumerate(os.listdir(path)):
+        class_folder_path = os.path.join(path, class_folder)
+        print(class_folder_path, " - ", class_indexes[class_folder])
+        if os.path.isdir(class_folder_path):
+            for filename in os.listdir(class_folder_path):
+                if filename.endswith(".jpg") or filename.endswith(".png"):
+                    image_path = os.path.join(class_folder_path, filename)
+                    image = np.array(Image.open(image_path))
+
+                    preprocessed_vector = preprocessing(image , (100, 100))
+                    if preprocessed_vector.shape != (30000,):
+                        print(f"Image {filename} has shape {preprocessed_vector.shape}")
+                        continue
+
+                    images.append(preprocessed_vector)
+                    labels.append(class_indexes[class_folder])
+
+    return np.array(images) , np.array(labels)
+
+
+
+def predict_one_vs_one(X_test , classifiers, class_pairs):
+    predictions = []
+    total = X_test.shape[0]
+    idx = 0
+
+    for x in X_test:
+        # print("One Example Shape - " , x.shape)
+        xt = x.astype('float').reshape(1 ,-1)
+        votes = {class_: 0 for class_ in range(11)}
+        # print(xt.shape)
+
+        for class1, class2 in class_pairs:
+            clf = classifiers[(class1, class2)]
+
+            pred = clf.predict(xt)
+
+            if pred[0] == -1.0:
+                # print("Pred Negati- ",pred)
+                votes[class1] += 1
+            else:
+                # print("Pred Positive- ",pred)
+                votes[class2] += 1
+
+        
+        print(votes)
+        max_votes = max(votes.values())
+        tied_classes = [class_ for class_, vote in votes.items() if vote == max_votes]
+
+        if len(tied_classes) &gt; 1:
+            # print("Tied Classes - ",tied_classes)
+            prediction = max(tied_classes)
+        else:
+            prediction = tied_classes[0]
+
+        predictions.append(prediction)
+        print(idx ," done ", total - idx - 1 , " remaining ")
+        idx += 1
+
+    return np.array(predictions)
+
+def find_misclassfied(Xm_test , y_pred , ym_test):
+    misclassified_indices = np.where(y_pred != ym_test)[0]
+
+    selected_indices = misclassified_indices[:10]
+    Xm_misclassified = Xm_test[selected_indices]
+    y_pred_misclassified = y_pred[selected_indices]
+    ym_test_misclassified = ym_test[selected_indices]
+
+    Xm_misclassified_resized = np.array([resize(x.reshape(100, 100, 3), (100, 100, 3)) for x in Xm_misclassified])
+
+    fig, axes = plt.subplots(1, 10, figsize=(20, 5))
+    for i, ax in enumerate(axes):
+        ax.imshow(Xm_misclassified_resized[i])
+        ax.set_title(f"True: {ym_test_misclassified[i]}\nPred: {y_pred_misclassified[i]}")
+        ax.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+
+def main():
+    # Frost / Glaze
+    frost_dir_train = "../data/Q2/train/frost"
+    glaze_dir_train = "../data/Q2/train/glaze"
+    frost_dir_test = "../data/Q2/test/frost"
+    glaze_dir_test = "../data/Q2/test/glaze"
+
+    frost_images_train = load_and_preprocess_images(frost_dir_train)
+    glaze_images_train = load_and_preprocess_images(glaze_dir_train)
+    frost_images_test = load_and_preprocess_images(frost_dir_test)
+    glaze_images_test = load_and_preprocess_images(glaze_dir_test)
+
+    # print(frost_images_train.shape)
+    # print(glaze_images_train.shape)
+    # print(frost_images_train[0].shape)
+    # print(glaze_images_train[0].shape)
+
+    
+    X_train = np.array(np.concatenate((frost_images_train, glaze_images_train), axis=0))
+    y_train = np.array([-1] * len(frost_images_train) + [1] * len(glaze_images_train))
+    print("X_train Shape - ", X_train.shape)
+    print("y_train - ", y_train.shape)
+
+    X_test = np.array(np.concatenate((frost_images_test, glaze_images_test), axis=0))
+    y_test = np.array([-1] * len(frost_images_test) + [1] * len(glaze_images_test))
+    print("X_test shape",X_test.shape)
+    print("y_test - ", y_test.shape)
+
+    # Question - 1
+    svm_linear = SupportVectorMachine()
+    start_time = time.time()
+    svm_linear.fit(X_train, y_train)
+    end_time = time.time()
+    training_time = end_time - start_time
+    print("Training Time cvxopt (Linear) - " ,training_time)
+
+    print("Train Accuracy - ",svm_linear.accuracy(X_train, y_train))
+    print("Test Accuracy - ",svm_linear.accuracy(X_test, y_test))
+
+    svm_linear.plot_support_vectors(X_train)
+    svm_linear.plot_w()
+
+    # Question - 2
+
+    svm_gaussian = SupportVectorMachine()
+    st = time.time()
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match223-1.html#5" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    svm_gaussian.fit(X_train, y_train, kernel='gaussian', C = 1.0 , gamma=0.001)
+    et = time.time()
+    training_time_gaussian = et - st
+</FONT>    print("Training Time cvxopt (Gaussian) - " ,training_time_gaussian)
+    gaussian_predict = svm_gaussian.predict(X_test)
+    gaussian_predict_train = svm_gaussian.predict(X_train)
+    # print(gaussian_predict)
+    print("Train Accuracy (Gaussian)- ", np.mean(gaussian_predict_train == y_train))
+    print("Test Accuracy (Gaussian)- ", np.mean(gaussian_predict == y_test))
+
+    svm_gaussian.plot_support_vectors(X_train)
+
+    # Question - 3
+    svm_sklearn(X_train, y_train, X_test, y_test)
+
+    # Question - 4
+    svm_sklearn_sgd_liblinear(X_train, y_train, X_test, y_test)
+
+    # # Question - 5 (Multi-Class Image Classification)
+
+    # class_indexes = {class_folder: class_index for class_index, class_folder in enumerate(os.listdir("../data/Q2/train"))}
+    # print(class_indexes)
+
+    # Xm_train , ym_train = load_all_data("../data/Q2/train" , class_indexes)
+    # Xm_test , ym_test = load_all_data("../data/Q2/test" , class_indexes)
+    # print(Xm_train.shape)
+    # print(Xm_train[0].shape)
+    # # print(np.unique(ym_train))
+    # print(ym_train.shape)
+
+    # class_pairs = list(combinations(range(11), 2))
+    # # print(class_pairs)
+
+    # for i in range(11):
+    #     print(f"Class {i} - {np.sum(ym_train == i)}")
+
+    # classifiers = {}
+    # for class1, class2 in class_pairs:
+    #     indices = np.where((ym_train == class1) | (ym_train == class2))
+    #     # print(indices)
+    #     idx1 = np.where(ym_train == class1)
+    #     idx2 = np.where(ym_train == class2)
+    #     X_pair = Xm_train[indices[0]]
+    #     print("X_pair - ",X_pair.shape)
+    #     y_pair = np.array([-1] * len(idx1[0]) + [1] * len(idx2[0]))
+    #     print("Class1 - ",class1)
+    #     print("Class2 - ",class2)
+    #     print("Number of training Examples - ", len(X_pair))
+
+    #     clf = SupportVectorMachine()
+    #     clf.fit(X_pair, y_pair ,kernel='gaussian', C=1.0, gamma=0.001)
+
+    #     classifiers[(class1, class2)] = clf
+
+    # print(f"Number of Classifiers: {len(classifiers)}")
+
+    # # np.random.seed(42)
+    # # indices = np.random.choice(Xm_test.shape[0], size=30, replace=False)
+    # # Xm_test = Xm_test[indices]
+    # # ym_test = ym_test[indices]
+
+    # y_pred = predict_one_vs_one(Xm_test, classifiers, class_pairs)
+    # find_misclassfied(Xm_test , y_pred , ym_test)
+
+    # accuracy = accuracy_score(ym_test, y_pred)
+    # print(f"Test Accuracy: {accuracy * 100:.2f}%")
+
+    # print("Confusion Matrix - ", confusion_matrix(ym_test, y_pred))
+
+    # # Question - 6 , 7
+    # st_time = time.time()
+    # svm_gaussian = svm.SVC(kernel='rbf', C=1.0, gamma=0.001, decision_function_shape='ovr')
+    # svm_gaussian.fit(Xm_train, ym_train)
+    # end_time = time.time()
+
+    # d_time = end_time - st_time
+    # print("Training Time libsvm Multiclass (gaussian) - " ,d_time)
+
+    # y_pred = svm_gaussian.predict(Xm_test)
+
+    # accuracy = accuracy_score(ym_test, y_pred)
+
+    # print("Test Set Accuracy: ",accuracy)
+    # print("Confusion Matrix - ", confusion_matrix(ym_test, y_pred))
+
+    # # Question - 8
+    
+    # C_values = [1e-5, 1e-3, 1, 5, 10]
+
+    # cv_accuracies = []
+    # test_accuracies = []
+
+    # for C in C_values:
+    #     svm_gaussian = svm.SVC(kernel='rbf', C=C, gamma=0.001)
+        
+    #     scores = cross_val_score(svm_gaussian, Xm_train, ym_train, cv=5)
+    #     cv_accuracy = scores.mean()
+    #     cv_accuracies.append(cv_accuracy)
+        
+    #     svm_gaussian.fit(Xm_train, ym_train)
+    #     y_pred = svm_gaussian.predict(Xm_test)
+    #     test_accuracy = np.mean(y_pred == ym_test)
+    #     test_accuracies.append(test_accuracy)
+
+    # print("Cross-Validation Accuracies:", cv_accuracies)
+    # print("Test Accuracies:", test_accuracies)
+
+    # plt.figure(figsize=(10, 6))
+    # bar_width = 0.35
+
+    # x = np.arange(len(C_values))
+    # plt.bar(x - bar_width/2, cv_accuracies, bar_width, label='Cross-Validation Accuracy')
+    # plt.bar(x + bar_width/2, test_accuracies, bar_width, label='Test Accuracy')
+
+    # plt.xticks(x, [f'{C:.1e}' for C in C_values], rotation=45)
+    # plt.xlabel('C Value')
+    # plt.ylabel('Accuracy')
+    # plt.title('Accuracy vs. C Value')
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.show()
+
+    # max_index = test_accuracies.index(max(test_accuracies))
+    # c_optimal = C[max_index]
+
+    # svm_optimal = svm.SVC(kernel='rbf', C=c_optimal, gamma=0.001)
+    # svm_optimal.fit(Xm_train, ym_train)
+
+    # y_pred = svm_optimal.predict(Xm_test)
+    # accuracy = accuracy_score(ym_test, y_pred)
+    # print("Test Set Accuracy: ",accuracy)
+    # cm = confusion_matrix(ym_test, y_pred)
+    # disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[0,1, 2, 3, 4, 5,6,7,8,9,10])
+    # disp.plot(cmap="Blues", values_format="d")
+    # plt.title("Confusion Matrix")
+    # plt.show()
+
+
+
+if __name__ == "__main__":
+    main()
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
