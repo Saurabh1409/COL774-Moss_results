@@ -1,0 +1,1928 @@
+<HTML>
+<HEAD>
+<TITLE>./A2_processed_new_hash_2/combined_SGPW2.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A2_processed_new_hash_2/combined_XA187.py<p><PRE>
+
+
+import numpy as np
+from collections import defaultdict
+
+class NaiveBayes:
+    def __init__(self):
+        self.class_priors = {} 
+        self.word_likelihoods = defaultdict(lambda: defaultdict(float)) 
+        self.vocab = set()
+        self.class_counts = defaultdict(int)
+        self.total_words_per_class = defaultdict(int)
+    
+    def preprocess_text(self, text):
+        text = text.replace('.', ' ').replace(',', ' ')
+
+        words = text.split()
+        words = [word.lower() for word in words]
+        return words
+    
+    def fit(self, df, smoothening=1.0, class_col="Class Index", text_col="Description"):
+
+        total_samples = len(df)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            self.class_counts[label] += 1
+            words = self.preprocess_text(row[text_col])
+            self.total_words_per_class[label] += len(words)
+            
+            for word in words:
+                self.vocab.add(word)
+                self.word_likelihoods[label][word] += 1
+        
+        self.class_priors = {label: np.log(count / total_samples) for label, count in self.class_counts.items()}
+
+        vocab_size = len(self.vocab)
+        for label in self.class_counts:
+            total_words = self.total_words_per_class[label]
+            for word in self.vocab:
+                count = self.word_likelihoods[label][word] + smoothening
+                self.word_likelihoods[label][word] = np.log(count / (total_words + smoothening * vocab_size))
+    
+    def predict(self, df, text_col="Description"):
+
+        predictions = []
+        for _, row in df.iterrows():
+            words = self.preprocess_text(row[text_col])
+            class_scores = {}
+            
+            for label in self.class_priors:
+                log_prob = self.class_priors[label]
+                for word in words:
+                    if word in self.word_likelihoods[label]:
+                        log_prob += self.word_likelihoods[label][word]
+                class_scores[label] = log_prob
+            
+            predicted_label = max(class_scores, key=class_scores.get)
+            predictions.append(predicted_label)
+        
+        return predictions
+    
+
+
+
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+from utils import load_data
+
+df_train, df_test = load_data()
+
+
+class NaiveBayes:
+    def __init__(self):
+        self.class_priors = {}  # P(y)
+        self.word_likelihoods = defaultdict(lambda: defaultdict(float))  # P(w|y)
+        self.vocab = set()
+        self.class_counts = defaultdict(int)
+        self.total_words_per_class = defaultdict(int)
+    
+    def preprocess_text(self, text):
+        text = text.replace('.', ' ').replace(',', ' ')
+
+        words = text.split()
+        words = [word.lower() for word in words]
+        return words
+    
+    def fit(self, df, smoothening=1.0, class_col="Class Index", text_col="Description"):
+
+        total_samples = len(df)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            self.class_counts[label] += 1
+            words = self.preprocess_text(row[text_col])
+            self.total_words_per_class[label] += len(words)
+            
+            for word in words:
+                self.vocab.add(word)
+                self.word_likelihoods[label][word] += 1
+        
+        self.class_priors = {label: np.log(count / total_samples) for label, count in self.class_counts.items()}
+
+        vocab_size = len(self.vocab)
+        for label in self.class_counts:
+            total_words = self.total_words_per_class[label]
+            for word in self.vocab:
+                count = self.word_likelihoods[label][word] + smoothening
+                self.word_likelihoods[label][word] = np.log(count / (total_words + smoothening * vocab_size))
+    
+    def predict(self, df, text_col="Description"):
+
+        predictions = []
+        for _, row in df.iterrows():
+            words = self.preprocess_text(row[text_col])
+            class_scores = {}
+            
+            for label in self.class_priors:
+                log_prob = self.class_priors[label]
+                for word in words:
+                    if word in self.word_likelihoods[label]:
+                        log_prob += self.word_likelihoods[label][word]
+                class_scores[label] = log_prob
+            
+            predicted_label = max(class_scores, key=class_scores.get)
+            predictions.append(predicted_label)
+        
+        return predictions
+    
+    def generate_word_cloud(self, df, class_col="Class Index", text_col="Description"):
+        class_texts = defaultdict(str)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            class_texts[label] += " " + " ".join(self.preprocess_text(row[text_col]))
+        
+        for label, text in class_texts.items():
+            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
+            plt.figure(figsize=(10, 5))
+            plt.imshow(wordcloud, interpolation='bilinear')
+            plt.axis("off")
+            plt.title(f"Word Cloud for Class {label}")
+            plt.show()
+
+nb = NaiveBayes()
+nb.fit(df_train)
+
+is_train = True
+if is_train:
+    predictions = nb.predict(df_train)
+    actual = df_train["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Train Accuracy: {100*accuracy:.2f} %")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part1_train.csv")
+else:
+    predictions = nb.predict(df_test)
+    actual = df_test["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Test Accuracy: {100*accuracy:.2f} %")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part1_test.csv")
+
+generate_word_cloud = True
+if generate_word_cloud : 
+    nb.generate_word_cloud(df_train)
+predictions = nb.predict(df_train)
+
+
+
+
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+from utils import load_data
+
+df_train, df_test = load_data()
+
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+import nltk
+nltk.download('stopwords')
+
+class NaiveBayes:
+    def __init__(self):
+        self.class_priors = {}  # P(y)
+        self.word_likelihoods = defaultdict(lambda: defaultdict(float))  # P(w|y)
+        self.vocab = set()
+        self.class_counts = defaultdict(int)
+        self.total_words_per_class = defaultdict(int)
+        self.stop_words = set(stopwords.words('english'))
+        self.stemmer = PorterStemmer()
+    
+    def preprocess_text(self, text):
+        text = text.replace('.', ' ').replace(',', ' ')
+        words = text.split()
+        words = [word.lower() for word in words]
+        words = [self.stemmer.stem(word) for word in words if word.lower() not in self.stop_words]
+        return words
+    
+    def fit(self, df, smoothening=1.0, class_col="Class Index", text_col="Description"):
+
+        # Count class occurrences
+        total_samples = len(df)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            self.class_counts[label] += 1
+            words = self.preprocess_text(row[text_col])
+
+            self.total_words_per_class[label] += len(words)
+            
+            for word in words:
+                self.vocab.add(word)
+                self.word_likelihoods[label][word] += 1
+        
+        # Compute log class priors
+        self.class_priors = {label: np.log(count / total_samples) for label, count in self.class_counts.items()}
+        
+        # Compute log likelihoods with Laplace smoothing
+        vocab_size = len(self.vocab)
+        for label in self.class_counts:
+            total_words = self.total_words_per_class[label]
+            for word in self.vocab:
+                count = self.word_likelihoods[label][word] + smoothening
+                self.word_likelihoods[label][word] = np.log(count / (total_words + smoothening * vocab_size))
+    
+    def predict(self, df, text_col="Description"):
+
+        predictions = []
+        for _, row in df.iterrows():
+            words = self.preprocess_text(row[text_col])
+            
+            class_scores = {}
+            
+            for label in self.class_priors:
+                log_prob = self.class_priors[label]
+                for word in words:
+                    if word in self.word_likelihoods[label]:
+                        log_prob += self.word_likelihoods[label][word]
+                class_scores[label] = log_prob
+            
+            predicted_label = max(class_scores, key=class_scores.get)
+            predictions.append(predicted_label)
+        
+        return predictions
+    
+    def generate_word_cloud(self, df, class_col="Class Index", text_col="Description"):
+        class_texts = defaultdict(str)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            class_texts[label] += " " + " ".join(self.preprocess_text(row[text_col]))
+        
+        for label, text in class_texts.items():
+            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
+            plt.figure(figsize=(10, 5))
+            plt.imshow(wordcloud, interpolation='bilinear')
+            plt.axis("off")
+            plt.title(f"Word Cloud for Class {label}")
+            plt.show()
+
+nb = NaiveBayes()
+nb.fit(df_train)
+is_train = True
+if is_train:
+    predictions = nb.predict(df_train)
+    actual = df_train["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Train Accuracy: {100*accuracy:.2f} %")
+
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part2_train.csv")
+else:
+    predictions = nb.predict(df_test)
+    actual = df_test["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Test Accuracy: {100*accuracy:.2f} %")
+
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part2_test.csv")
+
+
+generate_word_cloud = False
+if generate_word_cloud : 
+    nb.generate_word_cloud(df_train)
+
+
+
+
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+import nltk
+nltk.download('stopwords')
+
+from utils import load_data
+
+df_train, df_test = load_data()
+class NaiveBayes:
+    def __init__(self):
+        self.class_priors = {}  # P(y)
+        self.word_likelihoods = defaultdict(lambda: defaultdict(float))  # P(w|y)
+        self.vocab = set()
+        self.class_counts = defaultdict(int)
+        self.total_words_per_class = defaultdict(int)
+        self.stop_words = set(stopwords.words('english'))
+        self.stemmer = PorterStemmer()
+    
+    def preprocess_text(self, text):
+        text = text.replace('.', ' ').replace(',', ' ')
+        words = text.split()
+        #also make the words lower case
+        words = [word.lower() for word in words]
+        words = [self.stemmer.stem(word) for word in words if word.lower() not in self.stop_words]
+        bi_words = []
+        for i in range(len(words)-1):
+            bi_words.append(words[i]+" "+words[i+1])
+        words = words + bi_words
+        return words
+    
+    def fit(self, df, smoothening=1.0, class_col="Class Index", text_col="Description"):
+        """
+        Learn the parameters of the Naïve Bayes model from the training data.
+        """
+        # Count class occurrences
+        total_samples = len(df)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            self.class_counts[label] += 1
+            words = self.preprocess_text(row[text_col])
+
+            self.total_words_per_class[label] += len(words)
+            
+            for word in words:
+                self.vocab.add(word)
+                self.word_likelihoods[label][word] += 1
+        
+        # Compute log class priors
+        self.class_priors = {label: np.log(count / total_samples) for label, count in self.class_counts.items()}
+        
+        # Compute log likelihoods with Laplace smoothing
+        vocab_size = len(self.vocab)
+        for label in self.class_counts:
+            total_words = self.total_words_per_class[label]
+            for word in self.vocab:
+                count = self.word_likelihoods[label][word] + smoothening
+                self.word_likelihoods[label][word] = np.log(count / (total_words + smoothening * vocab_size))
+    
+    def predict(self, df, text_col="Description"):
+
+        predictions = []
+        for _, row in df.iterrows():
+            words = self.preprocess_text(row[text_col])
+            
+            class_scores = {}
+            
+            for label in self.class_priors:
+                log_prob = self.class_priors[label]
+                for word in words:
+                    if word in self.word_likelihoods[label]:
+                        log_prob += self.word_likelihoods[label][word]
+                class_scores[label] = log_prob
+            
+            predicted_label = max(class_scores, key=class_scores.get)
+            predictions.append(predicted_label)
+        
+        return predictions
+    
+    def generate_word_cloud(self, df, class_col="Class Index", text_col="Description"):
+        class_texts = defaultdict(str)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            class_texts[label] += " " + " ".join(self.preprocess_text(row[text_col]))
+        
+        for label, text in class_texts.items():
+            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
+            plt.figure(figsize=(10, 5))
+            plt.imshow(wordcloud, interpolation='bilinear')
+            plt.axis("off")
+            plt.title(f"Word Cloud for Class {label}")
+            plt.show()
+
+nb = NaiveBayes()
+nb.fit(df_train)
+is_train = False
+if is_train:
+    predictions = nb.predict(df_train)
+    actual = df_train["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Train Accuracy: {100*accuracy:.2f}")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part3_train.csv")
+else:
+    predictions = nb.predict(df_test)
+    actual = df_test["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Test Accuracy: {100*accuracy:.2f}")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part3_test.csv")
+
+
+
+
+
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
+import numpy as np
+import pandas as pd
+
+def evaluate_model(y_true, y_pred, labels=[1, 2, 3, 4]):
+    metrics = {}
+
+    metrics["accuracy"] = accuracy_score(y_true, y_pred)
+
+    metrics["precision_macro"] = precision_score(y_true, y_pred, labels=labels, average='macro')
+    metrics["recall_macro"] = recall_score(y_true, y_pred, labels=labels, average='macro')
+    metrics["f1_macro"] = f1_score(y_true, y_pred, labels=labels, average='macro')
+
+    metrics["precision_micro"] = precision_score(y_true, y_pred, labels=labels, average='micro')
+    metrics["recall_micro"] = recall_score(y_true, y_pred, labels=labels, average='micro')
+    metrics["f1_micro"] = f1_score(y_true, y_pred, labels=labels, average='micro')
+
+    print("\nEvaluation Metrics for Train:")
+    for key, value in metrics.items():
+        print(f"{key}: {value:.4f}")
+    print("\nClassification Report for Train:\n")
+    print(classification_report(y_true, y_pred, labels=labels))
+
+    return metrics
+
+df = pd.read_csv("output_part5_train.csv")
+pred=  df["Predicted"]
+actual = df["Actual"]
+evaluate_model(actual, pred)
+
+
+
+
+
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+from utils import load_data
+
+df_train, df_test = load_data()
+
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+import nltk
+nltk.download('stopwords')
+
+is_bigram = True
+is_stemming = True
+class NaiveBayes:
+    def __init__(self):
+        self.class_priors = {}  # P(y)
+        self.word_likelihoods = defaultdict(lambda: defaultdict(float))  # P(w|y)
+        self.vocab = set()
+        self.class_counts = defaultdict(int)
+        self.total_words_per_class = defaultdict(int)
+        self.stop_words = set(stopwords.words('english'))
+        self.stemmer = PorterStemmer()
+    
+    def preprocess_text(self, text):
+        text = text.replace('.', ' ').replace(',', ' ')
+
+        words = text.split()
+        #also make the words lower case
+        words = [word.lower() for word in words]
+        if is_stemming:
+            words = [self.stemmer.stem(word) for word in words if word.lower() not in self.stop_words]
+        bi_words = []
+        for i in range(len(words)-1):
+            bi_words.append(words[i]+" "+words[i+1])
+        if is_bigram:
+            words = words + bi_words
+        return words
+    
+    def fit(self, df, smoothening=1.0, class_col="Class Index", text_col="Title"):
+
+        total_samples = len(df)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            self.class_counts[label] += 1
+            words = self.preprocess_text(row[text_col])
+
+            self.total_words_per_class[label] += len(words)
+            
+            for word in words:
+                self.vocab.add(word)
+                self.word_likelihoods[label][word] += 1
+        
+        self.class_priors = {label: np.log(count / total_samples) for label, count in self.class_counts.items()}
+        
+        vocab_size = len(self.vocab)
+        for label in self.class_counts:
+            total_words = self.total_words_per_class[label]
+            for word in self.vocab:
+                count = self.word_likelihoods[label][word] + smoothening
+                self.word_likelihoods[label][word] = np.log(count / (total_words + smoothening * vocab_size))
+    
+    def predict(self, df, text_col="Title"):
+
+        predictions = []
+        for _, row in df.iterrows():
+            words = self.preprocess_text(row[text_col])
+            
+            class_scores = {}
+            
+            for label in self.class_priors:
+                log_prob = self.class_priors[label]
+                for word in words:
+                    if word in self.word_likelihoods[label]:
+                        log_prob += self.word_likelihoods[label][word]
+                class_scores[label] = log_prob
+            
+            predicted_label = max(class_scores, key=class_scores.get)
+            predictions.append(predicted_label)
+        
+        return predictions
+    
+    def generate_word_cloud(self, df, class_col="Class Index", text_col="Title"):
+
+        class_texts = defaultdict(str)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            class_texts[label] += " " + " ".join(self.preprocess_text(row[text_col]))
+        
+        for label, text in class_texts.items():
+            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
+            plt.figure(figsize=(10, 5))
+            plt.imshow(wordcloud, interpolation='bilinear')
+            plt.axis("off")
+            plt.title(f"Word Cloud for Class {label}")
+            plt.show()
+
+nb = NaiveBayes()
+nb.fit(df_train)
+is_train = False
+if is_train:
+    predictions = nb.predict(df_train)
+    actual = df_train["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    if is_bigram:
+        print("Using bigrams as a feature")
+    else:
+        print("Not using bigrams as a feature")
+    if is_stemming:
+        print("Using stemming as a feature")
+    else:
+        print("Not using stemming as a feature")
+    print(f"Train Accuracy: {100*accuracy:.2f}")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part5_train.csv")
+else:
+    predictions = nb.predict(df_test)
+    actual = df_test["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    if is_bigram:
+        print("Using bigrams as a feature")
+    else:
+        print("Not using bigrams as a feature")
+    if is_stemming:
+        print("Using stemming as a feature")
+    else:
+        print("Not using stemming as a feature")
+    print(f"Test Accuracy: {100*accuracy:.2f}")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part5_test.csv")
+
+
+generate_word_cloud = False
+if generate_word_cloud : 
+    nb.generate_word_cloud(df_train)
+predictions = nb.predict(df_train)
+
+
+
+
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+from utils import load_data
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match43-0.html#5" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+df_train, df_test = load_data()
+df_train["Concatenated"] = df_train["Title"] + " ### " + df_train["Description"]
+df_test["Concatenated"] = df_test["Title"] + " ### " + df_test["Description"]
+</FONT>
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+import nltk
+nltk.download('stopwords')
+
+class NaiveBayes:
+    def __init__(self):
+        self.class_priors = {}  # P(y)
+        self.word_likelihoods = defaultdict(lambda: defaultdict(float))  # P(w|y)
+        self.vocab = set()
+        self.class_counts = defaultdict(int)
+        self.total_words_per_class = defaultdict(int)
+        self.stop_words = set(stopwords.words('english'))
+        self.stemmer = PorterStemmer()
+    
+    def preprocess_text(self, text):
+        words = text.split()
+        #also make the words lower case
+        words = [word.lower() for word in words]
+        words = [self.stemmer.stem(word) for word in words if word.lower() not in self.stop_words]
+        bi_words = []
+        for i in range(len(words)-1):
+            if (words[i]=="###"):
+                continue
+            bi_words.append(words[i]+" "+words[i+1])
+        words = words + bi_words
+        return words
+    
+    def fit(self, df, smoothening=1.0, class_col="Class Index", text_col="Concatenated"):
+        total_samples = len(df)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            self.class_counts[label] += 1
+            words = self.preprocess_text(row[text_col] )
+
+            self.total_words_per_class[label] += len(words)
+            
+            for word in words:
+                self.vocab.add(word)
+                self.word_likelihoods[label][word] += 1
+        
+        self.class_priors = {label: np.log(count / total_samples) for label, count in self.class_counts.items()}
+        
+        vocab_size = len(self.vocab)
+        for label in self.class_counts:
+            total_words = self.total_words_per_class[label]
+            for word in self.vocab:
+                count = self.word_likelihoods[label][word] + smoothening
+                self.word_likelihoods[label][word] = np.log(count / (total_words + smoothening * vocab_size))
+    
+    def predict(self, df, text_col="Concatenated"):
+
+        predictions = []
+        for _, row in df.iterrows():
+            words = self.preprocess_text(row[text_col])
+            
+            class_scores = {}
+            
+            for label in self.class_priors:
+                log_prob = self.class_priors[label]
+                for word in words:
+                    if word in self.word_likelihoods[label]:
+                        log_prob += self.word_likelihoods[label][word]
+                class_scores[label] = log_prob
+            
+            predicted_label = max(class_scores, key=class_scores.get)
+            predictions.append(predicted_label)
+        
+        return predictions
+    
+    def generate_word_cloud(self, df, class_col="Class Index", text_col="Concatenated"):
+
+        class_texts = defaultdict(str)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            class_texts[label] += " " + " ".join(self.preprocess_text(row[text_col]))
+        
+        for label, text in class_texts.items():
+            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
+            plt.figure(figsize=(10, 5))
+            plt.imshow(wordcloud, interpolation='bilinear')
+            plt.axis("off")
+            plt.title(f"Word Cloud for Class {label}")
+            plt.show()
+
+nb = NaiveBayes()
+nb.fit(df_train)
+is_train = False
+if is_train:
+    predictions = nb.predict(df_train)
+    actual = df_train["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Train Accuracy: {100*accuracy:.2f}")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part6a_train.csv")
+else:
+    predictions = nb.predict(df_test)
+    actual = df_test["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Test Accuracy: {100*accuracy:.2f}")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part6a_test.csv")
+
+
+generate_word_cloud = False
+if generate_word_cloud : 
+    nb.generate_word_cloud(df_train)
+predictions = nb.predict(df_train)
+
+
+
+
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+import nltk
+nltk.download('stopwords')
+
+
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import math
+from utils import load_data
+
+df_train, df_test = load_data()
+
+class NaiveBayesTwoFeatures:
+    def __init__(self, alpha=1.0):
+        self.alpha = alpha  
+        self.class_priors = {}  # P(y)
+        self.word_likelihoods_title = defaultdict(lambda: defaultdict(float)) 
+        self.word_likelihoods_desc = defaultdict(lambda: defaultdict(float))   
+        self.class_counts = defaultdict(int)  
+        self.total_words_title = defaultdict(int)  
+        self.total_words_desc = defaultdict(int)  
+        self.vocab_title = set()  
+        self.vocab_desc = set()   
+        self.stop_words = set(stopwords.words('english'))
+        self.stemmer = PorterStemmer()
+
+    def preprocess_text(self, text):
+        words = text.split()
+        words = [word.lower() for word in words]
+        words = [self.stemmer.stem(word) for word in words if word.lower() not in self.stop_words]
+        bi_words = []
+        for i in range(len(words)-1):
+            bi_words.append(words[i]+" "+words[i+1])
+        words = words + bi_words
+        return words
+    
+    def fit(self, df, class_col="Class Index", title_col="Title", desc_col="Description"):
+        total_samples = len(df)
+        
+        for _, row in df.iterrows():
+            label = row[class_col]
+            self.class_counts[label] += 1
+            
+            words_title = self.preprocess_text(row[title_col])
+            self.vocab_title.update(words_title)
+            self.total_words_title[label] += len(words_title)
+            for word in words_title:
+                self.word_likelihoods_title[label][word] += 1
+            
+            words_desc = self.preprocess_text(row[desc_col])
+            self.vocab_desc.update(words_desc)
+            self.total_words_desc[label] += len(words_desc)
+            for word in words_desc:
+                self.word_likelihoods_desc[label][word] += 1
+        
+        self.class_priors = {y: count / total_samples for y, count in self.class_counts.items()}
+    
+    def predict_row(self, title, desc):
+        words_title = self.preprocess_text(title)
+        words_desc = self.preprocess_text(desc)
+        
+        best_class = None
+        max_prob = -float("inf")
+        
+        for y in self.class_priors:
+            log_prob = math.log(self.class_priors[y])
+            
+            for word in words_title:
+                count = self.word_likelihoods_title[y][word]
+                prob = (count + self.alpha) / (self.total_words_title[y] + self.alpha * len(self.vocab_title))
+                log_prob += math.log(prob)
+            
+            for word in words_desc:
+                count = self.word_likelihoods_desc[y][word]
+                prob = (count + self.alpha) / (self.total_words_desc[y] + self.alpha * len(self.vocab_desc))
+                log_prob += math.log(prob)
+            
+            if log_prob &gt; max_prob:
+                max_prob = log_prob
+                best_class = y
+        
+        return best_class
+
+    def predict(self, df):
+        return [self.predict_row(row["Title"], row["Description"]) for _, row in df.iterrows()]
+
+nb = NaiveBayesTwoFeatures()
+nb.fit(df_train)
+is_train = False
+if is_train:
+    predictions = nb.predict(df_train)
+    actual = df_train["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Train Accuracy: {100*accuracy:.2f}")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part6b_train.csv")
+else:
+    predictions = nb.predict(df_test)
+    actual = df_test["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Test Accuracy: {100*accuracy:.2f}")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part6b_test.csv")
+
+
+generate_word_cloud = False
+if generate_word_cloud : 
+    nb.generate_word_cloud(df_train)
+predictions = nb.predict(df_train)
+
+
+
+
+import numpy as np
+from sklearn.metrics import accuracy_score
+import pandas as pd
+from utils import load_data
+
+df_train, df_test = load_data()
+
+def random_baseline_accuracy(y_true):
+    num_classes = len(np.unique(y_true))  
+    y_pred_random = np.random.choice(num_classes, size=len(y_true))  
+
+    accuracy = np.mean((y_pred_random+1) == y_true)
+    return accuracy
+
+y_true = df_test["Class Index"].values  
+random_accuracy = random_baseline_accuracy(y_true)
+print(f"Random Prediction Accuracy: {100*random_accuracy:.4f}")
+
+def random_weighted_baseline_accuracy(y_true, y_train):
+    class_probs = np.bincount(y_train) / len(y_train)  
+    y_pred_random_weighted = np.random.choice(len(class_probs), size=len(y_true), p=class_probs)
+    accuracy = np.mean(y_pred_random_weighted == y_true)
+    return accuracy
+
+y_train = df_train["Class Index"].values
+random_weighted_accuracy = random_weighted_baseline_accuracy(y_true, y_train)
+print(f"Random Weighted Accuracy: {100*random_weighted_accuracy:.4f}")
+
+
+from collections import Counter
+
+def most_frequent_baseline_accuracy(y_true, y_train):
+    most_common_class = Counter(y_train).most_common(1)[0][0]  
+    y_pred_most_frequent = np.full_like(y_true, most_common_class)  
+    accuracy = np.mean((y_pred_most_frequent +1)== y_true)
+    return accuracy
+
+most_frequent_accuracy = most_frequent_baseline_accuracy(y_true, y_train)
+print(f"Most Frequent Class Accuracy: {100*most_frequent_accuracy:.4f}")
+
+ddf = pd.read_csv("output_part6a_test.csv")
+y_pred = ddf["Predicted"]
+naive_bayes_accuracy = accuracy_score(y_true, y_pred)  
+
+
+improvement_random = naive_bayes_accuracy - random_accuracy
+improvement_most_frequent = naive_bayes_accuracy - most_frequent_accuracy
+
+print(f"Accuracy of Naïve Bayes Model: {100*naive_bayes_accuracy:.4f}")
+print(f"Improvement over Random Guessing: {100*improvement_random:.4f}")
+print(f"Improvement over Most Frequent Class: {100*improvement_most_frequent:.4f}")
+
+
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+
+df = pd.read_csv("output_part6a_test.csv")
+
+def plot_confusion_matrix(y_true, y_pred, class_labels):
+    cm = confusion_matrix(y_true, y_pred)
+
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=class_labels, yticklabels=class_labels)
+    plt.xlabel("Predicted Label")
+    plt.ylabel("True Label")
+    plt.title("Confusion Matrix")
+    plt.show()
+
+
+
+def plot_confusion_matrix_proportion(y_true, y_pred, class_labels):
+    cm = confusion_matrix(y_true, y_pred)
+    cm_proportion = cm.astype(np.float64) / cm.sum(axis=1, keepdims=True)  # Normalize row-wise
+
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm_proportion, annot=True, fmt=".2f", cmap="Blues", xticklabels=class_labels, yticklabels=class_labels)
+    plt.xlabel("Predicted Label")
+    plt.ylabel("True Label")
+    plt.title("Confusion Matrix (Proportions)")
+    plt.show()
+
+
+y_true = df["Actual"]
+y_pred = df["Predicted"]
+class_labels = ["World", "Sports", "Business", "Science/Tech"]
+plot_confusion_matrix(y_true, y_pred, class_labels)
+plot_confusion_matrix_proportion(y_true,y_pred,class_labels)
+
+
+def find_best_class(cm, class_labels):
+    diagonal_values = np.diag(cm)  # Extract diagonal elements
+    best_class_idx = np.argmax(diagonal_values)  # Find index of highest value
+    best_class = class_labels[best_class_idx]
+
+    print(f"Best-classified category: {best_class} (Correct Predictions: {diagonal_values[best_class_idx]})")
+    return best_class
+
+# Compute confusion matrix
+cm = confusion_matrix(y_true, y_pred)
+best_class = find_best_class(cm, class_labels)
+
+
+
+
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+
+
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from utils import load_data
+
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+import nltk
+nltk.download('stopwords')
+
+df_train, df_test = load_data()
+df_train["Concatenated"] = df_train["Title"]  + df_train["Description"]
+df_test["Concatenated"] = df_test["Title"] +  df_test["Description"]
+
+class NaiveBayes:
+    def __init__(self):
+        self.class_priors = {}  # P(y)
+        self.word_likelihoods = defaultdict(lambda: defaultdict(float))  # P(w|y)
+        self.vocab = set()
+        self.class_counts = defaultdict(int)
+        self.total_words_per_class = defaultdict(int)
+        self.stop_words = set(stopwords.words('english'))
+        self.stemmer = PorterStemmer()
+    
+    def preprocess_text(self, text):
+        words = text.split()
+        #also make the words lower case
+        # find the number of letters capitalized 
+        capitalized = 0
+        for word in words:
+            if word[0].lower() != word[0]:
+                capitalized += 1
+        xx = str(int(10*capitalized/len(words)))
+        words = [word.lower() for word in words]
+        words = [self.stemmer.stem(word) for word in words if word.lower() not in self.stop_words]
+        bi_words = []
+        for i in range(len(words)-1):
+            bi_words.append(words[i]+" "+words[i+1])
+        is_x = False 
+        for i in range(len(words)-1):
+            if (words[i+1]==words[i]):
+                is_x = True
+        tri_words = []
+        for i in range(len(words)-2):
+            tri_words.append(words[i]+" "+words[i+1]+" "+words[i+2])
+        if (is_x):
+            words.append("x")
+        for i in range(len(words)//20):
+            words.append(xx)
+        words = words + bi_words + tri_words
+        return words
+    
+    def fit(self, df, smoothening=1.0, class_col="Class Index", text_col="Concatenated"):
+        # Count class occurrences
+        total_samples = len(df)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            self.class_counts[label] += 1
+            words = self.preprocess_text(row[text_col])
+
+            self.total_words_per_class[label] += len(words)
+            
+            for word in words:
+                self.vocab.add(word)
+                self.word_likelihoods[label][word] += 1
+        
+        self.class_priors = {label: np.log(count / total_samples) for label, count in self.class_counts.items()}
+        
+        vocab_size = len(self.vocab)
+        for label in self.class_counts:
+            total_words = self.total_words_per_class[label]
+            for word in self.vocab:
+                count = self.word_likelihoods[label][word] + smoothening
+                self.word_likelihoods[label][word] = np.log(count / (total_words + smoothening * vocab_size))
+    
+    def predict(self, df, text_col="Concatenated"):
+
+        predictions = []
+        for _, row in df.iterrows():
+            words = self.preprocess_text(row[text_col])
+            
+            class_scores = {}
+            
+            for label in self.class_priors:
+                log_prob = self.class_priors[label]
+                for word in words:
+                    if word in self.word_likelihoods[label]:
+                        log_prob += self.word_likelihoods[label][word]
+                class_scores[label] = log_prob
+            
+            predicted_label = max(class_scores, key=class_scores.get)
+            predictions.append(predicted_label)
+        
+        return predictions
+    
+    def generate_word_cloud(self, df, class_col="Class Index", text_col="Concatenated"):
+        class_texts = defaultdict(str)
+        for _, row in df.iterrows():
+            label = row[class_col]
+            class_texts[label] += " " + " ".join(self.preprocess_text(row[text_col]))
+        
+        for label, text in class_texts.items():
+            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
+            plt.figure(figsize=(10, 5))
+            plt.imshow(wordcloud, interpolation='bilinear')
+            plt.axis("off")
+            plt.title(f"Word Cloud for Class {label}")
+            plt.show()
+
+nb = NaiveBayes()
+nb.fit(df_train)
+is_train = True
+if is_train:
+    predictions = nb.predict(df_train)
+    actual = df_train["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Train Accuracy: {100*accuracy:.2f}")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part3_train.csv")
+else:
+    predictions = nb.predict(df_test)
+    actual = df_test["Class Index"]
+    accuracy = np.mean(predictions == actual)
+    print(f"Test Accuracy: {100*accuracy:.2f}")
+    df_new = {
+        "Predicted": predictions,
+        "Actual": actual
+    }
+    df_new = pd.DataFrame(df_new)
+    df_new.to_csv("output_part3_test.csv")
+
+
+
+
+
+
+import pandas as pd
+def load_data():
+    train_df = pd.read_csv("../data/Q1/train.csv")
+    test_df = pd.read_csv("../data/Q1/test.csv")
+    return train_df, test_df
+
+
+
+
+import numpy as np
+
+sv_linear_cvxopt = np.load("support_vectors_linear.npy")  # Linear SVM (CVXOPT)
+sv_gaussian_cvxopt = np.load("support_vectors_gaussian.npy")  # Gaussian SVM (CVXOPT)
+sv_linear_sklearn = np.load("support_vectors_linear_sklearn.npy")  # Linear SVM (Scikit-learn)
+sv_gaussian_sklearn = np.load("support_vectors_gaussian_sklearn.npy")  # Gaussian SVM (Scikit-learn)
+
+sv_linear_cvxopt_set = set(map(tuple, sv_linear_cvxopt))
+sv_gaussian_cvxopt_set = set(map(tuple, sv_gaussian_cvxopt))
+sv_linear_sklearn_set = set(map(tuple, sv_linear_sklearn))
+sv_gaussian_sklearn_set = set(map(tuple, sv_gaussian_sklearn))
+
+common_linear_cvxopt_sklearn = sv_linear_cvxopt_set.intersection(sv_linear_sklearn_set)
+common_gaussian_cvxopt_sklearn = sv_gaussian_cvxopt_set.intersection(sv_gaussian_sklearn_set)
+common_linear_gaussian_cvxopt = sv_linear_cvxopt_set.intersection(sv_gaussian_cvxopt_set)
+common_linear_gaussian_sklearn = sv_linear_sklearn_set.intersection(sv_gaussian_sklearn_set)
+
+common_all = sv_linear_cvxopt_set & sv_gaussian_cvxopt_set & sv_linear_sklearn_set & sv_gaussian_sklearn_set
+
+print(f"Support Vector Counts")
+print(f"Linear SVM (CVXOPT) count: {len(sv_linear_cvxopt_set)}")
+print(f"Gaussian SVM (CVXOPT) count: {len(sv_gaussian_cvxopt_set)}")
+print(f"Linear SVM (Scikit-learn) count: {len(sv_linear_sklearn_set)}")
+print(f"Gaussian SVM (Scikit-learn) count: {len(sv_gaussian_sklearn_set)}\n")
+
+print(f"Common between Linear SVM (CVXOPT) & Linear SVM (Scikit-learn): {len(common_linear_cvxopt_sklearn)}")
+print(f"Common between Gaussian SVM (CVXOPT) & Gaussian SVM (Scikit-learn): {len(common_gaussian_cvxopt_sklearn)}")
+print(f"Common between Linear SVM & Gaussian SVM (CVXOPT): {len(common_linear_gaussian_cvxopt)}")
+print(f"Common between Linear SVM & Gaussian SVM (Scikit-learn): {len(common_linear_gaussian_sklearn)}\n")
+print(f"Common across all 4 models: {len(common_all)}")
+
+
+
+
+import numpy as np
+
+w1 = np.loadtxt("weights_cvxopt_linear.txt")
+w2 = np.loadtxt("weights_and_biases.txt") 
+
+max_diff = np.max(np.abs(w1 - w2)) 
+norm_diff = np.linalg.norm(w1 - w2)  
+mean_diff = np.mean(np.abs(w1 - w2))  
+
+
+relative_max_diff = max_diff / (np.max(np.abs(w1)) + 1e-8)  #
+relative_norm_diff = norm_diff / (np.linalg.norm(w1) + 1e-8)
+
+print("Comparison of Weight Vectors obtained from sklearn vs CVXOPT :")
+print(f"Max Absolute Difference: {max_diff:.6f}")
+print(f"Mean Absolute Difference: {mean_diff:.6f}")
+print(f"Euclidean Norm of Difference: {norm_diff:.6f}")
+print(f"Relative Max Difference: {relative_max_diff:.6f}")
+print(f" Relative Norm Difference: {relative_norm_diff:.6f}")
+
+print("")
+
+
+
+
+
+# I DID NOT RUN THIS CODE ON LOCAL, I RAN IT ON KAGGLE AND USED THE VALUES TO PLOT THE GRAPH (IT WAS TAKING A LOT OF TIME TO RUN ON MY LOCAL MACHINE ~ 1-1.5 HOURS for 1 C VALUE)
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.metrics import accuracy_score
+from utils import load_data_all
+
+X_train, y_train, X_test, y_test, class_mapping = load_data_all()
+C_values = [1e-5, 1e-3, 1, 5, 10]
+gamma = 0.001  # Fixed
+
+
+cv_accuracies = []  
+test_accuracies = []  
+
+kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+for C in C_values:
+    print(f"Training SVM with C={C}")
+
+    svm = SVC(C=C, kernel='rbf', gamma=gamma)
+
+    cv_scores = cross_val_score(svm, X_train, y_train, cv=kf, scoring='accuracy')
+    mean_cv_accuracy = np.mean(cv_scores)
+
+    svm.fit(X_train, y_train)
+    y_pred = svm.predict(X_test)
+    test_accuracy = accuracy_score(y_test, y_pred)
+
+    cv_accuracies.append(mean_cv_accuracy)
+    test_accuracies.append(test_accuracy)
+
+    print(f"Cross-validation Accuracy: {mean_cv_accuracy:.4f}, Test Accuracy: {test_accuracy:.4f}")
+
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match43-0.html#3" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+C_values = np.array(C_values)
+cv_accuracies = np.array(cv_accuracies)
+test_accuracies = np.array(test_accuracies)
+
+plt.figure(figsize=(8, 6))
+plt.plot(C_values, cv_accuracies, marker='o', label='5-Fold CV Accuracy')
+plt.plot(C_values, test_accuracies, marker='s', label='Test Accuracy')
+</FONT>plt.xscale('log')  # Log scale for C values
+plt.xlabel("C (log scale)")
+plt.ylabel("Accuracy")
+plt.legend()
+plt.title("Hyperparameter Tuning for SVM (C vs Accuracy)")
+plt.show()
+
+best_C = C_values[np.argmax(cv_accuracies)]
+print(f"Best C from Cross-validation: {best_C}")
+
+final_svm = SVC(C=best_C, kernel='rbf', gamma=gamma)
+final_svm.fit(X_train, y_train)
+y_final_pred = final_svm.predict(X_test)
+final_test_accuracy = accuracy_score(y_test, y_final_pred)
+
+print(f"Final Model Test Accuracy with C={best_C}: {final_test_accuracy:.4f}")
+
+
+
+
+import os
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+from svm import SupportVectorMachine
+
+import os
+import cv2
+import numpy as np
+import time 
+
+from utils import load_data
+X_train, y_train, X_test, y_test, class_mapping = load_data()
+
+print(f"Training samples: {X_train.shape}, Labels: {y_train.shape}")
+print(f"Test samples: {X_test.shape}, Labels: {y_test.shape}")
+# print(f"Class Mapping: {class_mapping}")
+
+svm = SupportVectorMachine()
+
+strt_time = time.time()
+svm.fit(X_train, y_train, kernel="linear", C=1.0)
+print(f"Training time for linear CVXOPT: {time.time() - strt_time:.2f} seconds")
+
+num_support_vectors = len(svm.alpha)
+total_samples = X_train.shape[0]
+support_vector_percentage = (num_support_vectors / total_samples) * 100
+
+print(f"Number of Support Vectors: {num_support_vectors}")
+print(f"Percentage of Training Samples that are Support Vectors: {support_vector_percentage:.2f}%")
+
+predictions = svm.predict(X_test)
+
+pred_train = svm.predict(X_train)
+
+
+train_accuracy = np.mean(pred_train == y_train)
+print(f"Train set accuracy: {100*train_accuracy:.2f} %")
+
+test_accuracy = np.mean(predictions == y_test)
+print(f"Test set accuracy: {100*test_accuracy:.2f} %")
+
+
+top_5_indices = np.argsort(svm.alpha)[-5:]
+top_5_support_vectors = svm.support_vectors[top_5_indices]
+
+<A NAME="6"></A><FONT color = #00FF00><A HREF="match43-0.html#6" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+for i, sv in enumerate(top_5_support_vectors):
+    sv_reshaped = sv.reshape(100, 100, 3)
+    plt.subplot(1, 5, i+1)
+    plt.imshow(sv_reshaped)
+    plt.axis('off')
+</FONT>
+plt.show()
+
+np.savetxt("weights_cvxopt_linear.txt", svm.w)
+svm.w = svm.w * 255
+w_reshaped = svm.w.reshape(100, 100, 3)
+plt.imshow(w_reshaped)
+print("Biases :",svm.b)
+plt.axis('off')
+plt.show()
+
+np.save("support_vectors_linear.npy", svm.support_vectors)
+
+
+
+
+import os
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+from svm import SupportVectorMachine
+from utils import load_data
+import time 
+
+X_train, y_train, X_test, y_test, class_mapping = load_data()
+
+print(f"Training samples: {X_train.shape}, Labels: {y_train.shape}")
+print(f"Test samples: {X_test.shape}, Labels: {y_test.shape}")
+print(f"Class Mapping: {class_mapping}")
+
+svm = SupportVectorMachine()
+strt_time = time.time()
+svm.fit(X_train, y_train, kernel="gaussian", C=1.0, gamma=0.001)
+print(f"Training Time for gaussian CVXOPT: {time.time() - strt_time:.2f} seconds")
+num_support_vectors = len(svm.support_vectors)
+total_samples = X_train.shape[0]
+support_vector_percentage = (num_support_vectors / total_samples) * 100
+
+print(f"Number of Support Vectors: {num_support_vectors}")
+print(f"Percentage of Training Samples that are Support Vectors: {support_vector_percentage:.2f}%")
+
+predictions = svm.predict(X_test)
+test_accuracy = np.mean(predictions == y_test)
+print(f"Test set accuracy: {100*test_accuracy:.2f}")
+
+top_5_indices = np.argsort(svm.alpha)[-5:] 
+top_5_support_vectors = svm.support_vectors[top_5_indices]
+
+for i, sv in enumerate(top_5_support_vectors):
+    sv_reshaped = sv.reshape(100, 100, 3)
+    plt.subplot(1, 5, i+1)
+    plt.imshow(sv_reshaped)
+    plt.axis('off')
+
+plt.show()
+
+# save support vectors
+np.save("support_vectors_gaussian.npy", svm.support_vectors)
+
+
+
+from sklearn import svm
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+import os
+from utils import load_data
+
+X_train, y_train, X_test, y_test, class_mapping = load_data()
+
+print(f"Training samples: {X_train.shape}, Labels: {y_train.shape}")
+print(f"Test samples: {X_test.shape}, Labels: {y_test.shape}")
+print(f"Class Mapping: {class_mapping}")
+
+clf_linear = svm.SVC(kernel='linear', C=1.0)
+clf_linear.fit(X_train, y_train)
+
+nSV_linear = clf_linear.support_vectors_.shape[0]
+percentage_nSV_linear = (nSV_linear / len(X_train)) * 100
+print(f"Number of Support Vectors (Linear): {nSV_linear}")
+print(f"Percentage of Support Vectors (Linear): {percentage_nSV_linear}%")
+
+clf_gaussian = svm.SVC(kernel='rbf', C=1.0, gamma=0.001)
+clf_gaussian.fit(X_train, y_train)
+
+nSV_gaussian = clf_gaussian.support_vectors_.shape[0]
+percentage_nSV_gaussian = (nSV_gaussian / len(X_train)) * 100
+print(f"Number of Support Vectors (Gaussian): {nSV_gaussian}")
+print(f"Percentage of Support Vectors (Gaussian): {percentage_nSV_gaussian}%")
+
+test_accuracy_linear = clf_linear.score(X_test, y_test)
+test_accuracy_gaussian = clf_gaussian.score(X_test, y_test)
+
+print(f"Test Accuracy (Linear): {test_accuracy_linear}")
+print(f"Test Accuracy (Gaussian): {test_accuracy_gaussian}")
+
+
+import time
+
+start_time = time.time()
+clf_linear.fit(X_train, y_train)
+linear_training_time = time.time() - start_time
+
+
+clf_gaussian.fit(X_train, y_train)
+gaussian_training_time = time.time() - start_time
+
+print(f"Linear Training Time: {linear_training_time} seconds")
+print(f"Gaussian Training Time: {gaussian_training_time} seconds")
+
+
+# print(clf_linear.coef_)
+print("Linear Bias: ",clf_linear.intercept_)
+new = clf_linear.coef_ * 255
+
+# print(clf_linear.coef_.shape)
+xx = clf_linear.coef_.reshape(30000,1)
+np.savetxt('weights_and_biases.txt', xx)
+
+new = new.reshape(100, 100, 3)
+plt.imshow(new)
+plt.axis('off')
+plt.show()
+
+np.save("support_vectors_linear_sklearn.npy", clf_linear.support_vectors_)
+np.save("support_vectors_gaussian_sklearn.npy", clf_gaussian.support_vectors_)
+
+
+
+from sklearn.linear_model import SGDClassifier
+import time
+import numpy as np
+import cv2
+import os
+from utils import load_data
+
+X_train, y_train, X_test, y_test, class_mapping = load_data()
+
+print(f"Training samples: {X_train.shape}, Labels: {y_train.shape}")
+print(f"Test samples: {X_test.shape}, Labels: {y_test.shape}")
+print(f"Class Mapping: {class_mapping}")
+
+sgd_svm = SGDClassifier(loss='hinge', max_iter=1000, tol=1e-3, random_state=42)
+
+start_time = time.time()
+sgd_svm.fit(X_train, y_train)
+training_time_sgd = time.time() - start_time
+
+test_accuracy_sgd = sgd_svm.score(X_test, y_test)
+
+print(f"Training Time (SGD): {training_time_sgd} seconds")
+print(f"Test Accuracy (SGD): {test_accuracy_sgd}")
+
+from sklearn import svm
+
+<A NAME="7"></A><FONT color = #0000FF><A HREF="match43-0.html#7" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+clf_linear = svm.SVC(kernel='linear', C=1.0)
+
+start_time = time.time()
+clf_linear.fit(X_train, y_train)
+training_time_liblinear = time.time() - start_time
+</FONT>
+test_accuracy_liblinear = clf_linear.score(X_test, y_test)
+
+print(f"Training Time (LIBLINEAR): {training_time_liblinear} seconds")
+print(f"Test Accuracy (LIBLINEAR): {test_accuracy_liblinear}")
+
+print(f"SGD vs LIBLINEAR Training Time: {training_time_sgd} vs {training_time_liblinear} seconds")
+print(f"SGD vs LIBLINEAR Test Accuracy: {test_accuracy_sgd} vs {test_accuracy_liblinear}")
+
+
+
+
+import numpy as np
+import itertools
+from collections import Counter
+from svm import SupportVectorMachine
+from utils import load_data_all
+import time 
+import pandas as pd 
+class MultiClassSVM:
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match43-0.html#2" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    def __init__(self, C=1.0, gamma=0.001):
+        self.C = C
+        self.gamma = gamma
+        self.classifiers = {}
+        self.classes = None
+
+    def fit(self, X, y):
+
+        self.classes = np.unique(y)  
+</FONT>        pairs = list(itertools.combinations(self.classes, 2))  
+
+        for (class1, class2) in pairs:
+
+            mask = (y == class1) | (y == class2)
+            X_binary, y_binary = X[mask], y[mask]
+
+            y_binary = np.where(y_binary == class1, 1, -1)
+            svm = SupportVectorMachine()
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match43-0.html#0" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            svm.fit(X_binary, y_binary, kernel='gaussian', C=self.C, gamma=self.gamma)
+            self.classifiers[(class1, class2)] = svm
+
+    def predict(self, X):
+
+        votes = np.zeros((X.shape[0], len(self.classes)))  
+</FONT>
+        for (class1, class2), svm in self.classifiers.items():
+            preds = svm.predict(X)  
+            
+
+            for i, pred in enumerate(preds):
+                if pred == 1:
+                    votes[i, class1] += 1
+                else:
+                    votes[i, class2] += 1
+        return np.argmax(votes, axis=1)
+
+
+X_train, y_train, X_test, y_test, class_mapping = load_data_all()
+multi_svm = MultiClassSVM(C=1.0, gamma=0.001)
+
+
+start_time = time.time()
+multi_svm.fit(X_train, y_train)
+print("Training Time for MultiClass SVM: ", time.time() - start_time)
+
+y_pred = multi_svm.predict(X_test)
+
+accuracy = np.mean(y_pred == y_test)
+print(f"Test Accuracy: {accuracy * 100:.2f}%")
+
+
+
+df = {"Predictions":y_pred, "Actual":y_test}
+df = pd.DataFrame(df)
+df.to_csv("predictions_5.csv", index=False)
+
+
+
+
+import numpy as np
+import time
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score
+
+import numpy as np
+import cv2
+import os 
+ 
+import pandas as pd
+
+from utils import load_data_all
+
+X_train, y_train, X_test, y_test, class_mapping = load_data_all()  
+
+start_time = time.time()
+svm_sklearn = SVC(C=1.0, kernel='rbf', gamma=0.001, decision_function_shape='ovo')
+
+svm_sklearn.fit(X_train, y_train)
+train_time = time.time() - start_time
+y_pred_sklearn = svm_sklearn.predict(X_test)
+
+accuracy_sklearn = accuracy_score(y_test, y_pred_sklearn) * 100
+print(f"Test Accuracy (scikit-learn SVM): {accuracy_sklearn:.2f}%")
+print(f"Training Time (scikit-learn SVM): {train_time:.2f} seconds")
+
+df = {"Predictions":y_pred_sklearn, "Actual":y_test}
+df = pd.DataFrame(df)
+df.to_csv("predictions_6.csv", index=False)
+
+
+
+
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+
+class_labels = {
+    'dew': 0, 'fogsmog': 1, 'frost': 2, 'glaze': 3, 'hail': 4,
+    'lightning': 5, 'rain': 6, 'rainbow': 7, 'rime': 8, 'sandstorm': 9, 'snow': 10
+}
+class_names = list(class_labels.keys())  
+
+def plot_confusion_matrix(y_true, y_pred, title):
+    """Generates and plots the confusion matrix with raw counts (smaller size)."""
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(5, 4))  
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=class_names, 
+                yticklabels=class_names, annot_kws={'size': 8}, linewidths=0.5)
+    plt.xlabel("Predicted Label", fontsize=10)
+    plt.ylabel("True Label", fontsize=10)
+    plt.xticks(fontsize=8, rotation=45)
+    plt.yticks(fontsize=8)
+    plt.title(title, fontsize=12)
+    plt.tight_layout()  
+    plt.show()
+
+def plot_confusion_matrix_proportion(y_true, y_pred, title):
+    """Generates and plots the confusion matrix with proportions (smaller size)."""
+    cm = confusion_matrix(y_true, y_pred)
+    cm_proportion = cm.astype(np.float64) / cm.sum(axis=1, keepdims=True)  # Normalize row-wise
+
+    plt.figure(figsize=(5, 4))  # Reduced figure size
+    sns.heatmap(cm_proportion, annot=True, fmt=".2f", cmap="Blues", xticklabels=class_names, 
+                yticklabels=class_names, annot_kws={'size': 8}, linewidths=0.5)
+    plt.xlabel("Predicted Label", fontsize=10)
+    plt.ylabel("True Label", fontsize=10)
+    plt.xticks(fontsize=8, rotation=45)
+    plt.yticks(fontsize=8)
+    plt.title(title, fontsize=12)
+    plt.tight_layout()  
+    plt.show()
+
+df_5 = pd.read_csv("predictions_5.csv")
+y_pred_cvxopt = df_5["Predictions"].values
+y_test = df_5["Actual"].values
+
+plot_confusion_matrix(y_test, y_pred_cvxopt, "Confusion Matrix - Sklearn SVM")
+plot_confusion_matrix_proportion(y_test, y_pred_cvxopt, "Confusion Matrix Proportion - Sklearn SVM")
+
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from utils import load_data_all
+import pandas as pd
+
+X_train, y_train, X_test, y_test, class_mapping = load_data_all()
+
+df_5 = pd.read_csv("predictions_5.csv")
+y_pred_cvxopt = df_5["Predictions"].values
+
+
+misclassified_indices = np.where(y_pred_cvxopt != y_test)[0]
+
+print(f"Total Misclassified Samples: {len(misclassified_indices)}")
+
+class_labels = {v: k for k, v in class_mapping.items()}
+
+
+plt.figure(figsize=(15, 10))
+
+num_samples = 10 
+random_indices = np.random.choice(misclassified_indices, num_samples, replace=False)
+for i, idx in enumerate(random_indices):  
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match43-0.html#4" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    img = X_test[idx].reshape(100, 100, 3)  
+    
+    plt.subplot(2, 5, i + 1)
+    plt.imshow(img)
+    plt.title(f"True: {class_labels[y_test[idx]]}\nPred: {class_labels[y_pred_cvxopt[idx]]}")
+    plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+</FONT>
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match43-0.html#1" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+C_values = [1e-5, 1e-3, 1, 5, 10]
+cv_accuracy = [16.93, 16.93, 65.10, 66.50, 66.15]
+test_accuracy = [16.85, 16.85, 66.30, 68.34, 68.70]
+
+
+plt.figure(figsize=(10, 5))
+</FONT>plt.plot(C_values, cv_accuracy, marker='o', label="5-Fold CV Accuracy", linestyle='--')
+plt.plot(C_values, test_accuracy, marker='s', label="Test Accuracy", linestyle='-')
+plt.xlabel("C Value")
+plt.ylabel("Accuracy (%)")
+plt.title("SVM Accuracy vs. C Value")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Log Scale Plot
+plt.figure(figsize=(10, 5))
+plt.xscale("log")
+plt.plot(C_values, cv_accuracy, marker='o', label="5-Fold CV Accuracy", linestyle='--')
+plt.plot(C_values, test_accuracy, marker='s', label="Test Accuracy", linestyle='-')
+plt.xlabel("C Value (Log Scale)")
+plt.ylabel("Accuracy (%)")
+plt.title("SVM Accuracy vs. C Value (Log Scale)")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+
+
+import cvxopt
+import numpy as np
+
+class SupportVectorMachine:
+    '''
+    Binary Classifier using Support Vector Machine
+    '''
+    def __init__(self):
+        self.alpha = None
+        self.w = None
+        self.b = None
+        self.support_vectors = None
+        self.support_vector_labels = None
+        self.kernel_type = None
+        self.gamma = None
+
+    def linear_kernel(self, X1, X2):
+        return np.dot(X1, X2.T)
+    
+    def gaussian_kernel(self, X1, X2, gamma):
+        sq_dist = np.sum(X1**2, axis=1).reshape(-1,1) + np.sum(X2**2, axis=1) - 2 * np.dot(X1, X2.T)
+        return np.exp(-gamma * sq_dist)
+
+    def fit(self, X, y, kernel='linear', C=1.0, gamma=0.001):
+        self.kernel_type = kernel
+        self.gamma = gamma
+
+        if kernel == 'linear':
+            K = self.linear_kernel(X, X)
+        elif kernel == 'gaussian':
+            K = self.gaussian_kernel(X, X, gamma)
+        else:
+            raise ValueError("Unsupported kernel type")
+
+        N = X.shape[0]
+        P = cvxopt.matrix(np.outer(y, y) * K)
+        q = cvxopt.matrix(-np.ones(N))
+        G = cvxopt.matrix(np.vstack((-np.eye(N), np.eye(N))))
+        h = cvxopt.matrix(np.hstack((np.zeros(N), np.ones(N) * C)))
+        A = cvxopt.matrix(y.astype(float).reshape(1, -1), tc='d')
+        b = cvxopt.matrix(0.0)
+
+        cvxopt.solvers.options['show_progress'] = False
+        solution = cvxopt.solvers.qp(P, q, G, h, A, b)
+        alpha = np.ravel(solution['x'])
+
+        sv_mask = alpha &gt; 1e-5
+        if np.sum(sv_mask) == 0:
+            raise ValueError("No support vectors found! Try adjusting C.")
+
+        self.alpha = alpha[sv_mask]
+        self.support_vectors = X[sv_mask]
+        self.support_vector_labels = y[sv_mask]
+
+        if kernel == 'linear':
+            self.w = np.sum((self.alpha * self.support_vector_labels)[:, np.newaxis] * self.support_vectors, axis=0)
+        else:
+            self.w = None
+
+        self.b = np.mean(self.support_vector_labels - np.sum((self.alpha * self.support_vector_labels)[:, np.newaxis] * K[sv_mask][:, sv_mask], axis=1))
+
+    def predict(self, X):
+
+        if self.kernel_type == 'linear':
+            y_pred = np.dot(X, self.w) + self.b
+        elif self.kernel_type == 'gaussian':
+            K_test = self.gaussian_kernel(X, self.support_vectors, self.gamma)
+            y_pred = np.sum((self.alpha * self.support_vector_labels).reshape(1, -1) * K_test, axis=1) + self.b
+        else:
+            raise ValueError("Unsupported kernel type")
+
+        return np.sign(y_pred)  # Ensure output is -1 or +1
+
+
+
+
+import os
+import cv2
+import numpy as np
+train_path = "../data/Q2/train"
+test_path = "../data/Q2/test"  
+
+
+def load_images_from_folder_binary(folder_path, d=9, img_size=(100, 100)):
+    X, y = [], []
+    class_mapping = {}
+    
+    # Sort and select classes
+    class_folders = sorted(os.listdir(folder_path))
+    selected_classes = ['sandstorm', 'snow']  
+
+    for label, class_name in enumerate(class_folders):
+        if class_name not in selected_classes:
+            continue
+
+        class_mapping[class_name] = label
+        class_dir = os.path.join(folder_path, class_name)
+
+        if os.path.isdir(class_dir):
+            for img_file in os.listdir(class_dir):
+                img_path = os.path.join(class_dir, img_file)
+                img = cv2.imread(img_path)
+                
+                if img is not None:
+                    img = cv2.resize(img, img_size)
+                    img = img / 255.0  # Normalize to [0,1]
+                    
+                    X.append(img.flatten())
+
+                    y.append(-1 if class_name=='sandstorm' else 1)
+
+    return np.array(X), np.array(y), class_mapping
+
+def load_data():
+    X_train, y_train, class_mapping = load_images_from_folder_binary(train_path)
+    X_test, y_test, _ = load_images_from_folder_binary(test_path)
+    return X_train, y_train, X_test, y_test, class_mapping
+
+
+def load_images_from_folder(folder_path, img_size=(100, 100)):
+    X, y = [], []
+    class_mapping = {}
+    
+    class_folders = sorted(os.listdir(folder_path))
+    # Ignore hidden/system files (e.g., .DS_Store)
+    class_folders = [f for f in class_folders if not f.startswith('.')]
+
+    for label, class_name in enumerate(class_folders):
+        class_mapping[class_name] = label
+        class_dir = os.path.join(folder_path, class_name)
+        
+        if os.path.isdir(class_dir):
+            for img_file in os.listdir(class_dir):
+                img_path = os.path.join(class_dir, img_file)
+                img = cv2.imread(img_path) 
+
+                if img is not None:
+                    img = cv2.resize(img, img_size) 
+                    img = img / 255.0  
+                    X.append(img.flatten())  
+                    y.append(label)
+    
+    return np.array(X), np.array(y), class_mapping
+
+
+def load_data_all():
+    X_train, y_train, class_mapping = load_images_from_folder(train_path)
+    X_test, y_test, _ = load_images_from_folder(test_path)
+    return X_train, y_train, X_test, y_test, class_mapping
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
