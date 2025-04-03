@@ -1,0 +1,3423 @@
+<HTML>
+<HEAD>
+<TITLE>./A2_processed_new_hash_2/combined_2EL0I.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A2_processed_new_hash_2/combined_UHU23.py<p><PRE>
+
+
+#Part 1(Accuracy: 89.00%)
+
+import pandas as pd
+import numpy as np
+from naive_bayes import NaiveBayes
+
+def print_accuracy(pred_df, true_col):
+    """
+    Calculate and print the accuracy given the predictions and true labels.
+    """
+    accuracy = np.mean(pred_df["Predicted"] == pred_df[true_col])
+    print("Accuracy: {:.2f}%".format(accuracy * 100))
+    return accuracy
+
+def main():
+    # Load the training and testing data
+    # Adjust the paths as per your assignment directory structure
+    train_path = "data/Q1/train.csv"
+    test_path = "data/Q1/test.csv"
+    
+    try:
+        train_df = pd.read_csv(train_path)
+        test_df = pd.read_csv(test_path)
+    except FileNotFoundError:
+        print(f"File not found. Please check the paths: {train_path}, {test_path}")
+        return
+    except Exception as e:
+        print("Error loading CSV files:", e)
+        return
+    
+    print("Training data shape:", train_df.shape)
+    print("Testing data shape:", test_df.shape)
+
+    # Instantiate the NaiveBayes classifier
+    nb = NaiveBayes()
+
+    train_df["Tokenized Description"] = nb.tokenize_panda_series(train_df["Description"])
+    test_df["Tokenized Description"] = nb.tokenize_panda_series(test_df["Description"])
+    
+    print("Tokenized !!!")
+
+    # Fit the model on training data
+    nb.fit(train_df, smoothening=1.0, class_col="Class Index", text_col="Tokenized Description")
+    
+    # Predict on the train data
+<A NAME="7"></A><FONT color = #0000FF><A HREF="match16-0.html#7" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    pred_df = nb.predict(train_df.copy(), text_col="Tokenized Description", predicted_col="Predicted")
+    
+    accuracy = np.mean(pred_df["Predicted"] == train_df["Class Index"])
+    print("Train Accuracy: {:.2f}%".format(accuracy * 100))
+</FONT>    #print predictions
+    print(pred_df)
+
+    # Predict on the test data
+    pred_df = nb.predict(test_df.copy(), text_col="Tokenized Description", predicted_col="Predicted")
+    
+    print("Test Accuracy:")
+    print_accuracy(pred_df, "Class Index")
+    #print predictions
+    print(pred_df)
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, classification_report
+from naive_bayes import NaiveBayes
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+
+train_path = "data/Q1/train.csv"
+test_path = "data/Q1/test.csv"
+
+stop_words = set(stopwords.words("english"))
+stemmer = PorterStemmer()
+
+def preprocess(tokens):
+    cleaned_tokens = [stemmer.stem(word) for word in tokens]
+    final_tokens = [word for word in cleaned_tokens if word.lower() not in stop_words]
+    return final_tokens
+
+def generate_bigrams(tokens):
+    bigrams = []
+    for i in range(len(tokens)-1):
+        bigrams.append(tokens[i]+"_"+tokens[i+1])
+    return tokens + bigrams
+
+def main():
+    try:
+        train_df, test_df = pd.read_csv(train_path), pd.read_csv(test_path)
+    except Exception as e:
+        print(f"Error loading CSV files: {e}")
+        return
+
+    nb1 = NaiveBayes()
+
+    # Tokenize 
+    train_df["Tokenized Description"] = nb1.tokenize_panda_series(train_df["Description"])
+    test_df["Tokenized Description"] = nb1.tokenize_panda_series(test_df["Description"])
+
+    train_df["Tokenized Title"] = nb1.tokenize_panda_series(train_df["Title"])
+    test_df["Tokenized Title"] = nb1.tokenize_panda_series(test_df["Title"])
+
+    # Process "Description"
+    train_df["Processed Description"] = train_df["Tokenized Description"].apply(preprocess)
+    test_df["Processed Description"] = test_df["Tokenized Description"].apply(preprocess)
+
+    #process "Title"
+    train_df["Processed Title"] = train_df["Tokenized Title"].apply(preprocess)
+    test_df["Processed Title"] = test_df["Tokenized Title"].apply(preprocess)
+
+    # Apply bigram features to description
+    train_df["Enhanced Processed Description"] = train_df["Processed Description"].apply(generate_bigrams)
+    test_df["Enhanced Processed Description"] = test_df["Processed Description"].apply(generate_bigrams)
+
+    # Apply bigram features to title
+    train_df["Enhanced Processed Title"] = train_df["Processed Title"].apply(generate_bigrams)
+<A NAME="8"></A><FONT color = #00FFFF><A HREF="match16-0.html#8" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    test_df["Enhanced Processed Title"] = test_df["Processed Title"].apply(generate_bigrams)
+
+
+    # Concatenate best models for Title and Description
+    train_df["Concat Features"] = train_df["Enhanced Processed Description"] + train_df["Enhanced Processed Title"]
+    test_df["Concat Features"] = test_df["Enhanced Processed Description"] + test_df["Enhanced Processed Title"]
+</FONT>
+    # Train best model
+    nb = NaiveBayes()
+    nb.fit(train_df, smoothening=1.0, class_col="Class Index", text_col="Concat Features")
+    pred_df = nb.predict(test_df.copy(), text_col="Concat Features", predicted_col="Predicted")
+
+    # Compute confusion matrix
+    y_true, y_pred = test_df["Class Index"], pred_df["Predicted"]
+    cm = confusion_matrix(y_true, y_pred)
+    labels = sorted(y_true.unique())
+
+    # Display confusion matrix
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=labels, yticklabels=labels)
+    plt.xlabel("Predicted Label")
+    plt.ylabel("True Label")
+    plt.title("Confusion Matrix")
+    plt.savefig("confusion_matrix.png")
+    # plt.show()
+
+    # Classification Report
+    print("\nClassification Report:")
+    print(classification_report(y_true, y_pred))
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from naive_bayes1 import NaiveBayes
+from wordcloud import WordCloud, STOPWORDS
+import os
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+import time
+# Ensure necessary NLTK datasets are available
+# nltk.download("stopwords")
+
+# Define file paths for training and testing data
+train_path = "data/Q1/train.csv"
+test_path = "data/Q1/test.csv"
+
+# Initialize stopword remover and stemmer
+stop_words = set(stopwords.words("english"))
+stemmer = PorterStemmer()
+
+def preprocess_text(tokens):
+    """
+    Apply stemming and stopword removal to the list of tokens.
+    """
+    cleaned_tokens = [stemmer.stem(word) for word in tokens]
+    final_tokens = [word for word in cleaned_tokens if word.lower() not in stop_words]
+    return final_tokens
+
+def generate_bigrams(tokens):
+    """
+    Generate bigrams from the token list and append them to the original tokens.
+    """
+    bigrams = [tokens[i] + "_" + tokens[i+1] for i in range(len(tokens)-1)]
+    return tokens + bigrams
+
+def main():
+    try:
+        # Load training and testing CSV files
+        train_df = pd.read_csv(train_path)
+        test_df = pd.read_csv(test_path)
+    except Exception as e:
+        print(f"Error loading CSV files: {e}")
+        return
+
+    nb1 = NaiveBayes()
+
+    # Tokenize 
+    train_df["Tokenized Description"] = nb1.tokenize_panda_series(train_df["Description"])
+    test_df["Tokenized Description"] = nb1.tokenize_panda_series(test_df["Description"])
+
+    train_df["Tokenized Title"] = nb1.tokenize_panda_series(train_df["Title"])
+    test_df["Tokenized Title"] = nb1.tokenize_panda_series(test_df["Title"])
+
+    # Process "Description"
+    train_df["Processed Description"] = train_df["Tokenized Description"].apply(preprocess_text)
+    test_df["Processed Description"] = test_df["Tokenized Description"].apply(preprocess_text)
+
+    #process "Title"
+    train_df["Processed Title"] = train_df["Tokenized Title"].apply(preprocess_text)
+    test_df["Processed Title"] = test_df["Tokenized Title"].apply(preprocess_text)
+
+    # Apply bigram features to description
+    train_df["Enhanced Processed Description"] = train_df["Processed Description"].apply(generate_bigrams)
+    test_df["Enhanced Processed Description"] = test_df["Processed Description"].apply(generate_bigrams)
+
+    # Apply bigram features to title
+    train_df["Enhanced Processed Title"] = train_df["Processed Title"].apply(generate_bigrams)
+<A NAME="9"></A><FONT color = #FF00FF><A HREF="match16-0.html#9" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    test_df["Enhanced Processed Title"] = test_df["Processed Title"].apply(generate_bigrams)
+
+    # Concatenate best models for Title and Description
+    train_df["Concat Features"] = train_df["Enhanced Processed Description"] + train_df["Enhanced Processed Title"]
+    test_df["Concat Features"] = test_df["Enhanced Processed Description"] + test_df["Enhanced Processed Title"]
+</FONT>
+    # Train Naïve Bayes model with enhanced features including sentiment score
+    nb = NaiveBayes()
+    nb.feature_fit(train_df, smoothening=1.0, class_col="Class Index", text_col="Concat Features")
+    
+    # Predict on test data using the enhanced features
+    pred_df = nb.feature_predict(test_df.copy(), text_col="Concat Features", predicted_col="Predicted")
+    # Compute accuracy and print results
+    if "Class Index" in test_df.columns:
+        accuracy = np.mean(pred_df["Predicted"] == test_df["Class Index"])
+        print(f"Validation Accuracy with Concat Features (using Sentiment Score): {accuracy * 100:.2f}%")
+    else:
+        print("Predictions on test data:")
+        print(pred_df[["Enhanced Description", "Predicted"]])
+
+if __name__ == "__main__":
+    main()
+
+
+
+# Wordcloud
+
+import numpy as np  # useful for many scientific computing in Python
+import pandas as pd # primary data structure library
+from PIL import Image # converting images into arrays
+import matplotlib.pyplot as plt # for visualizing the data
+
+from wordcloud import WordCloud
+import os
+from naive_bayes import NaiveBayes
+
+# Define paths
+train_path = "data/Q1/train.csv"
+output_dir = "data/Q1/wordclouds"
+
+# Ensure output directory exists
+os.makedirs(output_dir, exist_ok=True)
+
+def generate_word_cloud(text, class_name):
+    """
+    Generates and saves a word cloud image for a given class.
+    Args:
+        text (str): The combined text for a particular class.
+        class_name (str): The name of the class.
+    """
+    
+    # Create a WordCloud object
+    wordcloud = WordCloud(
+        background_color="white",
+        max_words=200,
+        stopwords={},
+        width=800,
+        height=600
+    ).generate(text)
+    
+    # Save the word cloud image
+    plt.figure(figsize=(10, 6))
+    plt.axis("off")
+    x_=1
+    plt.imshow(wordcloud, interpolation="bilinear")
+    plt.title(f"Class {class_name}")
+    
+    image_filename = f"wordcloud_class_{class_name}.png"
+    plt.savefig(image_filename)  # Save in the current directory
+    plt.close()
+    print(f"Saved word cloud for class {class_name} at {image_filename}")
+
+def main():
+    try:
+        # Load training data
+        df = pd.read_csv(train_path)
+    except FileNotFoundError:
+        print(f"File not found. Please check the path: {train_path}")
+        return
+    except Exception as e:
+        print(f"Error loading {train_path}: {e}")
+        return
+    
+    nb = NaiveBayes()
+    df["Tokenized Description"] = nb.tokenize_panda_series(df["Description"])
+    # Group documents by class and combine text
+    class_groups = {}
+    for class_index, group in df.groupby("Class Index"):
+        combined_text = []
+        for tokens in group["Tokenized Description"]:
+            combined_text.append(" ".join(tokens))
+        class_groups[class_index] = " ".join(combined_text)
+
+    # Generate word clouds for each class
+    for class_index, text in class_groups.items():
+        generate_word_cloud(text, class_index)
+
+if __name__ == "__main__":
+    main()
+
+
+
+# Part 2(stemmming & removing stopwords)
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match16-0.html#5" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+from wordcloud import WordCloud, STOPWORDS
+import os
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from naive_bayes import NaiveBayes
+
+# Ensure necessary NLTK datasets are available
+nltk.download("stopwords")
+
+# Define paths
+train_path = "data/Q1/train.csv"
+</FONT>test_path = "data/Q1/test.csv"
+
+# Initialize stopword remover and stemmer
+stop_words = set(stopwords.words("english"))
+stemmer = PorterStemmer()
+
+def preprocess_text(tokens):
+    cleaned_tokens = [stemmer.stem(word) for word in tokens]
+    final_tokens = [word for word in cleaned_tokens if word.lower() not in stop_words]
+    return final_tokens
+
+def generate_word_cloud(text, class_name):
+    """
+    Generates and saves a word cloud image for a given class in the current directory.
+    Args:
+        text (str): The combined text for a particular class.
+        class_name (str): The name of the class.
+    """
+    wordcloud = WordCloud(
+        background_color="white",
+        max_words=200,
+        stopwords=STOPWORDS,
+        width=800,
+        height=600
+    ).generate(text)
+    
+    # Save the word cloud
+    plt.figure(figsize=(10, 6))
+    plt.axis("off")
+    x_=1
+    plt.imshow(wordcloud, interpolation="bilinear")
+    plt.title(f"Word Cloud (Preprocessed) for Class {class_name}")
+    
+    image_filename = f"wordcloud_preprocessed_class_{class_name}.png"
+    plt.savefig(image_filename)
+    plt.close()
+    print(f"Saved preprocessed word cloud for class {class_name} at {image_filename}")
+
+def main():
+    try:
+        # Load training and testing data
+        train_df = pd.read_csv(train_path)
+        test_df = pd.read_csv(test_path)
+    except FileNotFoundError:
+        print(f"File not found. ")
+        return
+    except Exception as e:
+        print(f"Error loading CSV files: {e}")
+        return
+    
+    nb1 = NaiveBayes()
+    train_df["Tokenized Description"] = nb1.tokenize_panda_series(train_df["Description"])
+    test_df["Tokenized Description"] = nb1.tokenize_panda_series(test_df["Description"])
+
+    # Apply stopword removal and stemming
+    train_df["Processed Description"] = train_df["Tokenized Description"].apply(preprocess_text)
+    test_df["Processed Description"] = test_df["Tokenized Description"].apply(preprocess_text)
+
+    # Generate word clouds for each class after preprocessing
+    class_groups = {}
+    for class_index, group in train_df.groupby("Class Index"):
+        combined_text = []
+        for tokens in group["Tokenized Description"]:
+            combined_text.append(" ".join(tokens))
+        class_groups[class_index] = " ".join(combined_text)
+
+    for class_index, text in class_groups.items():
+        generate_word_cloud(text, class_index)
+
+    # Train Naïve Bayes on processed data
+    nb = NaiveBayes()
+    nb.fit(train_df, smoothening=1, class_col="Class Index", text_col="Processed Description")
+
+    # Predict on validation data
+    pred_df = nb.predict(test_df.copy(), text_col="Processed Description", predicted_col="Predicted")
+
+    # Compute accuracy
+    if "Class Index" in test_df.columns:
+        accuracy = np.mean(pred_df["Predicted"] == test_df["Class Index"])
+        print(f"Validation Accuracy After Preprocessing: {accuracy * 100:.2f}%")
+    else:
+        print("Predictions on test data:")
+        print(pred_df[["Processed Description", "Predicted"]])
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+#Part3 : Bigrams: 90.22% accuracy
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from naive_bayes import NaiveBayes
+from wordcloud import WordCloud, STOPWORDS
+import os
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+# Ensure necessary NLTK datasets are available
+nltk.download("stopwords")
+
+# Define paths
+train_path = "data/Q1/train.csv"
+test_path = "data/Q1/test.csv"
+
+# Initialize stopword remover and stemmer
+stop_words = set(stopwords.words("english"))
+stemmer = PorterStemmer()
+
+def preprocess_text(tokens):
+    cleaned_tokens = [stemmer.stem(word) for word in tokens]
+    final_tokens = [word for word in cleaned_tokens if word.lower() not in stop_words]
+    return final_tokens
+
+def generate_bigrams(tokens):
+    bigrams = []
+    for i in range(len(tokens)-1):
+        bigrams.append(tokens[i]+"_"+tokens[i+1])
+    return tokens + bigrams
+
+def main():
+    try:
+        # Load training and testing data
+        train_df = pd.read_csv(train_path)
+        test_df = pd.read_csv(test_path)
+    except FileNotFoundError:
+        print(f"File not found.")
+        return
+    except Exception as e:
+        print(f"Error loading CSV files: {e}")
+        return
+
+    nb1 = NaiveBayes()
+
+    # Tokenize descriptions
+    train_df["Tokenized Description"] = nb1.tokenize_panda_series(train_df["Description"])
+    test_df["Tokenized Description"] = nb1.tokenize_panda_series(test_df["Description"])
+
+    # Apply stopword removal and stemming
+    train_df["Processed Description"] = train_df["Tokenized Description"].apply(preprocess_text)
+    test_df["Processed Description"] = test_df["Tokenized Description"].apply(preprocess_text)
+
+    # Apply bigram feature engineering
+    train_df["Enhanced Description"] = train_df["Processed Description"].apply(generate_bigrams)
+    test_df["Enhanced Description"] = test_df["Processed Description"].apply(generate_bigrams)
+
+    # Train Naïve Bayes with enhanced features
+    nb = NaiveBayes()
+    nb.fit(train_df, smoothening=1.0, class_col="Class Index", text_col="Enhanced Description")
+
+    # Predict on test data
+    pred_df = nb.predict(test_df.copy(), text_col="Enhanced Description", predicted_col="Predicted")
+
+    # Compute accuracy
+    if "Class Index" in test_df.columns:
+        accuracy = np.mean(pred_df["Predicted"] == test_df["Class Index"])
+        print(f"Validation Accuracy with Bigrams: {accuracy * 100:.2f}%")
+    else:
+        print("Predictions on test data:")
+        print(pred_df[["Enhanced Description", "Predicted"]])
+
+if __name__ == "__main__":
+    main()
+
+
+
+# Part 4: Analyze the performance of different models 
+
+import pandas as pd
+import numpy as np
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from naive_bayes import NaiveBayes
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+nltk.download("stopwords")
+stop_words = set(stopwords.words("english"))
+stemmer = PorterStemmer()
+
+train_path = "data/Q1/train.csv"
+test_path = "data/Q1/test.csv"
+
+def preprocess(tokens):
+    cleaned_tokens = [stemmer.stem(word) for word in tokens]
+    final_tokens = [word for word in cleaned_tokens if word.lower() not in stop_words]
+    return final_tokens
+
+def generate_bigrams(tokens):
+    bigrams = []
+    for i in range(len(tokens)-1):
+        bigrams.append(tokens[i]+"_"+tokens[i+1])
+    return tokens + bigrams
+
+def evaluate(nb, train_df, test_df, text_col):
+    nb.fit(train_df, smoothening=1.0, class_col="Class Index", text_col=text_col)
+    pred_df = nb.predict(test_df.copy(), text_col=text_col, predicted_col="Predicted")
+
+    y_true, y_pred = test_df["Class Index"], pred_df["Predicted"]
+    acc = accuracy_score(y_true, y_pred)
+    prec, rec, f1, _ = precision_recall_fscore_support(y_true, y_pred, average="weighted")
+    return [acc,prec,rec,f1]
+
+def main():
+    try:
+        train_df, test_df = pd.read_csv(train_path), pd.read_csv(test_path)
+    except FileNotFoundError:
+        print(f"File not found.")
+        return
+    except Exception as e:
+        print(f"Error loading CSV files: {e}")
+        return
+
+    nb1 = NaiveBayes()
+    train_df["Tokenized Description"] = nb1.tokenize_panda_series(train_df["Description"])
+    test_df["Tokenized Description"] = nb1.tokenize_panda_series(test_df["Description"])
+
+    train_df["Processed Description"] = train_df["Tokenized Description"].apply(preprocess)
+    test_df["Processed Description"] = test_df["Tokenized Description"].apply(preprocess)
+
+    train_df["Enhanced Description"] = train_df["Tokenized Description"].apply(generate_bigrams)
+    test_df["Enhanced Description"] = test_df["Tokenized Description"].apply(generate_bigrams)
+
+    train_df["Enhanced Processed Description"] = train_df["Processed Description"].apply(generate_bigrams)
+    test_df["Enhanced Processed Description"] = test_df["Processed Description"].apply(generate_bigrams)
+
+    models = {
+        "Unigrams": "Tokenized Description",
+        "Unigrams + Preprocessing": "Processed Description",
+        "Bigrams": "Enhanced Description",
+        "Bigrams + Preprocessing": "Enhanced Processed Description",
+    }
+
+    results = {}
+    nb = NaiveBayes()
+    for model_name, text_col in models.items():
+        print(f"Evaluating: {model_name}")
+        results[model_name] = evaluate(nb, train_df, test_df, text_col)
+        print(model_name,":\n",results[model_name])
+    print("\nModel Comparison:")
+    for model, metrics in results.items():
+        print(f"\n{model}")
+        print(f"  Accuracy:  {metrics[0] * 100:.4f}%")
+        print(f"  Precision: {metrics[1] * 100:.4f}%")
+        print(f"  Recall:    {metrics[2] * 100:.4f}%")
+        print(f"  F1-Score:  {metrics[3] * 100:.4f}%")
+    
+    mx_acc=0
+    for model, metrics in results.items():
+        if metrics[0]&gt;mx_acc:
+            mx_acc=metrics[0]
+            best_model=model
+    # mx_prec=0
+    # for model, metrics in results.items():
+    #     if metrics[1]&gt;mx_prec:
+    #         mx_prec=metrics[1]
+    #         best_model=model
+    # mx_rec=0
+    # for model, metrics in results.items():
+    #     if metrics[2]&gt;mx_rec:
+    #         mx_rec=metrics[2]
+    #         best_model=model
+
+    # mx_f1=0
+    # for model, metrics in results.items():
+    #     if metrics[3]&gt;mx_f1:
+    #         mx_f1=metrics[3]
+    #         best_model=model
+
+    print(f"\nBest Model: {best_model}")
+
+if __name__ == "__main__":
+    main()
+
+
+
+#Best model for Title Feature
+
+import pandas as pd
+import numpy as np
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from naive_bayes import NaiveBayes
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+# nltk.download("stopwords")
+stop_words = set(stopwords.words("english"))
+stemmer = PorterStemmer()
+
+train_path = "data/Q1/train.csv"
+test_path = "data/Q1/test.csv"
+
+def preprocess(tokens):
+    cleaned_tokens = [stemmer.stem(word) for word in tokens]
+    final_tokens = [word for word in cleaned_tokens if word.lower() not in stop_words]
+    return final_tokens
+
+def generate_bigrams(tokens):
+    bigrams = []
+    for i in range(len(tokens)-1):
+        bigrams.append(tokens[i]+"_"+tokens[i+1])
+    return tokens + bigrams
+
+def evaluate(nb, train_df, test_df, text_col):
+    nb.fit(train_df, smoothening=1.0, class_col="Class Index", text_col=text_col)
+    pred_df = nb.predict(test_df.copy(), text_col=text_col, predicted_col="Predicted")
+
+    y_true, y_pred = test_df["Class Index"], pred_df["Predicted"]
+    acc = accuracy_score(y_true, y_pred)
+    prec, rec, f1, _ = precision_recall_fscore_support(y_true, y_pred, average="weighted")
+
+    return [acc,prec,rec,f1]
+
+def main():
+    train_df, test_df = pd.read_csv(train_path), pd.read_csv(test_path)
+    print("Training data shape:", train_df.shape)
+
+    nb1 = NaiveBayes()
+
+    # Process "Description"
+    train_df["Tokenized Description"] = nb1.tokenize_panda_series(train_df["Description"])
+    test_df["Tokenized Description"] = nb1.tokenize_panda_series(test_df["Description"])
+    
+    train_df["Processed Description"] = train_df["Tokenized Description"].apply(preprocess)
+    test_df["Processed Description"] = test_df["Tokenized Description"].apply(preprocess)
+    
+    train_df["Enhanced Description"] = train_df["Tokenized Description"].apply(generate_bigrams)
+    test_df["Enhanced Description"] = test_df["Tokenized Description"].apply(generate_bigrams)
+
+    train_df["Enhanced Processed Description"] = train_df["Processed Description"].apply(generate_bigrams)
+    test_df["Enhanced Processed Description"] = test_df["Processed Description"].apply(generate_bigrams)
+
+    # Process "Title"
+    train_df["Tokenized Title"] = nb1.tokenize_panda_series(train_df["Title"])
+    test_df["Tokenized Title"] = nb1.tokenize_panda_series(test_df["Title"])
+
+    train_df["Processed Title"] = train_df["Tokenized Title"].apply(preprocess)
+    test_df["Processed Title"] = test_df["Tokenized Title"].apply(preprocess)
+
+    train_df["Enhanced Title"] = train_df["Tokenized Title"].apply(generate_bigrams)
+    test_df["Enhanced Title"] = test_df["Tokenized Title"].apply(generate_bigrams)
+
+    train_df["Enhanced Processed Title"] = train_df["Processed Title"].apply(generate_bigrams)
+    test_df["Enhanced Processed Title"] = test_df["Processed Title"].apply(generate_bigrams)
+
+    models = {
+        "Unigrams (Description)": "Tokenized Description",
+        "Unigrams + Preprocessing (Description)": "Processed Description",
+        "Bigrams (Description)": "Enhanced Description",
+        "Bigrams + Preprocessing (Description)": "Enhanced Processed Description",
+        "Unigrams (Title)": "Tokenized Title",
+        "Unigrams + Preprocessing (Title)": "Processed Title",
+        "Bigrams (Title)": "Enhanced Title",
+        "Bigrams + Preprocessing (Title)": "Enhanced Processed Title",
+    }
+
+    results = {}
+    nb = NaiveBayes()
+    for model_name, text_col in models.items():
+        print(f"Evaluating: {model_name}")
+        results[model_name] = evaluate(nb, train_df, test_df, text_col)
+
+    print("\nModel Comparison:")
+    for model, metrics in results.items():
+        print(f"\n{model}")
+        print(f"  Accuracy:  {metrics[0] * 100:.4f}%")
+        print(f"  Precision: {metrics[1] * 100:.4f}%")
+        print(f"  Recall:    {metrics[2] * 100:.4f}%")
+        print(f"  F1-Score:  {metrics[3] * 100:.4f}%")
+
+    mx_acc=0
+    best_desc_model=""
+    for model, metrics in results.items():
+        if "Description" in model:
+            if metrics[0]&gt;mx_acc:
+                mx_acc=metrics[0]
+                best_desc_model=model
+
+    mx_acc=0
+    best_title_model=""
+    for model, metrics in results.items():
+        if "Title" in model:
+            if metrics[0]&gt;mx_acc:
+                mx_acc=metrics[0]
+                best_title_model=model
+
+    print(f"\nBest Model for Description: {best_desc_model} (Accuracy: {results[best_desc_model][0] * 100:.2f}%)")
+    print(f"Best Model for Title: {best_title_model} (Accuracy: {results[best_title_model][0] * 100:.2f}%)")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+#6a(concat)
+
+import pandas as pd
+import numpy as np
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from naive_bayes import NaiveBayes
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+# nltk.download("stopwords")
+stop_words = set(stopwords.words("english"))
+stemmer = PorterStemmer()
+
+train_path = "data/Q1/train.csv"
+test_path = "data/Q1/test.csv"
+
+def preprocess(tokens):
+    cleaned_tokens = [stemmer.stem(word) for word in tokens]
+    final_tokens = [word for word in cleaned_tokens if word.lower() not in stop_words]
+    return final_tokens
+
+def generate_bigrams(tokens):
+    bigrams = []
+    for i in range(len(tokens)-1):
+        bigrams.append(tokens[i]+"_"+tokens[i+1])
+    return tokens + bigrams
+
+def evaluate(nb, train_df, test_df, text_col):
+    nb.fit(train_df, smoothening=1.0, class_col="Class Index", text_col=text_col)
+    pred_df = nb.predict(test_df.copy(), text_col=text_col, predicted_col="Predicted")
+
+    y_true, y_pred = test_df["Class Index"], pred_df["Predicted"]
+    acc = accuracy_score(y_true, y_pred)
+    prec, rec, f1, _ = precision_recall_fscore_support(y_true, y_pred, average="weighted")
+
+    return [acc,prec,rec,f1]
+
+def main():
+    train_df, test_df = pd.read_csv(train_path), pd.read_csv(test_path)
+    print("Training data shape:", train_df.shape)
+
+    nb1 = NaiveBayes()
+
+    # Tokenize 
+    train_df["Tokenized Description"] = nb1.tokenize_panda_series(train_df["Description"])
+    test_df["Tokenized Description"] = nb1.tokenize_panda_series(test_df["Description"])
+
+    train_df["Tokenized Title"] = nb1.tokenize_panda_series(train_df["Title"])
+    test_df["Tokenized Title"] = nb1.tokenize_panda_series(test_df["Title"])
+
+    # Process "Description"
+    train_df["Processed Description"] = train_df["Tokenized Description"].apply(preprocess)
+    test_df["Processed Description"] = test_df["Tokenized Description"].apply(preprocess)
+
+    #process "Title"
+    train_df["Processed Title"] = train_df["Tokenized Title"].apply(preprocess)
+    test_df["Processed Title"] = test_df["Tokenized Title"].apply(preprocess)
+
+    # Apply bigram features to description
+    train_df["Enhanced Processed Description"] = train_df["Processed Description"].apply(generate_bigrams)
+    test_df["Enhanced Processed Description"] = test_df["Processed Description"].apply(generate_bigrams)
+
+    # Apply bigram features to title
+    train_df["Enhanced Processed Title"] = train_df["Processed Title"].apply(generate_bigrams)
+<A NAME="10"></A><FONT color = #FF0000><A HREF="match16-0.html#10" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    test_df["Enhanced Processed Title"] = test_df["Processed Title"].apply(generate_bigrams)
+
+
+    # Concatenate best models for Title and Description
+    train_df["Concat Features"] = train_df["Enhanced Processed Description"] + train_df["Enhanced Processed Title"]
+    test_df["Concat Features"] = test_df["Enhanced Processed Description"] + test_df["Enhanced Processed Title"]
+</FONT>
+    # Train and evaluate model
+    nb_concat = NaiveBayes()
+    acc, prec, rec, f1 = evaluate(nb_concat, train_df, test_df, text_col="Concat Features")
+    
+    print("\nConcatenated Best Model (Title + Description):")
+    print(f"  Accuracy:  {acc * 100:.2f}%")
+    print(f"  Precision: {prec * 100:.2f}%")
+    print(f"  Recall:    {rec * 100:.2f}%")
+    print(f"  F1-Score:  {f1 * 100:.2f}%")
+
+if __name__ == "__main__":
+    main()
+
+
+
+# Part 6b
+import pandas as pd
+import numpy as np
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from naive_bayes import NaiveBayes
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+# Uncomment if needed to download stopwords
+# nltk.download("stopwords")
+stop_words = set(stopwords.words("english"))
+stemmer = PorterStemmer()
+
+# File paths
+train_path = "data/Q1/train.csv"
+test_path = "data/Q1/test.csv"
+
+def preprocess(tokens):
+    """
+    Preprocess tokens by applying stemming and removing stopwords.
+    """
+    cleaned_tokens = [stemmer.stem(word) for word in tokens]
+    final_tokens = [word for word in cleaned_tokens if word.lower() not in stop_words]
+    return final_tokens
+
+def generate_bigrams(tokens):
+    """
+<A NAME="6"></A><FONT color = #00FF00><A HREF="match16-0.html#6" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    Generate bigrams and return the union of the original tokens and the bigrams.
+    """
+    bigrams = []
+    for i in range(len(tokens) - 1):
+        bigrams.append(tokens[i] + "_" + tokens[i+1])
+</FONT>    return tokens + bigrams
+
+def compute_log_prob(nb_model, tokens):
+    """
+    Compute log probabilities for each class for a given model and tokens.
+    Returns a dictionary mapping each class to its log probability.
+    """
+    log_probs = {}
+    for cls in nb_model.class_priors:
+        # Start with log(P(C))
+        log_prob = np.log(nb_model.class_priors[cls])
+        # Sum log likelihoods for each token
+        zero=0
+        for word in tokens:
+            if word in nb_model.word_likelihoods[cls]:
+                log_prob += np.log(nb_model.word_likelihoods[cls][word])
+            else:
+                log_prob += zero
+            # If word is unseen, it contributes nothing 
+        log_probs[cls] = log_prob
+    return log_probs
+
+def evaluate_separate(nb_desc, nb_title, test_df, desc_col, title_col):
+    """
+    For each test instance, combine log probabilities from the description and title models
+    using the equation:
+    
+    log P(C|T, D) ∝ log P(C)_desc + ∑(log θ_desc(w|C)) + log P(C)_title + ∑(log θ_title(w|C))
+    
+    Returns the list of predicted classes.
+    """
+    predictions = []
+    for idx, row in test_df.iterrows():
+        desc_tokens = row[desc_col]
+        title_tokens = row[title_col]
+        # Compute log probabilities from each model
+        
+        log_probs_desc = nb_desc.log_sum_theta_all_classes(desc_tokens)
+        log_probs_title = nb_title.log_sum_theta_all_classes(title_tokens)
+        # Combine probabilities for each class
+        combined_log_probs = {}
+        for cls in nb_desc.class_priors:
+            log_class_prior_any_model=nb_desc.log_class_prior()
+            combined_log_probs[cls] = log_probs_desc.get(cls, -np.inf) + log_probs_title.get(cls, -np.inf)+log_class_prior_any_model[cls]
+        # Predict the class with the highest combined log probability
+        best_cls = max(combined_log_probs, key=combined_log_probs.get)
+        predictions.append(best_cls)
+    return predictions
+
+def main():
+    # Load training and testing data
+    train_df = pd.read_csv(train_path)
+    test_df = pd.read_csv(test_path)
+    print("Training data shape:", train_df.shape)
+    
+    # Initialize a temporary NaiveBayes instance for tokenization
+    nb_temp = NaiveBayes()
+    
+    # Tokenize the 'Description' and 'Title' columns
+    train_df["Tokenized Description"] = nb_temp.tokenize_panda_series(train_df["Description"])
+    test_df["Tokenized Description"] = nb_temp.tokenize_panda_series(test_df["Description"])
+    
+    train_df["Tokenized Title"] = nb_temp.tokenize_panda_series(train_df["Title"])
+    test_df["Tokenized Title"] = nb_temp.tokenize_panda_series(test_df["Title"])
+    
+    # Process "Description"
+    train_df["Processed Description"] = train_df["Tokenized Description"].apply(preprocess)
+    test_df["Processed Description"] = test_df["Tokenized Description"].apply(preprocess)
+
+    #process "Title"
+    train_df["Processed Title"] = train_df["Tokenized Title"].apply(preprocess)
+    test_df["Processed Title"] = test_df["Tokenized Title"].apply(preprocess)
+
+    # Apply bigram features to description
+    train_df["Enhanced Processed Description"] = train_df["Processed Description"].apply(generate_bigrams)
+    test_df["Enhanced Processed Description"] = test_df["Processed Description"].apply(generate_bigrams)
+
+    # Apply bigram features to title
+    train_df["Enhanced Processed Title"] = train_df["Processed Title"].apply(generate_bigrams)
+    test_df["Enhanced Processed Title"] = test_df["Processed Title"].apply(generate_bigrams)
+    
+    # Train separate Naive Bayes models for Description and Title features
+    nb_desc = NaiveBayes()
+    nb_title = NaiveBayes()
+    
+    # Train the description model on "Enhanced Processed Description"
+    nb_desc.fit(train_df, smoothening=1.0, class_col="Class Index", text_col="Enhanced Processed Description")
+    # Train the title model on "Enhanced Title"
+    nb_title.fit(train_df, smoothening=1.0, class_col="Class Index", text_col="Enhanced Processed Title")
+    
+    # Evaluate the combined model on the test set using separate parameters
+    predictions = evaluate_separate(nb_desc, nb_title, test_df,
+                                    desc_col="Enhanced Processed Description",
+                                    title_col="Enhanced Processed Title")
+    
+    # Extract true labels
+    y_true = test_df["Class Index"]
+    y_pred = predictions
+    
+    # Compute evaluation metrics
+    acc = accuracy_score(y_true, y_pred)
+    prec, rec, f1, _ = precision_recall_fscore_support(y_true, y_pred, average="weighted")
+    
+    print("\nSeparate Parameter Model (Title and Description):")
+    print(f"  Accuracy:  {acc * 100:.2f}%")
+    print(f"  Precision: {prec * 100:.2f}%")
+    print(f"  Recall:    {rec * 100:.2f}%")
+    print(f"  F1-Score:  {f1 * 100:.2f}%")
+    
+if __name__ == "__main__":
+    main()
+
+
+
+# Part 7
+
+import pandas as pd
+import numpy as np
+from sklearn.metrics import accuracy_score
+
+def preprocess_text(tokens):
+    cleaned_tokens = [stemmer.stem(word) for word in tokens]
+    final_tokens = [word for word in cleaned_tokens if word.lower() not in stop_words]
+    return final_tokens
+
+def generate_bigrams(tokens):
+    bigrams = []
+    for i in range(len(tokens)-1):
+        bigrams.append(tokens[i]+"_"+tokens[i+1])
+    return tokens + bigrams
+
+def main():
+    # Load test data
+    train_path= "data/Q1/train.csv"
+    train_df = pd.read_csv(train_path)
+    test_path = "data/Q1/test.csv"
+    test_df = pd.read_csv(test_path)
+    print("Test data shape:", test_df.shape)
+    
+    # True labels from the test set
+    y_true = test_df["Class Index"]
+    
+    # (a) Random Baseline:
+    random_preds = np.random.choice([1, 2, 3, 4], size=len(test_df))
+    random_acc = accuracy_score(y_true, random_preds)
+    
+    # (b) Positive Baseline:
+    # Predict the majority class (i.e., the class with the highest frequency)
+    class_counts = train_df["Class Index"].value_counts()  # Count occurrences of each class
+    majority_class = class_counts.idxmax()
+    positive_preds = [majority_class] * len(test_df)
+    positive_acc = accuracy_score(y_true, positive_preds)
+    
+    # Print the baseline accuracies
+    print("\nBaseline Analysis:")
+    print(f"  Random Baseline Accuracy:  {random_acc * 100:.2f}%")
+    print(f"  Positive Baseline Accuracy: {positive_acc * 100:.2f}%")
+    
+if __name__ == "__main__":
+    main()
+
+
+
+
+import numpy as np
+
+class NaiveBayes:
+    def __init__(self):
+        self.class_priors = {}  # Stores P(C)
+        self.word_likelihoods = {}  # Stores P(w|C)
+        self.vocab = set()  # Stores the vocabulary
+        self.smoothening = 1.0  # Default Laplace smoothing
+        self.probabilities = {}
+        self.predicted = None
+        self.positive_words = {
+            "good", "great", "excellent", "positive", "fortunate", "correct", "superior",
+            "happy", "joy", "love"
+        }
+
+        self.negative_words = {
+            "bad", "poor", "terrible", "negative", "unfortunate", "wrong", "inferior",
+            "sad", "hate", "awful", "worst"
+        }
+
+    def tokenize(self,text):
+        """
+        Tokenize a given text into words.
+        """
+        # Lowercase the text
+        # text = text.lower()
+        
+        # Replace punctuation with spaces
+        punctuation = '''!()-[];:'"\,&lt;&gt;./?@$%_~'''
+        punctuation=''''''
+        for char in text:
+            if char in punctuation:
+                text = text.replace(char, ' ')
+        # Split the text into words by spaces
+        words = text.split()
+        # Remove words of length &lt;= 2
+        # words = [word for word in words if len(word) &gt; 2]
+        return words
+
+    def tokenize_panda_series(self,series):
+        """
+        Tokenize a pandas series of text into words.
+        """
+        return series.apply(self.tokenize)
+
+    def fit(self, df, smoothening, class_col = "Class Index", text_col = "Tokenized Description"):
+        """Learn the parameters of the model from the training data.
+        Classes are 1-indexed
+
+        Args:
+            df (pd.DataFrame): The training data containing columns class_col and text_col.
+                each entry of text_col is a list of tokens.
+            smoothening (float): The Laplace smoothening parameter.
+        """
+        self.smoothening = smoothening
+        
+        # Get unique class labels
+        classes = list(set(df[class_col]))
+        total_docs = len(df)
+        
+        # Initialize probability dictionaries
+        self.class_priors = {cls: 0 for cls in classes} 
+        #Class Priors
+        for cls in classes:
+            class_docs = df[df[class_col] == cls]
+            self.class_priors[cls] = len(class_docs) / total_docs
+
+        #Vocabulary
+        for tokens in df[text_col]:
+            for word in tokens:
+                self.vocab.add(word)
+
+        self.smoothening = smoothening 
+        self.word_likelihoods = {cls: {} for cls in classes}
+        
+        for cls in classes:            
+            # Count word occurrences in the class
+            word_counts = {}
+            total_words = 0
+
+            class_docs = df[df[class_col] == cls]
+            
+            for tokens in class_docs[text_col]:
+                for word in tokens:
+                    if word in word_counts:
+                        word_counts[word] += 1
+                    else:
+                        word_counts[word] = 1
+                total_words += len(tokens)
+            
+            # Compute P(w|C) with Laplace smoothing
+            for word in self.vocab:
+                if word in word_counts:
+                    num = word_counts.get(word, 0)
+                    den = total_words
+                    self.word_likelihoods[cls][word] = (num + smoothening) / (den + smoothening * len(self.vocab))
+                else:
+                    den = total_words
+                    self.word_likelihoods[cls][word] = smoothening / (den + smoothening * len(self.vocab))
+    
+    def predict(self, df, text_col = "Tokenized Description", predicted_col = "Predicted"):
+        """
+        Predict the class of the input data by filling up column predicted_col in the input dataframe.
+
+        Args:
+            df (pd.DataFrame): The testing data containing column text_col.
+                each entry of text_col is a list of tokens.
+        """
+
+        # P(X|C) = P(w1|C) * P(w2|C) * ... * P(wn|C)
+        # P(C|X) = P(X|C) * P(C)
+        # log(P(C|X)) = log(P(w1|C)) + log(P(w2|C)) + ... + log(P(wn|C)) + log(P(C))
+
+        for i, row in df.iterrows():
+            df.at[i, predicted_col] = self.predict_single(row[text_col],i)   
+        return df
+
+    def predict_single(self, tokens,i_):
+        """
+        Predict the class of a single
+        """
+        self.probabilities={}
+        curr_max=-np.inf
+        self.predicted = None
+        for cls in self.class_priors:
+            self.probabilities[cls]=np.log(self.class_priors[cls])            
+            for word in tokens:
+                if word in self.word_likelihoods[cls]:
+                    self.probabilities[cls]+=np.log(self.word_likelihoods[cls][word])
+                # print(self.word_likelihoods[cls])
+            if self.probabilities[cls]&gt;curr_max:
+                curr_max=self.probabilities[cls]
+                self.predicted=cls
+        return self.predicted
+    
+    def log_sum_theta_all_classes(self, tokens):
+        ans={1:0.0,2:0.0,3:0.0,4:0.0}    
+        for cls in self.class_priors:
+            for word in tokens:
+                if word in self.word_likelihoods[cls]:
+                    ans[cls]+=np.log(self.word_likelihoods[cls][word])
+
+        return ans
+    
+    def log_class_prior(self):
+        ans={1:0.0,2:0.0,3:0.0,4:0.0}    
+        for cls in self.class_priors:
+            ans[cls]=np.log(self.class_priors[cls])
+        return ans
+    
+    def compute_sentiment(self, tokens):
+        if len(tokens) == 0:
+            return 0.0
+        pos_count = sum(1 for word in tokens if word.lower() in self.positive_words)
+        neg_count = sum(1 for word in tokens if word.lower() in self.negative_words)
+        return (pos_count - neg_count) / len(tokens)
+
+    def feature_fit(self, df, smoothening, class_col="Class Index", text_col="Tokenized Description"):
+        """
+        Learn model parameters from training data.
+        Args:
+            df (pd.DataFrame): Training data with columns class_col and text_col (each entry is a list of tokens).
+            smoothening (float): Laplace smoothing parameter.
+        """
+        self.smoothening = smoothening
+        # Get unique class labels
+        classes = list(set(df[class_col]))
+        total_docs = len(df)
+        
+        # Compute class priors
+        self.class_priors = {cls: len(df[df[class_col] == cls]) / total_docs for cls in classes}
+        
+        # Build vocabulary
+        for tokens in df[text_col]:
+            for word in tokens:
+                self.vocab.add(word)
+        
+        self.word_likelihoods = {cls: {} for cls in classes}
+        # Collect sentiment scores for each class
+        sentiment_scores = {cls: [] for cls in classes}
+        
+        for cls in classes:
+            word_counts = {}
+            total_words = 0
+            class_docs = df[df[class_col] == cls]
+            for tokens in class_docs[text_col]:
+                # Compute sentiment score for this document and store it
+                sentiment = self.compute_sentiment(tokens)
+                sentiment_scores[cls].append(sentiment)
+                # Count words for likelihood estimation
+                for word in tokens:
+                    word_counts[word] = word_counts.get(word, 0) + 1
+                total_words += len(tokens)
+            # Compute word likelihoods with Laplace smoothing
+            for word in self.vocab:
+                count = word_counts.get(word, 0)
+                self.word_likelihoods[cls][word] = (count + smoothening) / (total_words + smoothening * len(self.vocab))
+        
+        # Compute sentiment statistics (mean and variance) for each class
+        self.sentiment_stats = {}
+        for cls in classes:
+            scores = sentiment_scores[cls]
+            mean_score = np.mean(scores) if scores else 0.0
+            var_score = np.var(scores) if scores else 1e-6
+            if var_score == 0:
+                var_score = 1e-6  # Avoid zero variance
+            self.sentiment_stats[cls] = (mean_score, var_score)
+    
+    def feature_predict(self, df, text_col="Tokenized Description", predicted_col="Predicted"):
+        """
+        Predict the class for each document in the dataframe and add the prediction in column predicted_col.
+        """
+        for i, row in df.iterrows():
+            df.at[i, predicted_col] = self.feature_predict_single(row[text_col])
+        return df
+
+    def feature_predict_single(self, tokens):
+        """
+        Predict the class of a single document.
+        Combines the word likelihoods and the sentiment score likelihood.
+        """
+        self.probabilities = {}
+        curr_max = -np.inf
+        self.predicted = None
+        # Compute sentiment score for the document
+        sent_score = self.compute_sentiment(tokens)
+        
+        for cls in self.class_priors:
+            log_prob = np.log(self.class_priors[cls])
+            # Add log likelihoods for each word in the document
+            for word in tokens:
+                if word in self.word_likelihoods[cls]:
+                    log_prob += np.log(self.word_likelihoods[cls][word])
+            # Incorporate sentiment feature using Gaussian likelihood
+            mean_sent, var_sent = self.sentiment_stats[cls]
+            log_sent = -0.5 * np.log(2 * np.pi * var_sent) - ((sent_score - mean_sent) ** 2) / (2 * var_sent)
+            log_prob += log_sent
+            self.probabilities[cls] = log_prob
+            if log_prob &gt; curr_max:
+                curr_max = log_prob
+                self.predicted = cls
+        return self.predicted
+
+
+
+
+import numpy as np
+
+import nltk
+nltk.download('opinion_lexicon')
+from nltk.corpus import opinion_lexicon
+
+class NaiveBayes:
+    def __init__(self):
+        self.class_priors = {}  # Stores P(C)
+        self.word_likelihoods = {}  # Stores P(w|C)
+        self.vocab = set()  # Stores the vocabulary
+        self.smoothening = 1.0  # Default Laplace smoothing
+        self.probabilities = {}
+        self.predicted = None
+        self.positive_words = list(opinion_lexicon.positive())
+        self.negative_words = list(opinion_lexicon.negative())
+
+    def tokenize(self,text):
+        """
+        Tokenize a given text into words.
+        """
+        # Lowercase the text
+        # text = text.lower()
+        
+        # Replace punctuation with spaces
+        punctuation = '''!()-[];:'"\,&lt;&gt;./?@$%_~'''
+        punctuation=''''''
+        for char in text:
+            if char in punctuation:
+                text = text.replace(char, ' ')
+        # Split the text into words by spaces
+        words = text.split()
+        # Remove words of length &lt;= 2
+        # words = [word for word in words if len(word) &gt; 2]
+        return words
+
+    def tokenize_panda_series(self,series):
+        """
+        Tokenize a pandas series of text into words.
+        """
+        return series.apply(self.tokenize)
+
+    def fit(self, df, smoothening, class_col = "Class Index", text_col = "Tokenized Description"):
+        """Learn the parameters of the model from the training data.
+        Classes are 1-indexed
+
+        Args:
+            df (pd.DataFrame): The training data containing columns class_col and text_col.
+                each entry of text_col is a list of tokens.
+            smoothening (float): The Laplace smoothening parameter.
+        """
+        self.smoothening = smoothening
+        
+        # Get unique class labels
+        classes = list(set(df[class_col]))
+        total_docs = len(df)
+        
+        # Initialize probability dictionaries
+        self.class_priors = {cls: 0 for cls in classes} 
+        #Class Priors
+        for cls in classes:
+            class_docs = df[df[class_col] == cls]
+            self.class_priors[cls] = len(class_docs) / total_docs
+
+        #Vocabulary
+        for tokens in df[text_col]:
+            for word in tokens:
+                self.vocab.add(word)
+
+        self.word_likelihoods = {cls: {} for cls in classes}
+        
+        for cls in classes:            
+            # Count word occurrences in the class
+            word_counts = {}
+            total_words = 0
+
+            class_docs = df[df[class_col] == cls]
+            
+            for tokens in class_docs[text_col]:
+                for word in tokens:
+                    if word in word_counts:
+                        word_counts[word] += 1
+                    else:
+                        word_counts[word] = 1
+                total_words += len(tokens)
+            
+            # Compute P(w|C) with Laplace smoothing
+            for word in self.vocab:
+                if word in word_counts:
+                    num1=  word_counts.get(word, 0) 
+                    den1= total_words
+                    self.word_likelihoods[cls][word] = (num1 + smoothening) / (den1 + smoothening * len(self.vocab))
+                else:
+                    self.word_likelihoods[cls][word] = smoothening / (total_words + smoothening * len(self.vocab))
+    
+    def predict(self, df, text_col = "Tokenized Description", predicted_col = "Predicted"):
+        """
+        Predict the class of the input data by filling up column predicted_col in the input dataframe.
+
+        Args:
+            df (pd.DataFrame): The testing data containing column text_col.
+                each entry of text_col is a list of tokens.
+        """
+
+        # P(X|C) = P(w1|C) * P(w2|C) * ... * P(wn|C)
+        # P(C|X) = P(X|C) * P(C)
+        # log(P(C|X)) = log(P(w1|C)) + log(P(w2|C)) + ... + log(P(wn|C)) + log(P(C))
+
+        for i, row in df.iterrows():
+            df.at[i, predicted_col] = self.predict_single(row[text_col],i)   
+        return df
+
+    def predict_single(self, tokens,i_):
+        """
+        Predict the class of a single
+        """
+        self.probabilities={}
+        curr_max=-np.inf
+        self.predicted = None
+        for cls in self.class_priors:
+            self.probabilities[cls]=np.log(self.class_priors[cls])            
+            for word in tokens:
+                if word in self.word_likelihoods[cls]:
+                    self.probabilities[cls]+=np.log(self.word_likelihoods[cls][word])
+                # print(self.word_likelihoods[cls])
+            if self.probabilities[cls]&gt;curr_max:
+                curr_max=self.probabilities[cls]
+                self.predicted=cls
+        return self.predicted
+    
+    def log_sum_theta_all_classes(self, tokens):
+        ans={1:0.0,2:0.0,3:0.0,4:0.0}    
+        for cls in self.class_priors:
+            for word in tokens:
+                if word in self.word_likelihoods[cls]:
+                    ans[cls]+=np.log(self.word_likelihoods[cls][word])
+
+        return ans
+    
+    def log_class_prior(self):
+        ans={1:0.0,2:0.0,3:0.0,4:0.0}    
+        for cls in self.class_priors:
+            ans[cls]=np.log(self.class_priors[cls])
+        return ans
+    
+    def compute_sentiment(self, tokens):
+        if len(tokens) == 0:
+            return 0.0
+        pos_count = sum(1 for word in tokens if word.lower() in self.positive_words)
+        neg_count = sum(1 for word in tokens if word.lower() in self.negative_words)
+        return (pos_count - neg_count) / len(tokens)
+
+    def feature_fit(self, df, smoothening, class_col="Class Index", text_col="Tokenized Description"):
+        """
+        Learn model parameters from training data.
+        Args:
+            df (pd.DataFrame): Training data with columns class_col and text_col (each entry is a list of tokens).
+            smoothening (float): Laplace smoothing parameter.
+        """
+        self.smoothening = smoothening
+        # Get unique class labels
+        classes = list(set(df[class_col]))
+        total_docs = len(df)
+        
+        # Compute class priors
+        self.class_priors = {cls: len(df[df[class_col] == cls]) / total_docs for cls in classes}
+        
+        # Build vocabulary
+        for i in range(len(df)):
+            tokens = df.iloc[i][text_col]
+            i-=1
+            for word in tokens:
+                if word not in self.vocab:
+                    self.vocab.add(word)
+        
+        self.word_likelihoods = {cls: {} for cls in classes}
+        # Collect sentiment scores for each class
+        sentiment_scores = {cls: [] for cls in classes}
+        
+        for cls in classes:
+            word_counts = {}
+            total_words = 0
+            class_docs = df[df[class_col] == cls]
+            #loop like this:for i in range(len(class_docs)):
+            for i in range(len(class_docs)):
+                tokens = class_docs.iloc[i][text_col]
+            for tokens in class_docs[text_col]:
+                # Compute sentiment score for this document and store it
+                sentiment = self.compute_sentiment(tokens)
+                sentiment_scores[cls].append(sentiment)
+                # Count words for likelihood estimation
+                for word in tokens:
+                    word_counts[word] = word_counts.get(word, 0) + 1
+                total_words += len(tokens)
+            # Compute word likelihoods with Laplace smoothing
+            for word in self.vocab:
+                count = word_counts.get(word, 0)
+                self.word_likelihoods[cls][word] = (count + smoothening) / (total_words + smoothening * len(self.vocab))
+        
+        # Compute sentiment statistics (mean and variance) for each class
+        self.sentiment_stats = {}
+        for cls in classes:
+            scores = sentiment_scores[cls]
+            mean_score = np.mean(scores) if scores else 0.0
+            var_score = np.var(scores) if scores else 1e-6
+            if var_score == 0:
+                var_score = 1e-6  # Avoid zero variance
+            self.sentiment_stats[cls] = (mean_score, var_score)
+    
+    def feature_predict(self, df, text_col="Tokenized Description", predicted_col="Predicted"):
+        """
+        Predict the class for each document in the dataframe and add the prediction in column predicted_col.
+        """
+        for i, row in df.iterrows():
+            df.at[i, predicted_col] = self.feature_predict_single(row[text_col])
+        return df
+
+    def feature_predict_single(self, tokens):
+        """
+        Predict the class of a single document.
+        Combines the word likelihoods and the sentiment score likelihood.
+        """
+        self.probabilities = {}
+        curr_max = -np.inf
+        self.predicted = None
+        # Compute sentiment score for the document
+        sent_score = 5*self.compute_sentiment(tokens)
+        
+        for cls in self.class_priors:
+            log_prob = np.log(self.class_priors[cls])
+            # Add log likelihoods for each word in the document
+            for word in tokens:
+                if word in self.word_likelihoods[cls]:
+                    log_prob += np.log(self.word_likelihoods[cls][word])
+            # Incorporate sentiment feature using Gaussian likelihood
+            mean_sent, var_sent = self.sentiment_stats[cls]
+            log_sent = -0.5 * np.log(2 * np.pi * var_sent) - ((sent_score - mean_sent) ** 2) / (2 * var_sent)
+            log_prob += log_sent
+            self.probabilities[cls] = log_prob
+            if log_prob &gt; curr_max:
+                curr_max = log_prob
+                self.predicted = cls
+        return self.predicted
+
+
+
+
+#Part 1 and 2:Linear/Gaussian kernel SVM with CVXOPT
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+from sklearn import svm as sklearn_svm
+from sklearn.linear_model import SGDClassifier
+import time
+
+sz_=30000
+from svm import SupportVectorMachine
+
+def preprocess_image(image_path):
+    try:
+        # Load image
+        img = Image.open(image_path)
+        img = img.convert("RGB")
+        # Resize to 100x100
+        img = img.resize((100, 100))
+        
+        # Convert to numpy array
+        img_array = np.array(img)
+        
+        # Check if image is grayscale
+        if len(img_array.shape) == 2:
+            # Convert grayscale to RGB
+            img_array_rgb = np.zeros((100, 100, 3))
+            for i in range(3):
+                img_array_rgb[:, :, i] = img_array
+            img_array = img_array_rgb
+        
+        # Normalize to [0, 1]
+        if img_array.max() &gt; 1.0:
+            img_array = img_array / 255.0
+        else: 
+            img_array = img_array/ 255.0
+            #img_array = img_array / 1.0
+            
+        # Flatten the image
+        flattened_img = np.zeros(30000)
+        idx = 0
+        for i in range(100):
+            for j in range(100):
+                for k in range(3):
+                    flattened_img[idx] = img_array[i, j, k]
+                    idx += 1
+        
+        return flattened_img
+    
+    except Exception as e:
+        print(f"Error processing image {image_path}: {e}")
+        return None
+
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match16-0.html#1" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+def load_binary_data(base_dir, subset, class_names):
+    X = []
+    y = []
+    
+    for i, class_name in enumerate(class_names):
+        class_dir = os.path.join(base_dir, subset, class_name)
+        
+        if not os.path.exists(class_dir):
+            print(f"Directory not found: {class_dir}")
+</FONT>            continue
+            
+        print(f"Loading {subset} data for class {class_name}...")
+        
+        # List all image files in the class directory
+        image_files = []
+        for f in os.listdir(class_dir):
+            image_files.append(f)
+        
+        print(f"  Found {len(image_files)} images")
+        
+        for image_file in image_files:
+            image_path = os.path.join(class_dir, image_file)
+            
+            # Preprocess the image
+            img_features = preprocess_image(image_path)
+            
+            if img_features is not None:
+                X.append(img_features)
+                y.append(i)  # Use 0 for first class, 1 for second class
+    
+    return np.array(X), np.array(y)
+
+def plot_support_vectors(support_vectors, alphas, shape=(100, 100, 3), top_n=5):
+    # Sort support vectors by alpha value
+    sorted_indices = []
+    alpha_values = list(alphas)
+    
+    # Manual sorting to find indices with highest alpha values
+    for _ in range(min(top_n, len(alphas))):
+        max_idx = 0
+        max_val = alpha_values[0]
+        
+        for i in range(1, len(alpha_values)):
+            if alpha_values[i] &gt; max_val:
+                max_val = alpha_values[i]
+                max_idx = i
+        
+        sorted_indices.append(max_idx)
+        alpha_values[max_idx] = -1  # Mark as processed
+    
+    plt.figure(figsize=(15, 3))
+    for i, idx in enumerate(sorted_indices):
+        plt.subplot(1, top_n, i + 1)
+        x_=0
+        # Reshape the support vector
+        sv_reshaped = np.zeros(shape)
+        flat_idx = 0
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                for ch in range(shape[2]):
+                    sv_reshaped[r, c, ch] = support_vectors[idx][flat_idx]
+                    flat_idx += 1+x_
+        x_=1
+        # Clip values to [0, 1] range for visualization
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                for ch in range(shape[2]):
+                    if sv_reshaped[r, c, ch] &lt; 0:
+                        sv_reshaped[r, c, ch] = 1-x_
+                    if sv_reshaped[r, c, ch] &gt; 1:
+                        sv_reshaped[r, c, ch] = 2-x_
+        
+        plt.imshow(sv_reshaped)
+        plt.title(f"SV {i+1}\nα={alphas[idx]:.4f}")
+        plt.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig('top_support_vectors.png')
+    plt.close()
+
+def plot_weight_vector(w, shape=(100, 100, 3)):
+
+    plt.figure(figsize=(5, 5))
+    x_=0
+    y_=0
+    # Reshape the weight vector
+    w_reshaped = np.zeros(shape)
+    flat_idx = 0
+
+    for r in range(shape[0]):
+        for c in range(shape[1]):
+            for ch in range(shape[2]):
+                w_reshaped[r, c, ch] = w[flat_idx]
+                flat_idx += 1+x_
+    x_=1
+    
+    # Normalize for visualization
+    w_min = float('inf')
+    w_max = float('-inf')
+    
+    for r in range(shape[0]):
+        for c in range(shape[1]):
+            for ch in range(shape[2]):
+                if w_reshaped[r, c, ch] &lt; w_min:
+                    w_min = w_reshaped[r, c, ch]
+                if w_reshaped[r, c, ch] &gt; w_max:
+                    w_max = w_reshaped[r, c, ch]
+    
+    if w_min+y_ == w_max:
+        normalized_w = np.zeros_like(w_reshaped)
+    else:
+        normalized_w = np.zeros_like(w_reshaped)
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                for ch in range(shape[2]):
+                    normalized_w[r, c, ch] = (w_reshaped[r, c, ch] - w_min) / (w_max - w_min)
+    
+    plt.imshow(normalized_w)
+    plt.title("Weight Vector")
+    plt.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig('weight_vector.png')
+    plt.close()
+
+def calculate_accuracy(y_true, y_pred):
+    correct = 0
+    for i in range(len(y_true)):
+        if y_true[i] == y_pred[i]:
+            correct += 1
+    
+    return correct / len(y_true) if len(y_true) &gt; 0 else 0
+
+#----------------------------------------------------------------------------
+#----------------------------- MAIN CODE -----------------------------------
+#----------------------------------------------------------------------------
+
+# Paths
+base_dir = "/mnt/d/OneDrive/Desktop/COL774_A2/data/Q2"
+
+# The two classes we're using (hail and lightning)
+class_names = ["hail", "lightning"]
+
+print("Loading training data...")
+X_train, y_train = load_binary_data(base_dir, "train", class_names)
+
+print("Loading test data...")
+X_test, y_test = load_binary_data(base_dir, "test", class_names)
+
+print(f"Loaded {X_train.shape[0]} training samples and {X_test.shape[0]} test samples")
+
+print("\n1. Training SVM using CVXOPT...")
+
+start_time = time.time()
+
+# Initialize and train SVM
+svm_linear = SupportVectorMachine()
+svm_linear.fit(X_train, y_train, kernel='linear', C=1.0)
+
+train_time = time.time() - start_time
+print(f"Training completed in {train_time:.2f} seconds")
+
+# Get support vectors and their coefficients
+support_vectors, alphas = svm_linear.get_support_vectors()
+n_support_vectors = len(support_vectors)
+
+print(f"Number of support vectors: {n_support_vectors}")
+print(f"Percentage of training samples as support vectors: {100 * n_support_vectors / len(X_train):.2f}%")
+
+# Get weight vector and bias
+w, b = svm_linear.get_parameters()
+print("Weight vector w:",w)
+print(f"Bias term b: {b:.4f}")
+
+# Predict on test set
+start_time = time.time()
+y_pred = svm_linear.predict(X_test)
+predict_time = time.time() - start_time
+
+# Calculate accuracy
+accuracy = calculate_accuracy(y_test, y_pred)
+print(f"Test set accuracy: {accuracy:.4f}")
+print(f"Prediction time: {predict_time:.4f} seconds")
+
+# Plot top support vectors and weight vector
+print("Plotting top 5 support vectors...")
+plot_support_vectors(support_vectors, alphas)
+
+print("Plotting weight vector...")
+# plot_weight_vector(w)
+
+
+
+#Part 3:SVM with scikit-learn (LIBSVM)
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+from sklearn import svm as sklearn_svm
+import time
+
+sz_=30000
+from svm import SupportVectorMachine
+
+def preprocess_image(image_path):
+    # Load image
+    img = Image.open(image_path)
+    img = img.convert("RGB")
+    # Resize to 100x100
+    img = img.resize((100, 100))
+    
+    # Convert to numpy array
+    img_array = np.array(img)
+    
+    # Check if image is grayscale or has alpha channel
+    if len(img_array.shape) == 2:
+        # Convert grayscale to RGB
+        img_array_rgb = np.zeros((100, 100, 3))
+        for i in range(3):
+            img_array_rgb[:, :, i] = img_array
+        img_array = img_array_rgb
+    
+    # Normalize to [0, 1]
+    if img_array.max() &gt; 1.0:
+            img_array = img_array / 255.0
+    else: 
+        img_array = img_array/ 255.0
+        #img_array = img_array / 1.0
+    
+    # Flatten the image
+    flattened_img = np.zeros(sz_)
+    idx = 0
+    for i in range(100):
+        for j in range(100):
+            for k in range(3):
+                flattened_img[idx] = img_array[i, j, k]
+                idx += 1
+    
+    return flattened_img
+
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match16-0.html#2" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+def load_binary_data(base_dir, subset, class_names):
+    X = []
+    y = []
+    
+    for i, class_name in enumerate(class_names):
+        class_dir = os.path.join(base_dir, subset, class_name)
+        
+        if not os.path.exists(class_dir):
+            print(f"Directory not found: {class_dir}")
+</FONT>            continue
+            
+        print(f"Loading {subset} data for class {class_name}...")
+        
+        # List all image files in the class directory
+        image_files = []
+        for f in os.listdir(class_dir):
+            image_files.append(f)
+        
+        print(f"  Found {len(image_files)} images")
+        
+        for image_file in image_files:
+            image_path = os.path.join(class_dir, image_file)
+            
+            # Preprocess the image
+            img_features = preprocess_image(image_path)
+            
+            if img_features is not None:
+                X.append(img_features)
+                y.append(i)  # Use 0 for first class, 1 for second class
+
+    return np.array(X), np.array(y)
+
+def plot_support_vectors(support_vectors, alphas, shape=(100, 100, 3), top_n=5):
+    # Sort support vectors by alpha value
+    sorted_indices = []
+    alpha_values = list(alphas)
+    
+    # Manual sorting to find indices with highest alpha values
+    for _ in range(min(top_n, len(alphas))):
+        max_idx = 0
+        max_val = alpha_values[0]
+        
+        for i in range(1, len(alpha_values)):
+            if alpha_values[i] &gt; max_val:
+                max_val = alpha_values[i]
+                max_idx = i
+        
+        sorted_indices.append(max_idx)
+        alpha_values[max_idx] = -1  # Mark as processed
+    
+    plt.figure(figsize=(15, 3))
+    for i, idx in enumerate(sorted_indices):
+        plt.subplot(1, top_n, i + 1)
+        
+        # Reshape the support vector
+        sv_reshaped = np.zeros(shape)
+        flat_idx = 0
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                for ch in range(shape[2]):
+                    sv_reshaped[r, c, ch] = support_vectors[idx][flat_idx]
+                    flat_idx += 1
+        
+        # Clip values to [0, 1] range for visualization
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                for ch in range(shape[2]):
+                    if sv_reshaped[r, c, ch] &lt; 0:
+                        sv_reshaped[r, c, ch] = 0
+                    if sv_reshaped[r, c, ch] &gt; 1:
+                        sv_reshaped[r, c, ch] = 1
+        
+        plt.imshow(sv_reshaped)
+        plt.title(f"SV {i+1}\nα={alphas[idx]:.4f}")
+        plt.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig('top_support_vectors.png')
+    plt.close()
+
+def plot_weight_vector(w, shape=(100, 100, 3)):
+    plt.figure(figsize=(5, 5))
+    
+    # Reshape the weight vector
+    w_reshaped = np.zeros(shape)
+    flat_idx = 0
+    for r in range(shape[0]):
+        for c in range(shape[1]):
+            for ch in range(shape[2]):
+                w_reshaped[r, c, ch] = w[flat_idx]
+                flat_idx += 1
+    
+    # Normalize for visualization
+    w_min = float('inf')
+    w_max = float('-inf')
+    
+    for r in range(shape[0]):
+        for c in range(shape[1]):
+            for ch in range(shape[2]):
+                if w_reshaped[r, c, ch] &lt; w_min:
+                    w_min = w_reshaped[r, c, ch]
+                if w_reshaped[r, c, ch] &gt; w_max:
+                    w_max = w_reshaped[r, c, ch]
+    
+    # Avoid division by zero
+    if w_min == w_max:
+        normalized_w = np.zeros_like(w_reshaped)
+    else:
+        normalized_w = np.zeros_like(w_reshaped)
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                for ch in range(shape[2]):
+                    normalized_w[r, c, ch] = (w_reshaped[r, c, ch] - w_min) / (w_max - w_min)
+    
+    plt.imshow(normalized_w)
+    plt.title("Weight Vector")
+    plt.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig('weight_vector.png')
+    plt.close()
+
+def calculate_accuracy(y_true, y_pred):
+    correct = 0
+    for i in range(len(y_true)):
+        if y_true[i] == y_pred[i]:
+            correct += 1
+    
+    return correct / len(y_true) if len(y_true) &gt; 0 else 0
+
+#----------------------------------------------------------------------------
+#----------------------------- MAIN CODE -----------------------------------
+#----------------------------------------------------------------------------
+
+# Paths
+base_dir = "/mnt/d/OneDrive/Desktop/COL774_A2/data/Q2"
+
+# The two classes used (hail and lightning)
+class_names = ["hail", "lightning"]
+
+print("Loading training data...")
+X_train, y_train = load_binary_data(base_dir, "train", class_names)
+
+print("Loading test data...")
+X_test, y_test = load_binary_data(base_dir, "test", class_names)
+
+print(f"Loaded {X_train.shape[0]} training samples and {X_test.shape[0]} test samples")
+
+
+#------------
+# 1. Linear kernel SVM with CVXOPT
+#------------
+print("\n1. Training SVM with linear kernel using CVXOPT...")
+
+start_time = time.time()
+
+# Initialize and train SVM
+svm_linear = SupportVectorMachine()
+svm_linear.fit(X_train, y_train, kernel='linear', C=1.0)
+
+train_time = time.time() - start_time
+print(f"Training completed in {train_time:.2f} seconds")
+
+# Get support vectors and their coefficients
+support_vectors, alphas = svm_linear.get_support_vectors()
+n_support_vectors = len(support_vectors)
+
+print(f"Number of support vectors: {n_support_vectors}")
+print(f"Percentage of training samples as support vectors: {100 * n_support_vectors / len(X_train):.2f}%")
+
+# Get weight vector and bias
+w, b = svm_linear.get_parameters()
+print(f"Bias term b: {b:.4f}")
+
+# Predict on test set
+start_time = time.time()
+y_pred = svm_linear.predict(X_test)
+predict_time = time.time() - start_time
+
+# Calculate accuracy
+accuracy = calculate_accuracy(y_test, y_pred)
+print(f"Test set accuracy: {accuracy:.4f}")
+print(f"Prediction time: {predict_time:.4f} seconds")
+
+# Plot top support vectors and weight vector
+print("Plotting top 5 support vectors...")
+plot_support_vectors(support_vectors, alphas)
+
+print("Plotting weight vector...")
+# plot_weight_vector(w)
+
+
+#----------------
+# Linear/Gaussian kernel SVM with scikit-learn
+#----------------
+
+print("\n3. Training SVM with scikit-learn...")
+# Linear kernel SVM using sklearn
+print("\n3a. Training SVM with linear kernel using scikit-learn...")
+start_time = time.time()
+
+# Initialize and train linear SVM with sklearn
+sklearn_svm_linear = sklearn_svm.SVC(kernel='linear', C=1.0)
+sklearn_svm_linear.fit(X_train, y_train)
+
+sklearn_train_time_linear = time.time() - start_time
+print(f"Training completed in {sklearn_train_time_linear:.2f} seconds")
+
+# Get information about support vectors
+sklearn_sv_linear = sklearn_svm_linear.support_vectors_
+sklearn_n_sv_linear = len(sklearn_sv_linear)
+sklearn_sv_indices_linear = sklearn_svm_linear.support_
+
+print(f"Number of support vectors: {sklearn_n_sv_linear}")
+print(f"Percentage of training samples as support vectors: {100 * sklearn_n_sv_linear / len(X_train):.2f}%")
+
+# Get weight vector and bias
+sklearn_w_linear = sklearn_svm_linear.coef_[0]
+sklearn_b_linear = sklearn_svm_linear.intercept_[0]
+print(f"Bias term b: {sklearn_b_linear:.4f}")
+
+# Compare support vectors with CVXOPT implementation
+# Count matching support vectors
+matching_sv_linear = 0
+for idx in sklearn_sv_indices_linear:
+    if idx in svm_linear.support_vector_indices:
+        matching_sv_linear += 1
+
+print(f"Number of matching support vectors with CVXOPT: {matching_sv_linear}")
+print(f"Percentage of matching support vectors: {100 * matching_sv_linear / sklearn_n_sv_linear:.2f}%")
+
+# Compare weight vectors and bias
+w_diff = np.linalg.norm(sklearn_w_linear - w)
+b_diff = abs(sklearn_b_linear - b)
+print(f"L2 norm difference between weight vectors: {w_diff:.4f}")
+print(f"Absolute difference between bias terms: {b_diff:.4f}")
+
+# Predict on test set
+start_time = time.time()
+sklearn_y_pred_linear = sklearn_svm_linear.predict(X_test)
+sklearn_predict_time_linear = time.time() - start_time
+
+# Calculate accuracy
+sklearn_accuracy_linear = calculate_accuracy(y_test, sklearn_y_pred_linear)
+print(f"Test set accuracy: {sklearn_accuracy_linear:.4f}")
+print(f"Prediction time: {sklearn_predict_time_linear:.4f} seconds")
+
+# Compare computational costs
+print("\nComparison of computational costs (Linear Kernel):")
+print(f"CVXOPT training time: {train_time:.2f} seconds")
+print(f"scikit-learn training time: {sklearn_train_time_linear:.2f} seconds")
+print(f"Speed-up factor: {train_time / sklearn_train_time_linear:.2f}x")
+
+# Gaussian kernel SVM using sklearn
+print("\n3b. Training SVM with Gaussian kernel using scikit-learn...")
+start_time = time.time()
+
+# Initialize and train Gaussian SVM with sklearn
+sklearn_svm_gaussian = sklearn_svm.SVC(kernel='rbf', C=1.0, gamma=0.001)
+sklearn_svm_gaussian.fit(X_train, y_train)
+
+sklearn_train_time_gaussian = time.time() - start_time
+print(f"Training completed in {sklearn_train_time_gaussian:.2f} seconds")
+
+# Get information about support vectors
+sklearn_sv_gaussian = sklearn_svm_gaussian.support_vectors_
+sklearn_sv_indices_gaussian = sklearn_svm_gaussian.support_
+sklearn_n_sv_gaussian = len(sklearn_sv_gaussian)
+
+print(f"Number of support vectors: {sklearn_n_sv_gaussian}")
+print(f"Percentage of training samples as support vectors: {100 * sklearn_n_sv_gaussian / len(X_train):.2f}%")
+
+# Compare support vectors with CVXOPT implementation for Gaussian kernel
+# For this, first train a Gaussian kernel SVM with CVXOPT
+print("\nTraining SVM with Gaussian kernel using CVXOPT for comparison...")
+start_time = time.time()
+
+#-------------
+# 2. Gaussian kernel SVM with CVXOPT
+#-------------
+
+# Initialize and train SVM
+svm_gaussian = SupportVectorMachine()
+svm_gaussian.fit(X_train, y_train, kernel='gaussian', C=1.0, gamma=0.001)
+
+gaussian_train_time = time.time() - start_time
+print(f"CVXOPT Gaussian training completed in {gaussian_train_time:.2f} seconds")
+
+gaussian_support_vectors, gaussian_alphas = svm_gaussian.get_support_vectors()
+gaussian_n_support_vectors = len(gaussian_support_vectors)
+
+print(f"CVXOPT Gaussian number of support vectors: {gaussian_n_support_vectors}")
+
+# Count matching support vectors between sklearn and CVXOPT for Gaussian kernel
+matching_sv_gaussian = 0
+for idx in sklearn_sv_indices_gaussian:
+    if idx in svm_gaussian.support_vector_indices:
+        matching_sv_gaussian += 1
+
+print(f"Number of matching support vectors with CVXOPT (Gaussian): {matching_sv_gaussian}")
+print(f"Percentage of matching support vectors: {100 * matching_sv_gaussian / sklearn_n_sv_gaussian:.2f}%")
+
+# Predict on test set
+start_time = time.time()
+sklearn_y_pred_gaussian = sklearn_svm_gaussian.predict(X_test)
+sklearn_predict_time_gaussian = time.time() - start_time
+
+# Calculate accuracy
+sklearn_accuracy_gaussian = calculate_accuracy(y_test, sklearn_y_pred_gaussian)
+print(f"Test set accuracy: {sklearn_accuracy_gaussian:.4f}")
+print(f"Prediction time: {sklearn_predict_time_gaussian:.4f} seconds")
+
+# Compare computational costs
+print("\nComparison of computational costs (Gaussian Kernel):")
+print(f"CVXOPT training time: {gaussian_train_time:.2f} seconds")
+print(f"scikit-learn training time: {sklearn_train_time_gaussian:.2f} seconds")
+print(f"Speed-up factor: {gaussian_train_time / sklearn_train_time_gaussian:.2f}x")
+
+# Overall comparison
+print("\nOverall comparison:")
+print(f"Linear kernel - CVXOPT accuracy: {accuracy:.4f}, scikit-learn accuracy: {sklearn_accuracy_linear:.4f}")
+print(f"Gaussian kernel - CVXOPT accuracy: {calculate_accuracy(y_test, svm_gaussian.predict(X_test)):.4f}, scikit-learn accuracy: {sklearn_accuracy_gaussian:.4f}")
+
+
+
+
+import os
+import numpy as np
+import time
+from PIL import Image
+from sklearn.svm import LinearSVC
+from sklearn.metrics import accuracy_score
+from sklearn.linear_model import SGDClassifier
+from svm import SupportVectorMachine  
+
+sz_=30000
+
+def preprocess_image(image_path):
+    """Preprocess an image: resize, normalize, and flatten."""
+    try:
+        # Load image
+        img = Image.open(image_path)
+        img = img.convert("RGB")
+        # Resize to 100x100
+        img = img.resize((100, 100))
+        
+        # Convert to numpy array
+        img_array = np.array(img)
+        
+        # Check if image is grayscale
+        if len(img_array.shape) == 2:
+            # Convert grayscale to RGB
+            img_array_rgb = np.zeros((100, 100, 3))
+            for i in range(3):
+                img_array_rgb[:, :, i] = img_array
+            img_array = img_array_rgb
+        
+        # Normalize to [0, 1]
+        img_array = img_array / 255.0
+        
+        # Flatten the image
+        flattened_img = np.zeros(30000)
+        idx = 0
+        for i in range(100):
+            for j in range(100):
+                for k in range(3):
+                    flattened_img[idx] = img_array[i, j, k]
+                    idx += 1
+        
+        return flattened_img
+    
+    except Exception as e:
+        print(f"Error processing image {image_path}: {e}")
+        return None
+
+def load_binary_data(base_dir, subset, class_names):
+    """Load binary classification data for two classes."""
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match16-0.html#3" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    X = []
+    y = []
+    
+    for i, class_name in enumerate(class_names):
+        class_dir = os.path.join(base_dir, subset, class_name)
+        
+        if not os.path.exists(class_dir):
+            print(f"Directory not found: {class_dir}")
+</FONT>            continue
+            
+        print(f"Loading {subset} data for class {class_name}...")
+        
+        # List all image files in the class directory
+        image_files = [f for f in os.listdir(class_dir) if f.endswith(('.jpg', '.png'))]
+        
+        print(f"  Found {len(image_files)} images")
+        
+        for image_file in image_files:
+            image_path = os.path.join(class_dir, image_file)
+            
+            # Preprocess the image
+            img_features = preprocess_image(image_path)
+            
+            if img_features is not None:
+                X.append(img_features)
+                y.append(i)  # Use 0 for first class, 1 for second class
+    
+    return np.array(X), np.array(y)
+
+def test_sgd_svm():
+    """Test SGD-based SVM implementation and compare with LIBLINEAR."""
+    # Configuration
+    
+    # Paths
+    base_dir = "/mnt/d/OneDrive/Desktop/COL774_A2/data/Q2"
+
+    # The two classes we're using (hail and lightning)
+    class_names = ["hail", "lightning"]
+
+    print("Loading training data...")
+    X_train, y_train = load_binary_data(base_dir, "train", class_names)
+
+    print("Loading test data...")
+    X_test, y_test = load_binary_data(base_dir, "test", class_names)
+
+    print(f"Loaded {X_train.shape[0]} training samples and {X_test.shape[0]} test samples")
+    # Test Custom SGD SVM
+    print("\nTesting Custom SGD SVM...")
+    custom_svm = SupportVectorMachine()
+    
+    start_time = time.time()
+    custom_svm.fit_sgd(X_train, y_train, C=1.0, learning_rate=0.01, n_epochs=100)
+    custom_time = time.time() - start_time
+    
+    y_pred_custom = custom_svm.predict_sgd(X_test)
+    custom_acc = accuracy_score(y_test, y_pred_custom)
+    print("Custom Accuracy:", custom_acc)
+
+    # Test LIBLINEAR
+    print("\nTesting LIBLINEAR...")
+    liblinear_svm = LinearSVC(C=1.0, dual=False, max_iter=10000)
+    
+<A NAME="11"></A><FONT color = #00FF00><A HREF="match16-0.html#11" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    start_time = time.time()
+    liblinear_svm.fit(X_train, y_train)
+    liblinear_time = time.time() - start_time
+    
+    y_pred_liblinear = liblinear_svm.predict(X_test)
+    liblinear_acc = accuracy_score(y_test, y_pred_liblinear)
+    
+    # Results comparison
+    print("\n" + "="*40)
+</FONT>    print(f"{'Metric':&lt;20}{'Custom SGD':&lt;15}{'LIBLINEAR':&lt;15}{'SGDClassifier':&lt;15}")
+    print("-"*40)
+    print(f"{'Training Time (s)':&lt;20}{custom_time:.2f}{'':&lt;15}{liblinear_time:.2f}{'':&lt;15}")
+    print(f"{'Accuracy':&lt;20}{custom_acc:.4f}{'':&lt;15}{liblinear_acc:.4f}{'':&lt;15}")
+    print("="*40 + "\n")
+    
+    # Grading criteria (example thresholds)
+    assert custom_acc &gt;= liblinear_acc - 0.15, "Accuracy too low compared to LIBLINEAR"
+    assert custom_time &lt;= liblinear_time * 2, "Training time too high compared to LIBLINEAR"
+    print("All basic checks passed!")
+
+if __name__ == "__main__":
+    test_sgd_svm()
+
+
+
+# Multiclass Image Classification
+
+#Part 1 and 2:Linear/Gaussian kernel SVM with CVXOPT
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+from sklearn import svm as sklearn_svm
+from sklearn.linear_model import SGDClassifier
+import time
+
+from svm import SupportVectorMachine
+base_dir = "/mnt/d/OneDrive/Desktop/COL774_A2/data/Q2"
+class_names = ["dew","fogsmog","frost","glaze","hail", "lightning","rain","rainbow","rime","sandstorm","snow"]
+class_names = ["dew","fogsmog","frost"]
+
+sz_=30000
+def preprocess_image(image_path):
+    try:
+        # Load image
+        img = Image.open(image_path)
+        img = img.convert("RGB")
+        # Resize to 100x100
+        img = img.resize((100, 100))
+        
+        # Convert to numpy array
+        img_array = np.array(img)
+        
+        # Check if image is grayscale or has alpha channel
+        if len(img_array.shape) == 2:
+            # Convert grayscale to RGB
+            img_array_rgb = np.zeros((100, 100, 3))
+            for i in range(3):
+                img_array_rgb[:, :, i] = img_array
+            img_array = img_array_rgb
+        
+        # Normalize to [0, 1]
+        img_array = img_array / 255.0
+        
+        # Flatten the image
+        flattened_img = np.zeros(sz_)
+        idx = 0
+        for i in range(100):
+            for j in range(100):
+                for k in range(3):
+                    flattened_img[idx] = img_array[i, j, k]
+                    idx += 1
+        
+        return flattened_img
+    
+    except Exception as e:
+        print(f"Error processing image {image_path}: {e}")
+        return None
+
+def load_binary_data(base_dir, subset, class_names):
+    X = []
+    y = []
+    
+    for i, class_name in enumerate(class_names):
+        class_dir = os.path.join(base_dir, subset, class_name)
+        
+        if not os.path.exists(class_dir):
+            print(f"Directory not found: {class_dir}")
+            continue
+            
+        print(f"Loading {subset} data for class {class_name}...")
+        
+        # List all image files in the class directory
+        image_files = []
+        for f in os.listdir(class_dir):
+            image_files.append(f)
+        
+        print(f"  Found {len(image_files)} images")
+        
+        for image_file in image_files:
+            image_path = os.path.join(class_dir, image_file)
+            
+            # Preprocess the image
+            img_features = preprocess_image(image_path)
+            
+            if img_features is not None:
+                X.append(img_features)
+                y.append(i)  # Use 0 for first class, 1 for second class
+    
+    return np.array(X), np.array(y)
+
+def plot_support_vectors(support_vectors, alphas, shape=(100, 100, 3), top_n=5):
+    # Sort support vectors by alpha value
+    sorted_indices = []
+    alpha_values = list(alphas)
+    
+    # Manual sorting to find indices with highest alpha values
+    for _ in range(min(top_n, len(alphas))):
+        max_idx = 0
+        max_val = alpha_values[0]
+        
+        for i in range(1, len(alpha_values)):
+            if alpha_values[i] &gt; max_val:
+                max_val = alpha_values[i]
+                max_idx = i
+        
+        sorted_indices.append(max_idx)
+        alpha_values[max_idx] = -1  # Mark as processed
+    
+    plt.figure(figsize=(15, 3))
+    for i, idx in enumerate(sorted_indices):
+        plt.subplot(1, top_n, i + 1)
+        
+        # Reshape the support vector
+        sv_reshaped = np.zeros(shape)
+        flat_idx = 0
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                for ch in range(shape[2]):
+                    sv_reshaped[r, c, ch] = support_vectors[idx][flat_idx]
+                    flat_idx += 1
+        
+        # Clip values to [0, 1] range for visualization
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                for ch in range(shape[2]):
+                    if sv_reshaped[r, c, ch] &lt; 0:
+                        sv_reshaped[r, c, ch] = 0
+                    if sv_reshaped[r, c, ch] &gt; 1:
+                        sv_reshaped[r, c, ch] = 1
+        
+        plt.imshow(sv_reshaped)
+        plt.title(f"SV {i+1}\nα={alphas[idx]:.4f}")
+        plt.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig('top_support_vectors.png')
+    plt.close()
+
+def plot_confusion_matrix(y_true, y_pred, classes):
+    cm = np.zeros((len(classes), len(classes)), dtype=int)
+    for i in range(len(y_true)):
+        cm[y_true[i]][y_pred[i]] += 1
+    
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match16-0.html#0" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    plt.figure(figsize=(10, 8))
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    plt.title('Confusion Matrix')
+    plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+    
+    fmt = 'd'
+</FONT>    thresh = cm.max() / 2.
+    for i in range(len(classes)):
+        for j in range(len(classes)):
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match16-0.html#4" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            plt.text(j, i, format(cm[i, j], fmt),
+                     ha="center", va="center",
+                     color="white" if cm[i, j] &gt; thresh else "black")
+    
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.tight_layout()
+</FONT>    plt.savefig('sklearn_confusion_matrix.png')
+    plt.close()
+
+
+def plot_weight_vector(w, shape=(100, 100, 3)):
+
+    plt.figure(figsize=(5, 5))
+    
+    # Reshape the weight vector
+    w_reshaped = np.zeros(shape)
+    flat_idx = 0
+    for r in range(shape[0]):
+        for c in range(shape[1]):
+            for ch in range(shape[2]):
+                w_reshaped[r, c, ch] = w[flat_idx]
+                flat_idx += 1
+    
+    # Normalize for visualization
+    w_min = float('inf')
+    w_max = float('-inf')
+    
+    for r in range(shape[0]):
+        for c in range(shape[1]):
+            for ch in range(shape[2]):
+                if w_reshaped[r, c, ch] &lt; w_min:
+                    w_min = w_reshaped[r, c, ch]
+                if w_reshaped[r, c, ch] &gt; w_max:
+                    w_max = w_reshaped[r, c, ch]
+    
+    # Avoid division by zero
+    if w_min == w_max:
+        normalized_w = np.zeros_like(w_reshaped)
+    else:
+        normalized_w = np.zeros_like(w_reshaped)
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                for ch in range(shape[2]):
+                    normalized_w[r, c, ch] = (w_reshaped[r, c, ch] - w_min) / (w_max - w_min)
+    
+    plt.imshow(normalized_w)
+    plt.title("Weight Vector")
+    plt.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig('weight_vector.png')
+    plt.close()
+
+def calculate_accuracy(y_true, y_pred):
+    correct = 0
+    for i in range(len(y_true)):
+        if y_true[i] == y_pred[i]:
+            correct += 1
+    return correct / len(y_true) if len(y_true) &gt; 0 else 0
+
+#----------------------------------------------------------------------------
+#----------------------------- MAIN CODE -----------------------------------
+#----------------------------------------------------------------------------
+
+def get_train_data_lst(base_dir):
+    ans1=[]
+    ans2=[]
+    for class_ in class_names:
+        X,y=load_binary_data(base_dir, "train", [class_])
+        ans1.append(X)
+        ans2.append(y)
+    return ans1,ans2
+
+all_test_X,all_test_y=load_binary_data(base_dir,"test",class_names)
+print(f"Test data of length {len(all_test_y)} extracted")
+#maps class to list of map(class-&gt;class_count)(one int for each test case)
+mp_ = [[0 for _ in range(len(class_names))] for _ in range(len(all_test_y))]
+
+def check_i_or_j_class(base_dir,class1,class2,X_train, y_train, test_X,test_y):
+    # Initialize and train SVM
+    class1_idx=0
+    class2_idx=0
+    for i in range(len(class_names)):
+        if class_names[i]==class1:
+            class1_idx=i
+        if class_names[i]==class2:
+            class2_idx=i
+
+    svm_gaussian = SupportVectorMachine()
+    svm_gaussian.fit(X_train, y_train, kernel='gaussian', C=1.0)
+    print(f"Training completed of :{class1}, {class2}")
+    
+    y_pred = svm_gaussian.predict(all_test_X)
+    for i in range(len(y_pred)):
+        pred_class=-1
+        if y_pred[i]==0:
+            pred_class=class1_idx
+        else:
+            pred_class=class2_idx
+        mp_[i][pred_class]+=1
+
+X_train_lst,y_train_lst = get_train_data_lst(base_dir)
+print("Train data extracted")
+
+for i in range(len(class_names)):
+    for j in range(i+1,len(class_names)):
+        print("i,j: ",i,j)
+
+        X_train_ij=np.concatenate((X_train_lst[i],X_train_lst[j]),axis=0)
+        y_train_ij=np.concatenate(([0]*len(X_train_lst[i]),[1]*len(X_train_lst[j])),axis=0)
+
+        check_i_or_j_class(base_dir,class_names[i],class_names[j],X_train_ij,y_train_ij,all_test_X,all_test_y)
+
+y_pred_final=[-1]*len(all_test_y)
+for i in range(len(all_test_y)):
+    mx_cnt=0
+    mx_class=-1
+    for j in range(len(class_names)):
+        if mp_[i][j]&gt;=mx_cnt:
+            mx_class=j
+            mx_cnt=mp_[i][j]
+    y_pred_final[i]=mx_class
+
+# Calculate accuracy
+accuracy = calculate_accuracy(all_test_y, y_pred_final)
+print(f"Test set accuracy: {accuracy:.4f}")
+
+# Generate confusion matrix
+plot_confusion_matrix(y_test, y_pred, class_names)
+
+
+
+
+# Multiclass Image Classification using scikit-learn SVM (LIBSVM)
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+from sklearn import svm as sklearn_svm
+import time
+from svm import SupportVectorMachine    
+
+base_dir = "/mnt/d/OneDrive/Desktop/COL774_A2/data/Q2"
+class_names = ["dew", "fogsmog", "frost", "glaze", "hail", "lightning", "rain", "rainbow", "rime", "sandstorm", "snow"]
+# class_names = ["dew", "fogsmog", "frost"]
+sz_=30000
+
+def preprocess_image(image_path):
+    try:
+        # Load image
+        img = Image.open(image_path)
+        img = img.convert("RGB")
+        # Resize to 100x100
+        img = img.resize((100, 100))
+        
+        # Convert to numpy array
+        img_array = np.array(img)
+        # Check if image is grayscale or has alpha channel
+        if len(img_array.shape) == 2:
+            # Convert grayscale to RGB
+            img_array_rgb = np.zeros((100, 100, 3))
+            for i in range(3):
+                img_array_rgb[:, :, i] = img_array
+            img_array = img_array_rgb
+        elif img_array.shape[2]==4:
+            img_array = img_array[:,:,:3]
+        
+        # Normalize to [0, 1]
+        img_array = img_array / 255.0
+        
+        # Flatten the image
+        flattened_img = img_array.flatten()
+        if(flattened_img.shape[0]!=sz_):
+            print("flattened_img",flattened_img.shape)
+        return flattened_img
+    
+    except Exception as e:
+        print(f"Error processing image {image_path}: {e}")
+        return None
+
+def check_i_or_j_class(base_dir,class1,class2,X_train, y_train, test_X,test_y):
+    # Initialize and train SVM
+    class1_idx=0
+    class2_idx=0
+    mp_ = [[0 for _ in range(len(class_names))] for _ in range(len(test_y))]
+    for i in range(len(class_names)):
+        if class_names[i]==class1:
+            class1_idx=i
+        if class_names[i]==class2:
+            class2_idx=i
+
+    svm_gaussian = SupportVectorMachine()
+    svm_gaussian.fit(X_train, y_train, kernel='gaussian', C=1.0)
+    print(f"Training completed of :{class1}, {class2}")
+    
+    y_pred = svm_gaussian.predict(test_X)
+    for i in range(len(y_pred)):
+        pred_class=-1
+        if y_pred[i]==0:
+            pred_class=class1_idx
+        else:
+            pred_class=class2_idx
+        mp_[i][pred_class]+=1
+
+
+def load_data(base_dir, subset, class_names):
+    X = []
+    y = []
+    
+    for i, class_name in enumerate(class_names):
+        class_dir = os.path.join(base_dir, subset, class_name)
+        
+        if not os.path.exists(class_dir):
+            print(f"Directory not found: {class_dir}")
+            continue
+            
+        print(f"Loading {subset} data for class {class_name}...")
+        
+        # List all image files in the class directory
+        image_files = [f for f in os.listdir(class_dir) if os.path.isfile(os.path.join(class_dir, f))]
+        
+        print(f"  Found {len(image_files)} images")
+        
+        for image_file in image_files:
+            image_path = os.path.join(class_dir, image_file)
+            
+            # Preprocess the image
+            img_features = preprocess_image(image_path)
+            
+            if img_features is not None:
+                if img_features.shape == (sz_,):  # Ensure the shape is correct
+                    X.append(img_features)
+                    y.append(i)  # Use class index as the label
+                else:
+                    print(f"Skipping image {image_path} due to incorrect shape: {img_features.shape}")
+    
+    return np.array(X), np.array(y)
+
+def calculate_accuracy(y_true, y_pred):
+    correct = 0
+    for i in range(len(y_true)):
+        if y_true[i] == y_pred[i]:
+            correct += 1
+    return correct / len(y_true) if len(y_true) &gt; 0 else 0
+
+def plot_confusion_matrix(y_true, y_pred, classes):
+    cm = np.zeros((len(classes), len(classes)), dtype=int)
+    for i in range(len(y_true)):
+        cm[y_true[i]][y_pred[i]] += 1
+    
+    plt.figure(figsize=(10, 8))
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    plt.title('Confusion Matrix')
+    plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+    
+    fmt = 'd'
+    thresh = cm.max() / 2.
+    for i in range(len(classes)):
+        for j in range(len(classes)):
+            plt.text(j, i, format(cm[i, j], fmt),
+                     ha="center", va="center",
+                     color="white" if cm[i, j] &gt; thresh else "black")
+    
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.tight_layout()
+    plt.savefig('sklearn_confusion_matrix.png')
+    plt.close()
+
+# Load data
+print("Loading training data...")
+X_train, y_train = load_data(base_dir, "train", class_names)
+print(f"Training data loaded: {X_train.shape[0]} samples")
+
+print("Loading test data...")
+X_test, y_test = load_data(base_dir, "test", class_names)
+print(f"Test data loaded: {X_test.shape[0]} samples")
+
+# Train SVM model using scikit-learn (LIBSVM)
+print("Training SVM model...")
+start_time = time.time()
+
+# Create SVM classifier with Gaussian kernel (RBF)
+# Use one-vs-one approach for multi-class classification (default for SVC)
+svm_classifier = sklearn_svm.SVC(
+    C=1.0,
+    kernel='rbf',  # Gaussian kernel
+    gamma=0.001,
+    decision_function_shape='ovo',  # One-vs-one
+    cache_size=1000,  # Increase cache size for faster training
+    verbose=True
+)
+
+# Train the model
+svm_classifier.fit(X_train, y_train)
+
+end_time = time.time()
+training_time = end_time - start_time
+print(f"Model training completed in {training_time:.2f} seconds")
+
+# Predict on test data
+print("Making predictions on test data...")
+y_pred = svm_classifier.predict(X_test)
+
+# Calculate accuracy
+accuracy = calculate_accuracy(y_test, y_pred)
+print(f"Test set accuracy: {accuracy:.4f}")
+
+# Generate confusion matrix
+plot_confusion_matrix(y_test, y_pred, class_names)
+
+# Print additional information
+print(f"Number of support vectors: {svm_classifier.n_support_.sum()}")
+print(f"Support vectors per class: {svm_classifier.n_support_}")
+print(f"Number of classes: {len(svm_classifier.classes_)}")
+
+# Save results to file
+with open('sklearn_svm_results.txt', 'w') as f:
+    f.write(f"Training time: {training_time:.2f} seconds\n")
+    f.write(f"Test accuracy: {accuracy:.4f}\n")
+    f.write(f"Number of support vectors: {svm_classifier.n_support_.sum()}\n")
+    f.write(f"Support vectors per class: {svm_classifier.n_support_}\n")
+
+
+
+
+#
+import os
+import numpy as np
+import time
+import matplotlib.pyplot as plt
+from PIL import Image
+from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score, KFold
+
+def preprocess_image(image_path):
+    try:
+        img = Image.open(image_path)
+        img = img.convert("RGB")
+        img = img.resize((100, 100))
+        img_array = np.array(img)
+        if len(img_array.shape) == 2:
+            # Convert grayscale to RGB
+            img_array_rgb = np.zeros((100, 100, 3))
+            for i in range(3):
+                img_array_rgb[:, :, i] = img_array
+            img_array = img_array_rgb
+        
+        img_array = img_array / 255.0
+        return img_array.flatten()
+    except Exception as e:
+        print(f"Error processing image {image_path}: {e}")
+        return None
+
+def load_binary_data(base_dir, subset, class_names):
+    X = []
+    y = []
+    for i, class_name in enumerate(class_names):
+        class_dir = os.path.join(base_dir, subset, class_name)
+        if not os.path.exists(class_dir):
+            print(f"Directory not found: {class_dir}")
+            continue
+        print(f"Loading {subset} data for class {class_name}...")
+        image_files = os.listdir(class_dir)
+        print(f"  Found {len(image_files)} images")
+        for image_file in image_files:
+            image_path = os.path.join(class_dir, image_file)
+            features = preprocess_image(image_path)
+            if features is not None:
+                X.append(features)
+                y.append(i)
+    return np.array(X), np.array(y)
+
+def calculate_accuracy(y_true, y_pred):
+    return np.mean(y_true == y_pred)
+
+def load_and_report_data(base_dir, subset, class_names):
+    X, y = load_binary_data(base_dir, subset, class_names)
+    print(f"Loaded {X.shape[0]} {subset} samples")
+    return X, y
+
+
+def plot_accuracies(C_values, cv_accuracies, test_accuracies, filename='cv_test_accuracy_vs_C.png'):
+    plt.figure(figsize=(8, 6))
+    plt.plot(C_values, cv_accuracies, marker='o', label='5-fold CV Accuracy')
+    plt.plot(C_values, test_accuracies, marker='s', label='Test Accuracy')
+    plt.xscale('log')
+    plt.xlabel('C (log scale)')
+    plt.ylabel('Accuracy')
+    plt.title('Accuracy vs. C for Gaussian Kernel SVM (γ = 0.001)')
+    plt.legend()
+    plt.ylim(0, 1)  # accuracy is shown as a fraction between 0 and 1
+    plt.tight_layout()
+    plt.savefig(filename)
+    plt.close()
+    print(f"Plot saved as '{filename}'")
+
+def evaluate_model_for_C(X_train, y_train, X_test, y_test, C, gamma, cv):
+    print(f"\nEvaluating for C = {C}")
+    svc = SVC(kernel='rbf', C=C, gamma=gamma)
+    scores = cross_val_score(svc, X_train, y_train, cv=cv, scoring='accuracy')
+    mean_cv_acc = np.mean(scores)
+    print(f"  5-fold CV Accuracy: {mean_cv_acc:.4f}")
+    svc.fit(X_train, y_train)
+    y_pred = svc.predict(X_test)
+    test_acc = calculate_accuracy(y_test, y_pred)
+    print(f"  Test Accuracy: {test_acc:.4f}")
+    return mean_cv_acc, test_acc
+
+
+def main():
+    # Define paths and class names.
+    base_dir = "/mnt/d/OneDrive/Desktop/COL774_A2/data/Q2"
+    class_names = ["hail", "lightning"]
+    class_names = ["dew", "fogsmog", "frost", "glaze", "hail", "lightning", "rain", "rainbow", "rime", "sandstorm", "snow"]
+
+
+    print("Loading training data...")
+    X_train, y_train = load_and_report_data(base_dir, "train", class_names)
+    print("Loading test data...")
+    X_test, y_test = load_and_report_data(base_dir, "test", class_names)
+
+    # Define candidate C values and fixed gamma.
+    C_values = [1e-5, 1e-3, 1, 5, 10]
+    gamma = 0.001
+
+    cv_accuracies = []
+    test_accuracies = []
+    
+    cv = KFold(n_splits=5, shuffle=True, random_state=42)
+    
+    print("\nPerforming 5-fold cross-validation for different values of C:")
+    for C in C_values:
+        cv_acc, test_acc = evaluate_model_for_C(X_train, y_train, X_test, y_test, C, gamma, cv)
+        cv_accuracies.append(cv_acc)
+        test_accuracies.append(test_acc)
+
+        
+    # Plot the cross-validation and test accuracies vs. C
+    plot_accuracies(C_values, cv_accuracies, test_accuracies, filename='cv_test_accuracy_vs_C.png')
+    
+    # Determine the best C based on CV accuracy.
+    best_index = np.argmax(cv_accuracies)
+    best_C = C_values[best_index]
+    print(f"\nBest C value based on 5-fold CV: {best_C} with CV Accuracy: {cv_accuracies[best_index]:.4f}")
+    
+    # Train final SVM classifier on the entire training set with best C
+    final_svc = SVC(kernel='rbf', C=best_C, gamma=gamma)
+    final_svc.fit(X_train, y_train)
+    final_y_pred = final_svc.predict(X_test)
+    final_test_acc = calculate_accuracy(y_test, final_y_pred)
+    print(f"Final Test Accuracy with best C ({best_C}): {final_test_acc:.4f}")
+    
+if __name__ == "__main__":
+    main()
+
+
+
+
+# Misclassified: Multiclass Image Classification using scikit-learn SVM (LIBSVM)
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+from sklearn import svm as sklearn_svm
+import time
+import random
+
+base_dir = "/mnt/d/OneDrive/Desktop/COL774_A2/data/Q2"
+class_names = ["dew", "fogsmog", "frost", "glaze", "hail", "lightning", "rain", "rainbow", "rime", "sandstorm", "snow"]
+class_names = ["frost", "sandstorm"]
+
+x_=0
+y_=0
+def preprocess_image(image_path):
+    try:
+        img = Image.open(image_path)
+        img = img.convert("RGB")
+        img = img.resize((100, 100))
+
+        img_array = np.array(img)
+        if len(img_array.shape) == 2:  # Grayscale
+            img_array_rgb = np.stack([img_array]*3, axis=-1)
+            img_array = img_array_rgb
+        elif img_array.shape[2] == 4:  # RGBA -&gt; RGB
+            img_array = img_array[:, :, :3]
+        img_array = img_array / 255.0
+        return img_array.flatten()
+    except Exception as e:
+        print(f"Error processing image {image_path}: {e}")
+        return None
+
+def load_data(base_dir, subset, class_names):
+    X, y = [], []
+    for i, class_name in enumerate(class_names):
+        class_dir = os.path.join(base_dir, subset, class_name)
+        if not os.path.exists(class_dir):
+            print(f"Directory not found: {class_dir}")
+            continue
+        print(f"Loading {subset} data for class {class_name}...")
+        image_files = [f for f in os.listdir(class_dir) if os.path.isfile(os.path.join(class_dir, f))]
+        print(f"  Found {len(image_files)} images")
+        for image_file in image_files:
+            image_path = os.path.join(class_dir, image_file)
+            features = preprocess_image(image_path)
+            if features is not None and features.shape == (30000,):
+                X.append(features)
+                y.append(i)
+    return np.array(X), np.array(y)
+
+def calculate_accuracy(y_true, y_pred):
+    correct = sum(1 for i in range(len(y_true)) if y_true[i] == y_pred[i])
+    return correct / len(y_true) if len(y_true) &gt; 0 else 0
+
+def plot_confusion_matrix(y_true, y_pred, classes):
+    """
+    Plots the confusion matrix for the given true and predicted labels.
+    Args:
+        y_true (list or np.array): True class labels.
+        y_pred (list or np.array): Predicted class labels.
+        classes (list): List of class names.
+    """
+    # Initialize the confusion matrix
+    cm = np.zeros((len(classes), len(classes)), dtype=int)
+    for i in range(len(y_true)):
+        cm[y_true[i]][y_pred[i]] += 1
+
+    # Plot the confusion matrix
+    plt.figure(figsize=(10, 8))
+    plt.title('Confusion Matrix')
+    mappable = plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Greens)  # Create a mappable object
+    plt.colorbar(mappable)  # Associate the colorbar with the mappable object
+
+    # Add labels and ticks
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+
+    # Add text annotations for each cell
+    thresh = cm.max() / 2.0
+    for i in range(len(classes)):
+        for j in range(len(classes)):
+            plt.text(j, i, str(cm[i, j]),
+                     ha="center", va="center",
+                     color="white" if cm[i, j] &gt; thresh else "black")
+
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.tight_layout()
+    plt.savefig('sklearn_confusion_matrix.png')
+    plt.close()
+
+def visualize_misclassified(X_test, y_test, y_pred, class_names, top_n=10, shape=(100,100,3)):
+    """
+    Displays a grid of 'top_n' misclassified examples, showing the true and predicted labels.
+    """
+    # Identify misclassified indices
+    misclassified = [i for i in range(len(y_test)) if y_test[i] != y_pred[i]]
+    
+    # Randomly select up to 'top_n' misclassified samples
+    
+    sampled_indices = random.sample(misclassified, min(top_n, len(misclassified)))
+
+    
+    # Plot each misclassified image
+    plt.figure(figsize=(15, 6))
+    for idx, mis_idx in enumerate(sampled_indices):
+        img_reshaped = X_test[mis_idx].reshape(shape)
+        plt.subplot(2, 5, idx + 1)
+        plt.imshow(img_reshaped)
+        true_label = class_names[y_test[mis_idx]]
+        pred_label = class_names[y_pred[mis_idx]]
+        plt.title(f"True: {true_label}\nPred: {pred_label}")
+        plt.axis('off')
+    plt.tight_layout()
+    plt.savefig('misclassified_examples.png')
+    plt.close()
+
+def train_svm_classifier(X_train, y_train, C_value=1.0, gamma_value=0.001):
+    """
+    Trains an SVM classifier using the RBF kernel.
+    Args:
+        X_train (np.array): Training images.
+        y_train (np.array): Training labels.
+        C_value (float): Regularization parameter.
+        gamma_value (float): Kernel coefficient.
+    Returns:
+        SVC: Trained SVM classifier.
+    """
+    print("\nTraining SVM classifier...")
+    classifier = sklearn_svm.SVC(C=C_value, kernel='rbf', gamma=gamma_value, decision_function_shape='ovo', cache_size=1000, verbose=True)
+    start_time = time.time()
+    classifier.fit(X_train, y_train)
+    print(f"Training completed in {time.time() - start_time:.2f} seconds")
+    return classifier
+
+
+# ------------------------- MAIN SCRIPT -------------------------------------
+
+# Load training data
+print("Loading training data...")
+X_train, y_train = load_data(base_dir, "train", class_names)
+print(f"Training data loaded: {X_train.shape[0]} samples")
+x_=0
+# Load test data
+print("Loading test data...")
+X_test, y_test = load_data(base_dir, "test", class_names)
+print(f"Test data loaded: {X_test.shape[0]} samples")
+
+# Train SVM model using scikit-learn (LIBSVM)
+print("Training SVM model...")
+start_time = time.time()
+y_=1
+
+model = train_svm_classifier(X_train, y_train)
+
+training_time = time.time() - start_time
+print(f"Model training completed in {training_time:.2f} seconds")
+
+# Predict on test data
+print("Making predictions on test data...")
+y_pred = model.predict(X_test)
+accuracy = calculate_accuracy(y_test, y_pred)
+print(f"Test set accuracy: {accuracy:.4f}")
+
+# Generate confusion matrix
+plot_confusion_matrix(y_test, y_pred, class_names)
+
+# Print additional information
+print(f"Number of support vectors: {model.n_support_.sum()}")
+print(f"Support vectors per class: {model.n_support_}")
+print(f"Number of classes: {len(model.classes_)}")
+
+# Visualize 10 misclassified examples
+print("Visualizing misclassified examples...")
+visualize_misclassified(X_test, y_test, y_pred, class_names, top_n=10)
+
+
+
+import cvxopt
+import numpy as np
+
+class SupportVectorMachine:
+    '''
+    Binary Classifier using Support Vector Machine
+    '''
+    def __init__(self):
+        self.support_vectors = []
+        self.support_vector_labels = []
+        self.alphas = None
+        self.b = None
+        self.w = None
+        self.kernel_type = None
+        self.gamma = None
+        self.kernel_matrix=None
+
+    def linear_kernel(self, x, z):
+        return np.dot(x, z)
+    
+    def gaussian_kernel(self, x, z, gamma):
+        diff = x - z
+        return np.exp(-gamma * np.dot(diff, diff))
+    
+    def compute_kernel(self, x, z, kernel, gamma):
+        if kernel == 'linear':
+            return self.linear_kernel(x, z)
+        elif kernel == 'gaussian':
+            return self.gaussian_kernel(x, z, gamma)
+    '''
+    def compute_kernel_matrix(self, X, kernel, gamma):
+        m = X.shape[0]
+        K = np.zeros((m, m))
+        for i in range(m):
+            for j in range(m):
+                K[i, j] = self.compute_kernel(X[i], X[j],kernel, gamma)
+        return K
+    '''
+
+    def compute_kernel_matrix(self, X, kernel, gamma):
+        """Compute the kernel matrix efficiently using vectorized operations."""
+        if kernel == 'linear':
+            return X @ X.T 
+
+        elif kernel == 'gaussian':
+            X_norm = np.sum(X**2, axis=1, keepdims=True)  
+            K = np.exp(-gamma * (X_norm + X_norm.T - 2 * (X @ X.T)))  
+            return K
+
+        else:
+            raise ValueError("Neither 'linear' nor 'gaussian' kernel is selected")
+
+    def fit(self, X, y, kernel='linear', C=1.0, gamma=0.001):
+        '''
+        Learn the parameters from the given training data
+        Classes are 0 or 1
+        
+        Args:
+            X: np.array of shape (N, D) 
+                where N is the number of samples and D is the flattened dimension of each image
+                
+            y: np.array of shape (N,)
+                where N is the number of samples and y[i] is the class of the ith sample
+                
+            kernel: str
+                The kernel to be used. Can be 'linear' or 'gaussian'
+                
+            C: float
+                The regularization parameter
+                
+            gamma: float
+                The gamma parameter for gaussian kernel, ignored for linear kernel
+        '''
+        # Convert 0/1 labels to -1/+1 for SVM
+        self.support_vectors = []
+        self.support_vector_labels = []
+        y_svm = np.zeros_like(y, dtype=float)
+        for i in range(len(y)):
+            y_svm[i] = 2 * y[i] - 1  # Convert 0 to -1 and 1 to 1
+        n_samples, n_features = X.shape
+        self.kernel_type = kernel
+        self.gamma = gamma
+        
+        # Compute the kernel matrix
+        K = np.zeros((n_samples, n_samples))
+        K = self.compute_kernel_matrix(X, kernel, gamma)
+
+        self.kernel_matrix=None
+        self.kernel_matrix=K
+
+        # we want to minimize 1/2 * sum_i sum_j (alpha_i * alpha_j * y_i * y_j * K_ij) - sum_i alpha_i
+        # subject to sum_i (alpha_i * y_i) = 0 and 0 &lt;= alpha_i &lt;= C for all i
+        
+        # std quadratic programming form: 1/2 x^T P x + q^T x s.t. Gx &lt;= h, Ax = b
+        
+        # here, x is the vector of alphas
+
+        # P matrix for CVXOPT
+        P = np.zeros((n_samples, n_samples))
+        for i in range(n_samples):
+            for j in range(n_samples):
+                P[i, j] = y_svm[i] * y_svm[j] * K[i, j] # P = y * y.T * K
+        
+        P = cvxopt.matrix(P)
+        
+        # q vector for CVXOPT
+        q = np.zeros(n_samples)
+        for i in range(n_samples):
+            q[i] = -1.0 # q = -1 vector of length n_samples
+        
+        q = cvxopt.matrix(q)
+        
+        # G matrix for inequality constraints: 0 &lt;= alpha_i &lt;= C
+        # G is a 2n x n matrix where the first n rows represent -I and the next n rows represent I
+        G = np.zeros((2 * n_samples, n_samples))
+        
+        # for alpha_i &gt;= 0
+        for i in range(n_samples):
+            G[i, i] = -1.0 # -I and I are stacked vertically
+        
+        # for alpha_i &lt;= C
+        for i in range(n_samples):
+            G[i + n_samples, i] = 1.0  # -I and I are stacked vertically
+        
+        G = cvxopt.matrix(G)
+        
+        # h vector for inequality constraints
+        h = np.zeros(2 * n_samples)
+        
+        # for alpha_i &gt;= 0
+        for i in range(n_samples):
+            h[i] = 0.0 # 0 and C are stacked vertically
+        
+        # for alpha_i &lt;= C
+        for i in range(n_samples):
+            h[i + n_samples] = C # 0 and C are stacked vertically
+        
+        h = cvxopt.matrix(h)
+        
+        # A matrix for equality constraint: sum_i (alpha_i * y_i) = 0
+        A = np.zeros((1, n_samples))
+        for i in range(n_samples):
+            A[0, i] = y_svm[i] 
+        
+        A = cvxopt.matrix(A)
+        
+        # b vector for equality constraint
+        b = cvxopt.matrix(0.0)
+        
+        # Solve the quadratic programming problem
+        cvxopt.solvers.options['show_progress'] = False
+        solution = cvxopt.solvers.qp(P, q, G, h, A, b)
+        
+        # Lagrange multipliers
+        alphas = np.array(solution['x']).flatten()
+
+        # Find support vectors: indices where alpha &gt; threshold
+        sv_threshold = 1e-5
+        self.support_vector_indices = []
+        
+        for i in range(n_samples):
+            if alphas[i] &gt; sv_threshold:
+                self.support_vector_indices.append(i)
+                self.support_vectors.append(X[i])
+                self.support_vector_labels.append(y_svm[i])
+        
+        self.support_vector_indices = np.array(self.support_vector_indices)
+        
+        self.alphas = alphas
+        
+        # Find indices of support vectors with 0 &lt; alpha &lt; C for computing b
+        sv_for_b = []
+        for i in range(n_samples):
+            if alphas[i] &gt; sv_threshold and alphas[i] &lt; C - sv_threshold:
+                sv_for_b.append(i)
+        
+        # If no support vectors with 0 &lt; alpha &lt; C are found, use all support vectors
+        if len(sv_for_b) == 0:
+            sv_for_b = self.support_vector_indices
+        
+        # Calculate intercept term b
+        self.b = 0
+        for i in sv_for_b:
+            self.b += y_svm[i]
+            sum_term = 0
+            for j in range(len(self.support_vector_indices)):
+                idx = self.support_vector_indices[j]
+                term = alphas[idx] * y_svm[idx] * K[idx, i]
+                sum_term += term
+            self.b -= sum_term
+        
+        if len(sv_for_b) &gt; 0:
+            self.b /= len(sv_for_b)
+        else: 
+            self.b = 0
+
+        # For linear kernel, we can explicitly calculate w
+        if kernel == 'linear':
+            self.w = np.zeros(n_features)
+            for i in range(len(self.support_vector_indices)):
+                idx = self.support_vector_indices[i]
+                term = alphas[idx] * y_svm[idx] * X[idx]
+                self.w += term
+        else:
+            self.w = None
+
+    def predict(self, X):
+        '''
+        Predict the class of the input data
+        
+        Args:
+            X: np.array of shape (N, D) 
+                where N is the number of samples and D is the flattened dimension of each image
+                
+        Returns:
+            np.array of shape (N,)
+                where N is the number of samples and y[i] is the class of the
+                ith sample (0 or 1)
+        '''
+        decision_values = np.zeros(X.shape[0])
+        for i in range(X.shape[0]):
+            decision_value = 0
+            for j in range(len(self.support_vector_indices)):
+                sv, relevant_alphas=self.get_support_vectors()
+                idx = self.support_vector_indices[j]
+                alpha_j = self.alphas[idx]#relevant_alphas[j]
+                y_j = self.support_vector_labels[j]#y_svm[idx]
+                decision_value += alpha_j * y_j * self.compute_kernel(sv[j], X[i], self.kernel_type, self.gamma)
+            decision_values[i] = decision_value + self.b
+
+        # Convert decision values to class labels (0 or 1)
+        predictions = np.zeros(X.shape[0], dtype=int)
+        for i in range(X.shape[0]):
+            if decision_values[i] &gt; 0:
+                predictions[i] = 1
+            else:
+                predictions[i] = 0            
+        return predictions
+    
+    def decision_values(self, X):
+        decision_values = np.zeros(X.shape[0])
+        for i in range(X.shape[0]):
+            decision_value = 0
+            for j in range(len(self.support_vector_indices)):
+                sv, relevant_alphas=self.get_support_vectors()
+                idx = self.support_vector_indices[j]
+                alpha_j = self.alphas[idx]#relevant_alphas[j]
+                y_j = self.support_vector_labels[j]#y_svm[idx]
+                decision_value += alpha_j * y_j * self.compute_kernel(sv[j], X[i], self.kernel_type, self.gamma)
+            decision_values[i] = decision_value + self.b
+        return decision_values
+
+    def get_support_vectors(self):
+        return self.support_vectors, self.alphas[self.support_vector_indices]
+    
+    def get_parameters(self):
+        return self.w, self.b
+    
+    def fit_sgd(self, X, y, C=1.0, learning_rate=0.01, n_epochs=100):
+        '''
+        Learn parameters using SGD on the primal problem
+        Args:
+            X: Training data (n_samples, n_features)
+            y: Labels (0 or 1)
+            C: Regularization parameter (inverse of regularization strength)
+            learning_rate: Initial learning rate
+            n_epochs: Number of passes over the training data
+        '''
+        # Convert labels to -1 and +1
+        y_svm = 2 * y - 1
+        n_samples, n_features = X.shape
+        
+        # Initialize weights and bias
+        self.w = np.zeros(n_features)
+        self.b = 0.0
+        self.kernel_type = 'linear'  # SGD is for linear kernel
+        deb_=0
+        for epoch in range(n_epochs):
+            # Shuffle data
+            indices = np.random.permutation(n_samples)
+            X_shuffled = X[indices]
+            y_shuffled = y_svm[indices]
+            
+            for i in range(n_samples):
+                x_i = X_shuffled[i]
+                y_i = y_shuffled[i]
+                
+                # Compute decision value
+                decision = y_i * (np.dot(self.w, x_i) + self.b)
+                
+                if decision+deb_ &lt; 1:
+                    # Update weights and bias
+                    self.w = (1 - learning_rate) * self.w + learning_rate * C * y_i * x_i
+                    self.b += learning_rate * C * y_i
+                else:
+                    # Apply regularization to weights only
+                    self.w = (1 - learning_rate) * self.w
+        learning_rate=  learning_rate/(epoch*0.1+1)
+        return self
+    
+    def predict_sgd(self, X):
+        decision_values = np.dot(X, self.w) + self.b
+        predictions = (decision_values &gt;= 0).astype(int)
+        return predictions
+        
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
