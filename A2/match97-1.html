@@ -1,0 +1,3228 @@
+<HTML>
+<HEAD>
+<TITLE>./A2_processed_new_hash_2/combined_O1KGG.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A2_processed_new_hash_2/combined_YHRMJ.py<p><PRE>
+
+
+# import numpy as np
+
+# class NaiveBayes:
+#     def __init__(self):
+#         pass
+        
+#     def fit(self, df, smoothening, class_col = "Class Index", text_col = "Tokenized Description"):
+#         """Learn the parameters of the model from the training data.
+#         Classes are 1-indexed
+
+#         Args:
+#             df (pd.DataFrame): The training data containing columns class_col and text_col.
+#                 each entry of text_col is a list of tokens.
+#             smoothening (float): The Laplace smoothening parameter.
+#         """
+#         pass
+    
+#     def predict(self, df, text_col = "Tokenized Description", predicted_col = "Predicted"):
+#         """
+#         Predict the class of the input data by filling up column predicted_col in the input dataframe.
+
+#         Args:
+#             df (pd.DataFrame): The testing data containing column text_col.
+#                 each entry of text_col is a list of tokens.
+#         """
+#         pass
+
+import numpy as np
+import pandas as pd
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+class NaiveBayes:
+    def __init__(self):
+        # These attributes will be set in the fit method.
+        self.class_priors = {}          # Log prior probabilities for each class
+        self.word_counts = {}           # Raw word counts per class, a dict of dicts. word_counts[cls][word] = count
+        self.total_words = {}           # Total word count per class
+        self.vocab = set()              # The vocabulary (set of all tokens)
+        self.smoothing = None           # Laplace smoothing parameter
+        self.log_likelihood = {}        # Log likelihood: for each class, a dict mapping word -&gt; log P(word|class)
+        self.default_log_prob = {}      # For each class, log probability for unseen words
+        
+        self.title_counts = {}
+        self.total_title_words = {}
+        self.vocab_title = set()
+        self.log_likelihood_title = {}
+        self.default_log_prob_title = {}
+        
+        self.desc_counts = {}
+        self.total_desc_words = {}
+        self.vocab_desc = set()
+        self.log_likelihood_desc = {}
+        self.default_log_prob_desc = {}
+
+    def fit(self, df, smoothening, class_col="Class Index", text_col="Tokenized Description", title_col = "Tokenized Title", different = False):
+        """
+        Learn the parameters of the model from the training data.
+        
+        Args:
+            df (pd.DataFrame): The training data containing columns class_col and text_col.
+                Each entry of text_col is a list of tokens.
+            smoothening (float): The Laplace smoothing parameter.
+        """
+        if(different):
+            self.smoothing = smoothening
+            total_docs = len(df)
+            class_doc_count = {}
+            
+            self.title_counts = {}
+            self.total_title_words = {}
+            self.vocab_title = set()
+            
+            self.desc_counts = {}
+            self.total_desc_words = {}
+            self.vocab_desc = set()
+            
+            for _, row in df.iterrows():
+                cls = row[class_col]
+                title_tokens = row[title_col]
+                desc_tokens = row[text_col]
+                class_doc_count[cls] = class_doc_count.get(cls, 0) + 1
+                
+                # Initialize dictionaries if needed.
+                if cls not in self.title_counts:
+                    self.title_counts[cls] = {}
+                    self.total_title_words[cls] = 0
+                if cls not in self.desc_counts:
+                    self.desc_counts[cls] = {}
+                    self.total_desc_words[cls] = 0
+                
+                # Count title tokens.
+                for token in title_tokens:
+                    self.title_counts[cls][token] = self.title_counts[cls].get(token, 0) + 1
+                    self.total_title_words[cls] += 1
+                    self.vocab_title.add(token)
+                    
+                # Count description tokens.
+                for token in desc_tokens:
+                    self.desc_counts[cls][token] = self.desc_counts[cls].get(token, 0) + 1
+                    self.total_desc_words[cls] += 1
+                    self.vocab_desc.add(token)
+                    
+            self.class_priors = {cls: np.log(count / total_docs) for cls, count in class_doc_count.items()}
+            
+            # Compute log likelihood for title features.
+            vocab_size_title = len(self.vocab_title)
+            self.log_likelihood_title = {}
+            self.default_log_prob_title = {}
+            for cls in self.title_counts:
+                self.log_likelihood_title[cls] = {}
+                total_words = self.total_title_words[cls]
+                denom = total_words + smoothening * vocab_size_title
+                self.default_log_prob_title[cls] = np.log(smoothening / denom)
+                for word in self.vocab_title:
+                    count = self.title_counts[cls].get(word, 0)
+                    prob = (count + smoothening) / denom
+                    self.log_likelihood_title[cls][word] = np.log(prob)
+                    
+            # Compute log likelihood for description features.
+            vocab_size_desc = len(self.vocab_desc)
+            self.log_likelihood_desc = {}
+            self.default_log_prob_desc = {}
+            for cls in self.desc_counts:
+                self.log_likelihood_desc[cls] = {}
+                total_words = self.total_desc_words[cls]
+                denom = total_words + smoothening * vocab_size_desc
+                self.default_log_prob_desc[cls] = np.log(smoothening / denom)
+                for word in self.vocab_desc:
+                    count = self.desc_counts[cls].get(word, 0)
+                    prob = (count + smoothening) / denom
+                    self.log_likelihood_desc[cls][word] = np.log(prob)
+        else:
+            self.smoothing = smoothening
+            total_docs = len(df)
+            
+            # Counters for documents per class, word counts per class, and total words per class.
+            class_doc_count = {}
+            self.word_counts = {}
+            self.total_words = {}
+            
+            # Loop through the training data
+            for _, row in df.iterrows():
+                cls = row[class_col]
+                tokens = row[text_col]
+                
+                # Count documents per class
+                class_doc_count[cls] = class_doc_count.get(cls, 0) + 1
+                
+                # Initialize dictionaries for new classes
+                if cls not in self.word_counts:
+                    self.word_counts[cls] = {}
+                    self.total_words[cls] = 0
+                
+                # Count tokens and update the vocabulary
+                for token in tokens:
+                    self.word_counts[cls][token] = self.word_counts[cls].get(token, 0) + 1
+                    self.total_words[cls] += 1
+                    self.vocab.add(token)
+                    
+            # Compute log priors for each class
+            self.class_priors = {cls: np.log(count / total_docs) 
+                                for cls, count in class_doc_count.items()}
+            
+            # Precompute the log likelihood for each word in the vocabulary for every class.
+            vocab_size = len(self.vocab)
+            self.log_likelihood = {}
+            self.default_log_prob = {}
+            for cls in self.word_counts:
+                self.log_likelihood[cls] = {}
+                total_wc = self.total_words[cls]
+                # Denom for Laplace smoothing: total count + smoothing * vocab size
+                denom = total_wc + smoothening * vocab_size
+                # Default log probability for words not seen in class cls
+                self.default_log_prob[cls] = np.log(smoothening / denom)
+                
+                # Compute log likelihood for every word in the vocabulary.
+                for word in self.vocab:
+                    count = self.word_counts[cls].get(word, 0)
+                    prob = (count + smoothening) / denom
+                    self.log_likelihood[cls][word] = np.log(prob)
+    
+    def predict(self, df, text_col="Tokenized Description",title_col="Tokenized Title", predicted_col="Predicted", different = False):
+        """
+        Predict the class of the input data and add a column with the predictions.
+        
+        Args:
+            df (pd.DataFrame): The testing data containing column text_col.
+                Each entry of text_col is a list of tokens.
+            predicted_col (str): Name of the column to store predictions.
+        Returns:
+            pd.DataFrame: The input dataframe with an additional column for predictions.
+        """
+        predictions = []
+        if(different):
+            for _, row in df.iterrows():
+                title_tokens = row[title_col]
+                desc_tokens = row[text_col]
+                class_scores = {}
+                for cls in self.class_priors:
+                    score = self.class_priors[cls]
+                    # Sum log probabilities for title tokens.
+                    for token in title_tokens:
+                        score += self.log_likelihood_title[cls].get(token, self.default_log_prob_title[cls])
+                    # Sum log probabilities for description tokens.
+                    for token in desc_tokens:
+                        score += self.log_likelihood_desc[cls].get(token, self.default_log_prob_desc[cls])
+                    class_scores[cls] = score
+                predicted_class = max(class_scores, key=class_scores.get)
+                predictions.append(predicted_class)
+            df[predicted_col] = predictions
+            return df
+        else:
+            # Iterate over each document in the test set.
+            for _, row in df.iterrows():
+                tokens = row[text_col]
+                class_scores = {}
+                
+                # Calculate the log probability for each class.
+                for cls in self.class_priors:
+                    # Start with the log prior for the class.
+                    score = self.class_priors[cls]
+                    # Add log likelihoods for each token in the document.
+                    for token in tokens:
+                        # Use the stored log likelihood if the token is seen;
+                        # otherwise, add the default log probability for unseen tokens.
+                        score += self.log_likelihood[cls].get(token, self.default_log_prob[cls])
+                    class_scores[cls] = score
+                
+                # Choose the class with the highest log probability.
+                predicted_class = max(class_scores, key=class_scores.get)
+                predictions.append(predicted_class)
+            
+            df[predicted_col] = predictions
+            return df
+    
+
+# Download NLTK stopwords if not already available.
+nltk.download('stopwords')
+
+# Initialize the stopwords set and the stemmer.
+stop_words = set(stopwords.words('english'))
+stemmer = PorterStemmer()
+
+def preprocess_text(tokens):
+    """
+    Preprocesses the input text by lowercasing, removing stopwords, and applying stemming.
+    
+    Args:
+        tokens
+        
+    Returns:
+        list: A list of processed tokens.
+    """
+    # Lowercase the text and split it into tokens (words).    
+    # Remove stopwords and apply stemming to each token.
+    processed_tokens = [stemmer.stem(token) for token in tokens if token not in stop_words]
+    # processed_tokens = [token for token in tokens if token not in stop_words]
+    # processed_tokens = [stemmer.stem(token) for token in tokens]
+    return processed_tokens
+
+def tokenize_text(text):
+    """
+    A simple tokenizer that lowercases and splits the text on whitespace.
+    For a more robust approach, consider using regex or nltk.
+    """
+    return text.lower().split()
+def generate_wordclouds(df, class_col="Class Index", text_col="Tokenized Description"):
+    """
+    Generates and displays a word cloud for each class in the dataframe.
+
+    Args:
+        df (pd.DataFrame): The dataframe containing at least the columns for class labels and tokenized text.
+        class_col (str): The column name representing class labels.
+        text_col (str): The column name containing tokenized text (list of tokens).
+    """
+    classes = df[class_col].unique()
+    
+    for cls in classes:
+        # Filter rows for the current class.
+        subset = df[df[class_col] == cls]
+        # Join all tokens into a single text string for the word cloud.
+        text = " ".join([" ".join(tokens) for tokens in subset[text_col]])
+        
+        # Create a WordCloud object and generate the word cloud.
+        wc = WordCloud(width=1920, height=1080, background_color="white").generate(text)
+        
+        # Display the generated word cloud.
+        plt.figure(figsize=(10, 5))
+        plt.imshow(wc, interpolation="bilinear")
+        plt.axis("off")
+        plt.title("Word Cloud for Class: " + str(cls))
+        plt.show()
+
+def generate_unigram_and_bigram(tokens):
+    """
+    Generate combined unigram and bigram features.
+    
+    Args:
+        tokens (list): A list of tokens.
+        
+    Returns:
+        list: A combined list containing unigrams and bigrams.
+    """
+    # Unigrams are the tokens themselves.
+    unigrams = tokens
+    # Generate bigrams: for each consecutive pair of tokens, join them with a space.
+    bigrams = [" ".join(tokens[i:i+2]) for i in range(len(tokens) - 1)]
+    return unigrams + bigrams
+    # return bigrams 
+
+def random_baseline_accuracy(val_df, label_col="Class Index", num_trials=1000):
+    """
+    Compute the average accuracy by randomly guessing a class.
+    """
+    classes = val_df[label_col].unique()
+    n = len(val_df)
+    accuracies = []
+    for _ in range(num_trials):
+        random_preds = np.random.choice(classes, size=n)
+        acc = (random_preds == val_df[label_col].values).mean()
+        accuracies.append(acc)
+    return np.mean(accuracies)
+
+def majority_baseline_accuracy(val_df, label_col="Class Index"):
+    """
+    Compute the accuracy when always predicting the most frequent class.
+    """
+    majority_class = val_df[label_col].value_counts().idxmax()
+    accuracy = (val_df[label_col] == majority_class).mean()
+    return accuracy, majority_class
+
+def compare_baselines(val_df, label_col="Class Index", pred_col="Predicted", model_name="Best Model"):
+    """
+    Compare model accuracy with random and majority baselines.
+    """
+    model_acc = (val_df[label_col] == val_df[pred_col]).mean()
+    rand_acc = random_baseline_accuracy(val_df, label_col)
+    maj_acc, majority_class = majority_baseline_accuracy(val_df, label_col)
+    
+    print(f"{model_name} Accuracy: {model_acc * 100:.2f}%")
+    print(f"Random Baseline Accuracy: {rand_acc * 100:.2f}%")
+    print(f"Majority Baseline Accuracy (predicting '{majority_class}'): {maj_acc * 100:.2f}%")
+    print("\nImprovements:")
+    print(f"- Improvement over Random Baseline: {(model_acc - rand_acc) * 100:.2f} percentage points.")
+    print(f"- Improvement over Majority Baseline: {(model_acc - maj_acc) * 100:.2f} percentage points.")
+
+# ------------------ Main Function ------------------ #
+
+def main():
+    # Replace with your actual CSV file paths.
+    train_csv = "data/Q1/train.csv"
+    test_csv = "data/Q1/test.csv"
+    
+    # Read the train and test CSV files.
+    train_df = pd.read_csv(train_csv)
+    test_df = pd.read_csv(test_csv)
+    
+    # Tokenize Title and Description.
+    train_df["T Title"] = train_df["Title"].apply(tokenize_text)
+    test_df["T Title"] = test_df["Title"].apply(tokenize_text)
+
+    train_df["T Description"] = train_df["Description"].apply(tokenize_text)
+    test_df["T Description"] = test_df["Description"].apply(tokenize_text)
+
+    # Preprocess the token lists.
+    train_df["Processed Title"] = train_df["T Title"].apply(preprocess_text)
+    test_df["Processed Title"] = test_df["T Title"].apply(preprocess_text)
+
+    train_df["Processed Description"] = train_df["T Description"].apply(preprocess_text)
+    test_df["Processed Description"] = test_df["T Description"].apply(preprocess_text)
+
+    # Generate features: combine unigrams and bigrams.
+    train_df["Tokenized Title"] = train_df["Processed Title"].apply(generate_unigram_and_bigram)
+    test_df["Tokenized Title"] = test_df["Processed Title"].apply(generate_unigram_and_bigram)
+
+    train_df["Tokenized Description"] = train_df["Processed Description"].apply(generate_unigram_and_bigram)
+    test_df["Tokenized Description"] = test_df["Processed Description"].apply(generate_unigram_and_bigram)
+    
+    # Initialize and train the Naïve Bayes classifier with separate parameters for Title & Description.
+    nb_classifier = NaiveBayes()
+    nb_classifier.fit(train_df, smoothening=0.001, class_col="Class Index", 
+                      text_col="Tokenized Description", title_col="Tokenized Title", different=True)
+    
+    # Predict on Test Data.
+    predicted_test_df = nb_classifier.predict(test_df, text_col="Tokenized Description", 
+                                                title_col="Tokenized Title", predicted_col="Predicted", different=True)
+    print("Test Data with Predictions:")
+    print(predicted_test_df.head())
+    
+    # Compute accuracy on Test Data.
+    correct_predictions = (predicted_test_df["Predicted"] == predicted_test_df["Class Index"]).sum()
+    total_predictions = len(predicted_test_df)
+    test_accuracy = correct_predictions / total_predictions
+    print("\nAccuracy on Test Data: {:.2f}%".format(test_accuracy * 100))
+    
+    # Compute accuracy on Train Data.
+    predicted_train_df = nb_classifier.predict(train_df, text_col="Tokenized Description", 
+                                                 title_col="Tokenized Title", predicted_col="Predicted", different=True)
+    correct_predictions_train = (predicted_train_df["Predicted"] == predicted_train_df["Class Index"]).sum()
+    total_predictions_train = len(predicted_train_df)
+    train_accuracy = correct_predictions_train / total_predictions_train
+    print("\nAccuracy on Train Data: {:.2f}%".format(train_accuracy * 100))
+    
+    # ----- Baseline Evaluation on Test Data -----
+    print("\n--- Baseline Comparison on Test Data ---")
+    compare_baselines(predicted_test_df, label_col="Class Index", pred_col="Predicted", model_name="Best Model")
+
+if __name__ == "__main__":
+    main()
+
+
+
+# import numpy as np
+
+# class NaiveBayes:
+#     def __init__(self):
+#         pass
+        
+#     def fit(self, df, smoothening, class_col = "Class Index", text_col = "Tokenized Description"):
+#         """Learn the parameters of the model from the training data.
+#         Classes are 1-indexed
+
+#         Args:
+#             df (pd.DataFrame): The training data containing columns class_col and text_col.
+#                 each entry of text_col is a list of tokens.
+#             smoothening (float): The Laplace smoothening parameter.
+#         """
+#         pass
+    
+#     def predict(self, df, text_col = "Tokenized Description", predicted_col = "Predicted"):
+#         """
+#         Predict the class of the input data by filling up column predicted_col in the input dataframe.
+
+#         Args:
+#             df (pd.DataFrame): The testing data containing column text_col.
+#                 each entry of text_col is a list of tokens.
+#         """
+#         pass
+
+import numpy as np
+import pandas as pd
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+class NaiveBayes:
+    def __init__(self):
+        # These attributes will be set in the fit method.
+        self.class_priors = {}          # Log prior probabilities for each class
+        self.word_counts = {}           # Raw word counts per class, a dict of dicts. word_counts[cls][word] = count
+        self.total_words = {}           # Total word count per class
+        self.vocab = set()              # The vocabulary (set of all tokens)
+        self.smoothing = None           # Laplace smoothing parameter
+        self.log_likelihood = {}        # Log likelihood: for each class, a dict mapping word -&gt; log P(word|class)
+        self.default_log_prob = {}      # For each class, log probability for unseen words
+        
+        self.title_counts = {}
+        self.total_title_words = {}
+        self.vocab_title = set()
+        self.log_likelihood_title = {}
+        self.default_log_prob_title = {}
+        
+        self.desc_counts = {}
+        self.total_desc_words = {}
+        self.vocab_desc = set()
+        self.log_likelihood_desc = {}
+        self.default_log_prob_desc = {}
+
+    def fit(self, df, smoothening, class_col="Class Index", text_col="Tokenized Description", title_col = "Tokenized Title", different = False):
+        """
+        Learn the parameters of the model from the training data.
+        
+        Args:
+            df (pd.DataFrame): The training data containing columns class_col and text_col.
+                Each entry of text_col is a list of tokens.
+            smoothening (float): The Laplace smoothing parameter.
+        """
+        if(different):
+            self.smoothing = smoothening
+            total_docs = len(df)
+            class_doc_count = {}
+            
+            self.title_counts = {}
+            self.total_title_words = {}
+            self.vocab_title = set()
+            
+            self.desc_counts = {}
+            self.total_desc_words = {}
+            self.vocab_desc = set()
+            
+            for _, row in df.iterrows():
+                cls = row[class_col]
+                title_tokens = row[title_col]
+                desc_tokens = row[text_col]
+                class_doc_count[cls] = class_doc_count.get(cls, 0) + 1
+                
+                # Initialize dictionaries if needed.
+                if cls not in self.title_counts:
+                    self.title_counts[cls] = {}
+                    self.total_title_words[cls] = 0
+                if cls not in self.desc_counts:
+                    self.desc_counts[cls] = {}
+                    self.total_desc_words[cls] = 0
+                
+                # Count title tokens.
+                for token in title_tokens:
+                    self.title_counts[cls][token] = self.title_counts[cls].get(token, 0) + 1
+                    self.total_title_words[cls] += 1
+                    self.vocab_title.add(token)
+                    
+                # Count description tokens.
+                for token in desc_tokens:
+                    self.desc_counts[cls][token] = self.desc_counts[cls].get(token, 0) + 1
+                    self.total_desc_words[cls] += 1
+                    self.vocab_desc.add(token)
+                    
+            self.class_priors = {cls: np.log(count / total_docs) for cls, count in class_doc_count.items()}
+            
+            # Compute log likelihood for title features.
+            vocab_size_title = len(self.vocab_title)
+            self.log_likelihood_title = {}
+            self.default_log_prob_title = {}
+            for cls in self.title_counts:
+                self.log_likelihood_title[cls] = {}
+                total_words = self.total_title_words[cls]
+                denom = total_words + smoothening * vocab_size_title
+                self.default_log_prob_title[cls] = np.log(smoothening / denom)
+                for word in self.vocab_title:
+                    count = self.title_counts[cls].get(word, 0)
+                    prob = (count + smoothening) / denom
+                    self.log_likelihood_title[cls][word] = np.log(prob)
+                    
+            # Compute log likelihood for description features.
+            vocab_size_desc = len(self.vocab_desc)
+            self.log_likelihood_desc = {}
+            self.default_log_prob_desc = {}
+            for cls in self.desc_counts:
+                self.log_likelihood_desc[cls] = {}
+                total_words = self.total_desc_words[cls]
+                denom = total_words + smoothening * vocab_size_desc
+                self.default_log_prob_desc[cls] = np.log(smoothening / denom)
+                for word in self.vocab_desc:
+                    count = self.desc_counts[cls].get(word, 0)
+                    prob = (count + smoothening) / denom
+                    self.log_likelihood_desc[cls][word] = np.log(prob)
+        else:
+            self.smoothing = smoothening
+            total_docs = len(df)
+            
+            # Counters for documents per class, word counts per class, and total words per class.
+            class_doc_count = {}
+            self.word_counts = {}
+            self.total_words = {}
+            
+            # Loop through the training data
+            for _, row in df.iterrows():
+                cls = row[class_col]
+                tokens = row[text_col]
+                
+                # Count documents per class
+                class_doc_count[cls] = class_doc_count.get(cls, 0) + 1
+                
+                # Initialize dictionaries for new classes
+                if cls not in self.word_counts:
+                    self.word_counts[cls] = {}
+                    self.total_words[cls] = 0
+                
+                # Count tokens and update the vocabulary
+                for token in tokens:
+                    self.word_counts[cls][token] = self.word_counts[cls].get(token, 0) + 1
+                    self.total_words[cls] += 1
+                    self.vocab.add(token)
+                    
+            # Compute log priors for each class
+            self.class_priors = {cls: np.log(count / total_docs) 
+                                for cls, count in class_doc_count.items()}
+            
+            # Precompute the log likelihood for each word in the vocabulary for every class.
+            vocab_size = len(self.vocab)
+            self.log_likelihood = {}
+            self.default_log_prob = {}
+            for cls in self.word_counts:
+                self.log_likelihood[cls] = {}
+                total_wc = self.total_words[cls]
+                # Denom for Laplace smoothing: total count + smoothing * vocab size
+                denom = total_wc + smoothening * vocab_size
+                # Default log probability for words not seen in class cls
+                self.default_log_prob[cls] = np.log(smoothening / denom)
+                
+                # Compute log likelihood for every word in the vocabulary.
+                for word in self.vocab:
+                    count = self.word_counts[cls].get(word, 0)
+                    prob = (count + smoothening) / denom
+                    self.log_likelihood[cls][word] = np.log(prob)
+    
+    def predict(self, df, text_col="Tokenized Description",title_col="Tokenized Title", predicted_col="Predicted", different = False):
+        """
+        Predict the class of the input data and add a column with the predictions.
+        
+        Args:
+            df (pd.DataFrame): The testing data containing column text_col.
+                Each entry of text_col is a list of tokens.
+            predicted_col (str): Name of the column to store predictions.
+        Returns:
+            pd.DataFrame: The input dataframe with an additional column for predictions.
+        """
+        predictions = []
+        if(different):
+            for _, row in df.iterrows():
+                title_tokens = row[title_col]
+                desc_tokens = row[text_col]
+                class_scores = {}
+                for cls in self.class_priors:
+                    score = self.class_priors[cls]
+                    # Sum log probabilities for title tokens.
+                    for token in title_tokens:
+                        score += self.log_likelihood_title[cls].get(token, self.default_log_prob_title[cls])
+                    # Sum log probabilities for description tokens.
+                    for token in desc_tokens:
+                        score += self.log_likelihood_desc[cls].get(token, self.default_log_prob_desc[cls])
+                    class_scores[cls] = score
+                predicted_class = max(class_scores, key=class_scores.get)
+                predictions.append(predicted_class)
+            df[predicted_col] = predictions
+            return df
+        else:
+            # Iterate over each document in the test set.
+            for _, row in df.iterrows():
+                tokens = row[text_col]
+                class_scores = {}
+                
+                # Calculate the log probability for each class.
+                for cls in self.class_priors:
+                    # Start with the log prior for the class.
+                    score = self.class_priors[cls]
+                    # Add log likelihoods for each token in the document.
+                    for token in tokens:
+                        # Use the stored log likelihood if the token is seen;
+                        # otherwise, add the default log probability for unseen tokens.
+                        score += self.log_likelihood[cls].get(token, self.default_log_prob[cls])
+                    class_scores[cls] = score
+                
+                # Choose the class with the highest log probability.
+                predicted_class = max(class_scores, key=class_scores.get)
+                predictions.append(predicted_class)
+            
+            df[predicted_col] = predictions
+            return df
+    
+
+# Download NLTK stopwords if not already available.
+nltk.download('stopwords')
+
+# Initialize the stopwords set and the stemmer.
+stop_words = set(stopwords.words('english'))
+stemmer = PorterStemmer()
+
+def preprocess_text(tokens):
+    """
+    Preprocesses the input text by lowercasing, removing stopwords, and applying stemming.
+    
+    Args:
+        tokens
+        
+    Returns:
+        list: A list of processed tokens.
+    """
+    # Lowercase the text and split it into tokens (words).    
+    # Remove stopwords and apply stemming to each token.
+    processed_tokens = [stemmer.stem(token) for token in tokens if token not in stop_words]
+    # processed_tokens = [token for token in tokens if token not in stop_words]
+    # processed_tokens = [stemmer.stem(token) for token in tokens]
+    return processed_tokens
+
+def tokenize_text(text):
+    """
+    A simple tokenizer that lowercases and splits the text on whitespace.
+    For a more robust approach, consider using regex or nltk.
+    """
+    return text.lower().split()
+def generate_wordclouds(df, class_col="Class Index", text_col="Tokenized Description"):
+    """
+    Generates and displays a word cloud for each class in the dataframe.
+
+    Args:
+        df (pd.DataFrame): The dataframe containing at least the columns for class labels and tokenized text.
+        class_col (str): The column name representing class labels.
+        text_col (str): The column name containing tokenized text (list of tokens).
+    """
+    classes = df[class_col].unique()
+    
+    for cls in classes:
+        # Filter rows for the current class.
+        subset = df[df[class_col] == cls]
+        # Join all tokens into a single text string for the word cloud.
+        text = " ".join([" ".join(tokens) for tokens in subset[text_col]])
+        
+        # Create a WordCloud object and generate the word cloud.
+        wc = WordCloud(width=1920, height=1080, background_color="white").generate(text)
+        
+        # Display the generated word cloud.
+        plt.figure(figsize=(10, 5))
+        plt.imshow(wc, interpolation="bilinear")
+        plt.axis("off")
+        plt.title("Word Cloud for Class: " + str(cls))
+        plt.show()
+
+def generate_unigram_and_bigram(tokens):
+    """
+    Generate combined unigram and bigram features.
+    
+    Args:
+        tokens (list): A list of tokens.
+        
+    Returns:
+        list: A combined list containing unigrams and bigrams.
+    """
+    # Unigrams are the tokens themselves.
+    unigrams = tokens
+    # Generate bigrams: for each consecutive pair of tokens, join them with a space.
+    bigrams = [" ".join(tokens[i:i+2]) for i in range(len(tokens) - 1)]
+    return unigrams + bigrams
+    # return bigrams 
+
+def main():
+    # Replace with your actual CSV file paths.
+    train_csv = "data/Q1/train.csv"
+    test_csv = "data/Q1/test.csv"
+    
+    # Read the train and test CSV files.
+    train_df = pd.read_csv(train_csv)
+    test_df = pd.read_csv(test_csv)
+    # test_df = pd.read_csv(train_csv)
+    
+    # Tokenize the desired column.
+    # Here, we're tokenizing the "Description" column.
+    # To tokenize the "Title" instead, change the column name below.
+    # train_df["Processed Description"] = train_df["Title"].apply(tokenize_text)
+    # test_df["Processed Description"] = test_df["Title"].apply(tokenize_text)
+
+    train_df["T Title"] = train_df["Title"].apply(tokenize_text)
+    test_df["T Title"] = test_df["Title"].apply(tokenize_text)
+
+    train_df["T Description"] = train_df["Description"].apply(tokenize_text)
+    test_df["T Description"] = test_df["Description"].apply(tokenize_text)
+
+    # train_df["Merged Text"] = train_df.apply(
+    #     lambda row: row["Tokenized Title"] + row["Tokenized Description"], axis=1)
+    # test_df["Merged Text"] = test_df.apply(
+    #     lambda row: row["Tokenized Title"] + row["Tokenized Description"], axis=1)
+
+    train_df["Processed Title"] = train_df["T Title"].apply(preprocess_text)
+    test_df["Processed Title"] = test_df["T Title"].apply(preprocess_text)
+
+    train_df["Processed Description"] = train_df["T Description"].apply(preprocess_text)
+    test_df["Processed Description"] = test_df["T Description"].apply(preprocess_text)
+
+    # train_df["Tokenized Description"] = train_df["Title"].apply(tokenize_text)
+    # test_df["Tokenized Description"] = test_df["Title"].apply(tokenize_text)
+
+    # Generate features: combine unigrams and bigrams.
+    # train_df["Tokenized Text"] = train_df["Processed Text"].apply(generate_unigram_and_bigram)
+    # test_df["Tokenized Text"] = test_df["Processed Text"].apply(generate_unigram_and_bigram)
+
+    train_df["Tokenized Title"] = train_df["Processed Title"].apply(generate_unigram_and_bigram)
+    test_df["Tokenized Title"] = test_df["Processed Title"].apply(generate_unigram_and_bigram)
+
+    train_df["Tokenized Description"] = train_df["Processed Description"].apply(generate_unigram_and_bigram)
+    test_df["Tokenized Description"] = test_df["Processed Description"].apply(generate_unigram_and_bigram)
+    
+    
+    # generate_wordclouds(test_df)
+    # generate_wordclouds(train_df)
+    # Initialize and train the Naïve Bayes classifier.
+    nb_classifier = NaiveBayes()
+    nb_classifier.fit(train_df, smoothening=0.001, class_col="Class Index", text_col="Tokenized Description", title_col = "Tokenized Title", different = True)
+    # Predict the class for each entry in the test data.
+    predicted_df = nb_classifier.predict(test_df, text_col="Tokenized Description", title_col="Tokenized Title",  predicted_col="Predicted", different = True)
+    
+    # Display the test data with predictions.
+    print("Test Data with Predictions:")
+    print(predicted_df.head())
+
+    correct_predictions = (predicted_df["Predicted"] == predicted_df["Class Index"]).sum()
+    total_predictions = len(predicted_df)
+    accuracy = correct_predictions / total_predictions
+    
+    print("\nAccuracy on Test Data: {:.2f}%".format(accuracy * 100))
+   
+    predicted_df = nb_classifier.predict(train_df, text_col="Tokenized Description", title_col="Tokenized Title",  predicted_col="Predicted", different = True)
+    correct_predictions = (predicted_df["Predicted"] == predicted_df["Class Index"]).sum()
+    total_predictions = len(predicted_df)
+    accuracy = correct_predictions / total_predictions
+    
+    print("\nAccuracy on Train Data: {:.2f}%".format(accuracy * 100))
+    
+if __name__ == "__main__":
+    main()
+
+
+
+# import numpy as np
+
+# class NaiveBayes:
+#     def __init__(self):
+#         pass
+        
+#     def fit(self, df, smoothening, class_col = "Class Index", text_col = "Tokenized Description"):
+#         """Learn the parameters of the model from the training data.
+#         Classes are 1-indexed
+
+#         Args:
+#             df (pd.DataFrame): The training data containing columns class_col and text_col.
+#                 each entry of text_col is a list of tokens.
+#             smoothening (float): The Laplace smoothening parameter.
+#         """
+#         pass
+    
+#     def predict(self, df, text_col = "Tokenized Description", predicted_col = "Predicted"):
+#         """
+#         Predict the class of the input data by filling up column predicted_col in the input dataframe.
+
+#         Args:
+#             df (pd.DataFrame): The testing data containing column text_col.
+#                 each entry of text_col is a list of tokens.
+#         """
+#         pass
+
+import numpy as np
+import pandas as pd
+import string
+# from wordcloud import WordCloud
+# import matplotlib.pyplot as plt
+# import nltk
+# from nltk.corpus import stopwords
+# from nltk.stem import PorterStemmer
+# from nltk.stem import WordNetLemmatizer
+# import seaborn as sns
+# from sklearn.metrics import confusion_matrix
+# nltk.download('wordnet')
+# nltk.download('omw-1.4')  
+
+class NaiveBayes:
+    def __init__(self):
+        # These attributes will be set in the fit method.
+        self.class_priors = {}          # Log prior probabilities for each class
+        self.word_counts = {}           # Raw word counts per class, a dict of dicts. word_counts[cls][word] = count
+        self.total_words = {}           # Total word count per class
+        self.vocab = set()              # The vocabulary (set of all tokens)
+        self.smoothing = None           # Laplace smoothing parameter
+        self.log_likelihood = {}        # Log likelihood: for each class, a dict mapping word -&gt; log P(word|class)
+        self.default_log_prob = {}      # For each class, log probability for unseen words
+
+    def fit(self, df, smoothening, class_col="Class Index", text_col="Tokenized Description"):
+        """
+        Learn the parameters of the model from the training data.
+        
+        Args:
+            df (pd.DataFrame): The training data containing columns class_col and text_col.
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match97-0.html#2" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+                Each entry of text_col is a list of tokens.
+            smoothening (float): The Laplace smoothing parameter.
+        """
+        self.smoothing = smoothening
+        total_docs = len(df)
+</FONT>        
+        # Counters for documents per class, word counts per class, and total words per class.
+        class_doc_count = {}
+        self.word_counts = {}
+        self.total_words = {}
+        
+        # Loop through the training data
+        for _, row in df.iterrows():
+            cls = row[class_col]
+            tokens = row[text_col]
+            
+            # Count documents per class
+            class_doc_count[cls] = class_doc_count.get(cls, 0) + 1
+            
+            # Initialize dictionaries for new classes
+            if cls not in self.word_counts:
+                self.word_counts[cls] = {}
+                self.total_words[cls] = 0
+            
+            # Count tokens and update the vocabulary
+            for token in tokens:
+                self.word_counts[cls][token] = self.word_counts[cls].get(token, 0) + 1
+                self.total_words[cls] += 1
+                self.vocab.add(token)
+                
+        # Compute log priors for each class
+        self.class_priors = {cls: np.log(count / total_docs) 
+                             for cls, count in class_doc_count.items()}
+        
+        # Precompute the log likelihood for each word in the vocabulary for every class.
+        vocab_size = len(self.vocab)
+        self.log_likelihood = {}
+        self.default_log_prob = {}
+        for cls in self.word_counts:
+            self.log_likelihood[cls] = {}
+            total_wc = self.total_words[cls]
+            # Denom for Laplace smoothing: total count + smoothing * vocab size
+            denom = total_wc + smoothening * vocab_size
+            # Default log probability for words not seen in class cls
+            self.default_log_prob[cls] = np.log(smoothening / denom)
+            
+            # Compute log likelihood for every word in the vocabulary.
+            for word in self.vocab:
+                count = self.word_counts[cls].get(word, 0)
+                prob = (count + smoothening) / denom
+                self.log_likelihood[cls][word] = np.log(prob)
+    
+    def predict(self, df, text_col="Tokenized Description", predicted_col="Predicted"):
+        """
+        Predict the class of the input data and add a column with the predictions.
+        
+        Args:
+            df (pd.DataFrame): The testing data containing column text_col.
+                Each entry of text_col is a list of tokens.
+            predicted_col (str): Name of the column to store predictions.
+        Returns:
+            pd.DataFrame: The input dataframe with an additional column for predictions.
+        """
+        predictions = []
+        
+        # Iterate over each document in the test set.
+        for _, row in df.iterrows():
+            tokens = row[text_col]
+            class_scores = {}
+            
+            # Calculate the log probability for each class.
+            for cls in self.class_priors:
+                # Start with the log prior for the class.
+                score = self.class_priors[cls]
+                # Add log likelihoods for each token in the document.
+                for token in tokens:
+                    # Use the stored log likelihood if the token is seen;
+                    # otherwise, add the default log probability for unseen tokens.
+                    score += self.log_likelihood[cls].get(token, self.default_log_prob[cls])
+                class_scores[cls] = score
+            
+            # Choose the class with the highest log probability.
+            predicted_class = max(class_scores, key=class_scores.get)
+            predictions.append(predicted_class)
+        
+        df[predicted_col] = predictions
+        return df
+    
+
+# # Download NLTK stopwords if not already available.
+# nltk.download('stopwords')
+
+# # Initialize the stopwords set and the stemmer.
+# stop_words = set(stopwords.words('english'))
+# stemmer = PorterStemmer()
+
+# def preprocess_text(tokens):
+#     """
+#     Preprocesses the input text by lowercasing, removing stopwords, and applying stemming.
+    
+#     Args:
+#         tokens
+        
+#     Returns:
+#         list: A list of processed tokens.
+#     """
+#     # Lowercase the text and split it into tokens (words).    
+#     # Remove stopwords and apply stemming to each token.
+#     processed_tokens = [stemmer.stem(token) for token in tokens if token not in stop_words]
+#     # processed_tokens = [token for token in tokens if token not in stop_words]
+#     # processed_tokens = [stemmer.stem(token) for token in tokens]
+#     return processed_tokens
+
+# def tokenize_text(text):
+#     """
+#     A simple tokenizer that lowercases and splits the text on whitespace.
+#     For a more robust approach, consider using regex or nltk.
+#     """
+#     translator = str.maketrans('', '', string.punctuation)
+#     clean_text = text.translate(translator).lower()
+#     return clean_text.split()
+# def generate_wordclouds(df, class_col="Class Index", text_col="Tokenized Description"):
+#     """
+#     Generates and displays a word cloud for each class in the dataframe.
+
+#     Args:
+#         df (pd.DataFrame): The dataframe containing at least the columns for class labels and tokenized text.
+#         class_col (str): The column name representing class labels.
+#         text_col (str): The column name containing tokenized text (list of tokens).
+#     """
+#     classes = df[class_col].unique()
+    
+#     for cls in classes:
+#         # Filter rows for the current class.
+#         subset = df[df[class_col] == cls]
+#         # Join all tokens into a single text string for the word cloud.
+#         text = " ".join([" ".join(tokens) for tokens in subset[text_col]])
+        
+#         # Create a WordCloud object and generate the word cloud.
+#         wc = WordCloud(width=1920, height=1080, background_color="white").generate(text)
+        
+#         # Display the generated word cloud.
+#         plt.figure(figsize=(10, 5))
+#         plt.imshow(wc, interpolation="bilinear")
+#         plt.axis("off")
+#         plt.title("Word Cloud for Class: " + str(cls))
+#         plt.show()
+
+# def generate_unigram_and_bigram(tokens):
+#     """
+#     Generate combined unigram and bigram features.
+    
+#     Args:
+#         tokens (list): A list of tokens.
+        
+#     Returns:
+#         list: A combined list containing unigrams and bigrams.
+#     """
+#     # Unigrams are the tokens themselves.
+#     unigrams = tokens
+#     # Generate bigrams: for each consecutive pair of tokens, join them with a space.
+#     bigrams = [" ".join(tokens[i:i+2]) for i in range(len(tokens) - 1)]
+#     return unigrams + bigrams
+#     # return bigrams 
+# def lemmatize_tokens(tokens):
+#     """
+#     Lemmatizes a list of tokens using NLTK's WordNetLemmatizer.
+    
+#     Args:
+#         tokens (list of str): A list of tokens (words) to lemmatize.
+    
+#     Returns:
+#         list of str: A list of lemmatized tokens.
+#     """
+#     lemmatizer = WordNetLemmatizer()
+#     # Lemmatize each token and return the new list.
+#     return [lemmatizer.lemmatize(token) for token in tokens]
+# def plot_confusion_matrix(y_true, y_pred, classes, title="Confusion Matrix"):
+#     """
+#     Plots a confusion matrix using seaborn heatmap.
+    
+#     Args:
+#         y_true (list or array): True class labels.
+#         y_pred (list or array): Predicted class labels.
+#         classes (list): List of class names (or labels).
+#         title (str): Title for the plot.
+#     """
+#     cm = confusion_matrix(y_true, y_pred, labels=classes)
+    
+#     plt.figure(figsize=(8, 6))
+#     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+#                 xticklabels=classes, yticklabels=classes)
+#     plt.xlabel("Predicted Label")
+#     plt.ylabel("True Label")
+#     plt.title(title)
+#     plt.show()
+
+# def evaluate_confusion_matrix(test_df):
+#     # Extract true and predicted labels.
+#     y_true = test_df["Class Index"].tolist()
+#     y_pred = test_df["Predicted"].tolist()
+    
+#     # Assume your classes are something like: ['World', 'Sports', 'Business', 'Science/Technology']
+#     classes = sorted(list(set(y_true)))  # Sorting can help to have a consistent order.
+    
+#     plot_confusion_matrix(y_true, y_pred, classes, title="Confusion Matrix for Best Model")
+
+# def main():
+#     # Replace with your actual CSV file paths.
+#     train_csv = "data/Q1/train.csv"
+#     test_csv = "data/Q1/test.csv"
+    
+#     # Read the train and test CSV files.
+#     train_df = pd.read_csv(train_csv)
+#     test_df = pd.read_csv(test_csv)
+#     # test_df = pd.read_csv(train_csv)
+    
+#     # Tokenize the desired column.
+#     # Here, we're tokenizing the "Description" column.
+#     # To tokenize the "Title" instead, change the column name below.
+#     # train_df["Processed Description"] = train_df["Title"].apply(tokenize_text)
+#     # test_df["Processed Description"] = test_df["Title"].apply(tokenize_text)
+
+#     train_df["Tokenized Title"] = train_df["Title"].apply(tokenize_text)
+#     test_df["Tokenized Title"] = test_df["Title"].apply(tokenize_text)
+
+#     train_df["Tokenized Description"] = train_df["Description"].apply(tokenize_text)
+#     test_df["Tokenized Description"] = test_df["Description"].apply(tokenize_text)
+
+#     train_df["Merged Text"] = train_df.apply(
+#         lambda row: row["Tokenized Title"] + row["Tokenized Description"], axis=1)
+#     test_df["Merged Text"] = test_df.apply(
+#         lambda row: row["Tokenized Title"] + row["Tokenized Description"], axis=1)
+
+#     train_df["Processed Text"] = train_df["Merged Text"].apply(preprocess_text)
+#     test_df["Processed Text"] = test_df["Merged Text"].apply(preprocess_text)  
+
+#     train_df["Lemmatized Text"] = train_df["Processed Text"].apply(lemmatize_tokens)
+#     test_df["Lemmatized Text"] = test_df["Processed Text"].apply(lemmatize_tokens)
+
+#     # train_df["Tokenized Description"] = train_df["Title"].apply(tokenize_text)
+#     # test_df["Tokenized Description"] = test_df["Title"].apply(tokenize_text)
+
+#     # Generate features: combine unigrams and bigrams.
+#     train_df["Tokenized Text"] = train_df["Lemmatized Text"].apply(generate_unigram_and_bigram)
+#     test_df["Tokenized Text"] = test_df["Lemmatized Text"].apply(generate_unigram_and_bigram)
+    
+    
+#     # generate_wordclouds(test_df)
+#     # generate_wordclouds(train_df)
+#     # Initialize and train the Naïve Bayes classifier.
+#     nb_classifier = NaiveBayes()
+#     nb_classifier.fit(train_df, smoothening=0.05, class_col="Class Index", text_col="Tokenized Text")
+#     # Predict the class for each entry in the test data.
+#     predicted_df = nb_classifier.predict(test_df, text_col="Tokenized Text", predicted_col="Predicted")
+#     evaluate_confusion_matrix(predicted_df)
+#     # Display the test data with predictions.
+#     print("Test Data with Predictions:")
+#     print(predicted_df.head())
+
+#     correct_predictions = (predicted_df["Predicted"] == predicted_df["Class Index"]).sum()
+#     total_predictions = len(predicted_df)
+#     accuracy = correct_predictions / total_predictions
+    
+#     print("\nAccuracy on Test Data: {:.2f}%".format(accuracy * 100))
+   
+#     predicted_df = nb_classifier.predict(train_df, text_col="Tokenized Text", predicted_col="Predicted")
+#     evaluate_confusion_matrix(predicted_df)
+#     correct_predictions = (predicted_df["Predicted"] == predicted_df["Class Index"]).sum()
+#     total_predictions = len(predicted_df)
+#     accuracy = correct_predictions / total_predictions
+    
+#     print("\nAccuracy on Train Data: {:.2f}%".format(accuracy * 100))
+    
+# if __name__ == "__main__":
+#     main()
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.datasets import make_classification
+import os
+import cv2
+
+
+def preprocess_image(image_path):
+    """
+    Reads an image from image_path, resizes it to 100x100 pixels with center cropping,
+    normalizes pixel values to [0, 1], and flattens it.
+    """
+    # Read image using cv2
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Image at {image_path} could not be loaded.")
+    
+    # Convert BGR to RGB (optional, depending on use-case)
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    # Resize image: To maintain aspect ratio, first resize so that the smaller side is 100,
+    # then perform a center crop.
+    h, w, _ = img.shape
+    if h &lt; w:
+        new_h = 100
+        new_w = int(w * (100 / h))
+    else:
+        new_w = 100
+        new_h = int(h * (100 / w))
+    resized = cv2.resize(img, (new_w, new_h))
+    
+    # Center crop to 100x100
+    start_x = (resized.shape[1] - 100) // 2
+    start_y = (resized.shape[0] - 100) // 2
+    cropped = resized[start_y:start_y+100, start_x:start_x+100]
+    
+    # Normalize to [0, 1]
+    normalized = cropped.astype(np.float32) / 255.0
+    
+    # Flatten the image into a 1D vector
+    flattened = normalized.flatten()
+    return flattened
+
+def load_dataset(base_dir, class_names):
+    """
+    Loads and preprocesses images from the specified base_dir.
+    Assumes that images for each class are in separate subdirectories given by class_names.
+    
+    Args:
+        base_dir: Path to the dataset folder (e.g., 'data/Q2/train' or 'data/Q2/test')
+        class_names: List of subdirectory names corresponding to the classes to load.
+                     Labels will be assigned in the order of class_names (0, 1, ...).
+                     
+    Returns:
+        X: np.array of shape (N, 30000) where each row is a flattened image.
+        y: np.array of shape (N,) containing class labels.
+    """
+    X, y = [], []
+    for label, cls in enumerate(class_names):
+        cls_dir = os.path.join(base_dir, cls)
+        if not os.path.exists(cls_dir):
+            print(f"Directory {cls_dir} does not exist, skipping.")
+            continue
+        # Consider common image extensions
+        for file in os.listdir(cls_dir):
+            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                img_path = os.path.join(cls_dir, file)
+                try:
+                    img_vector = preprocess_image(img_path)
+                    X.append(img_vector)
+                    y.append(label)
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+    return np.array(X), np.array(y)
+
+# ==========================
+# Main Function
+# ==========================
+def main():
+    # Directories for train and test sets.
+    # Adjust these paths according to your directory structure.
+    train_dir = 'data/Q2/train'
+    test_dir = 'data/Q2/test'
+    
+    # For binary classification, choose two classes.
+    # According to the assignment, these might be determined based on your entry number.
+    # For demonstration, we simply take the first two sorted directories.
+    available_classes = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
+    if len(available_classes) &lt; 2:
+        print("Not enough classes found in training data.")
+        return
+    # For example, we take the first two classes.
+    class_names = available_classes
+    print(f"Using classes: {class_names}")
+
+    # Cache file path for preprocessed data
+    cache_file = 'preprocessed_data_multiclass.npz'
+    
+    if os.path.exists(cache_file):
+        print("Loading cached data...")
+        cache = np.load(cache_file, allow_pickle=True)
+        X_train, y_train = cache['X_train'], cache['y_train']
+        X_test, y_test = cache['X_test'], cache['y_test']
+    else:
+        print("Preprocessing training data...")
+        X_train, y_train = load_dataset(train_dir, class_names)
+        print("Preprocessing test data...")
+        X_test, y_test = load_dataset(test_dir, class_names)
+        # Cache the preprocessed data
+        np.savez(cache_file, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
+        print(f"Cached preprocessed data to {cache_file}")
+
+    print(f"Training data: {X_train.shape[0]} samples")
+<A NAME="7"></A><FONT color = #0000FF><A HREF="match97-0.html#7" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    print(f"Test data: {X_test.shape[0]} samples")
+    # Define hyperparameter values for C and fixed gamma
+    C_values = [1e-5, 1e-3, 1, 5, 10]
+    gamma = 0.001
+
+    cv_scores = []
+    test_scores = []
+</FONT>
+    print("Hyperparameter tuning for Gaussian SVM (gamma=0.001):")
+<A NAME="8"></A><FONT color = #00FFFF><A HREF="match97-0.html#8" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    for C in C_values:
+        # Initialize SVC with RBF kernel
+        clf = SVC(kernel='rbf', C=C, gamma=gamma)
+        
+        # 5-fold cross-validation on training data
+        scores = cross_val_score(clf, X_train, y_train, cv=5, n_jobs=2)
+</FONT>        cv_score = np.mean(scores)
+        cv_scores.append(cv_score)
+        
+        # Train on the entire training set and evaluate on test set
+        clf.fit(X_train, y_train)
+        test_acc = accuracy_score(y_test, clf.predict(X_test))
+        test_scores.append(test_acc)
+        
+        print(f"C = {C:.5f}: 5-Fold CV Accuracy = {cv_score:.4f}, Test Accuracy = {test_acc:.4f}")
+
+    # Plotting CV and test accuracies versus C (using a log scale for C)
+    plt.figure(figsize=(8, 6))
+    plt.plot(C_values, cv_scores, marker='o', label="5-Fold CV Accuracy")
+    plt.plot(C_values, test_scores, marker='s', label="Test Accuracy")
+    plt.xscale('log')
+    plt.xlabel("C (log scale)")
+    plt.ylabel("Accuracy")
+    plt.title("Hyperparameter Tuning: Gaussian SVM (γ = 0.001)")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('Q2.png')
+
+    # Identify best C based on cross-validation accuracy
+    best_index = np.argmax(cv_scores)
+    best_C = C_values[best_index]
+    print(f"Best C (based on 5-fold CV): {best_C}")
+
+    # (c) Train final SVM using the best C on the entire training set
+    final_clf = SVC(kernel='rbf', C=best_C, gamma=gamma)
+    final_clf.fit(X_train, y_train)
+    final_test_accuracy = accuracy_score(y_test, final_clf.predict(X_test))
+    print(f"Final Test Accuracy with best C ({best_C}): {final_test_accuracy:.4f}")
+
+if __name__ == '__main__':
+    main()
+
+
+
+import time
+import numpy as np
+from sklearn.linear_model import SGDClassifier
+from sklearn.svm import LinearSVC
+from sklearn.metrics import accuracy_score
+import os
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score
+import pickle
+import time
+
+def preprocess_image(image_path):
+    """
+    Reads an image, converts it to RGB, resizes with aspect ratio preservation,
+    center-crops to 100x100, normalizes to [0, 1], and flattens it.
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Image at {image_path} could not be loaded.")
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    h, w, _ = img.shape
+    # Resize: make the smaller dimension equal to 100 and then crop
+    if h &lt; w:
+        new_h = 100
+        new_w = int(w * (100 / h))
+    else:
+        new_w = 100
+        new_h = int(h * (100 / w))
+    resized = cv2.resize(img, (new_w, new_h))
+    start_x = (resized.shape[1] - 100) // 2
+    start_y = (resized.shape[0] - 100) // 2
+    cropped = resized[start_y:start_y+100, start_x:start_x+100]
+    normalized = cropped.astype(np.float32) / 255.0
+    return normalized.flatten()
+
+def load_dataset(base_dir, class_names):
+    """
+    Loads images from subdirectories named in class_names, preprocesses each image,
+    and assigns labels based on the order in class_names.
+    """
+    X, y = [], []
+    for label, cls in enumerate(class_names):
+        cls_dir = os.path.join(base_dir, cls)
+        if not os.path.exists(cls_dir):
+            print(f"Directory {cls_dir} does not exist, skipping.")
+            continue
+        for file in os.listdir(cls_dir):
+            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                img_path = os.path.join(cls_dir, file)
+                try:
+                    img_vector = preprocess_image(img_path)
+                    X.append(img_vector)
+                    y.append(label)
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+    return np.array(X), np.array(y)
+
+def normalize_vector_to_image(vector):
+    """
+    Normalizes a vector to the range [0, 1] using min-max normalization.
+    """
+    v_min = np.min(vector)
+    v_max = np.max(vector)
+    norm_vec = (vector - v_min) / (v_max - v_min)
+    return norm_vec
+
+def plot_top_support_vectors(clf, title_prefix="SV"):
+    """
+    Plots the top 5 support vectors from the classifier based on the magnitude
+    of the dual coefficients.
+    """
+    support_vectors = clf.support_vectors_
+    # For binary classification, dual_coef_ shape is (1, n_sv)
+    dual_coef = clf.dual_coef_[0]
+    abs_dual_coef = np.abs(dual_coef)
+    # Get indices of top 5 support vectors (by contribution)
+    top5_idx = np.argsort(abs_dual_coef)[-5:]
+    for i in top5_idx:
+        img = support_vectors[i].reshape(100, 100, 3)
+        plt.figure()
+        plt.title(f"{title_prefix} index: {i}, dual coef: {dual_coef[i]:.3f}")
+        plt.imshow(img)
+        plt.axis('off')
+        plt.show()
+
+def main():
+    # Directories for training and test data (adjust paths as needed)
+    train_dir = 'data/Q2/train_p1'
+    test_dir = 'data/Q2/test_p1'
+    
+    # For binary classification, we use two classes.
+    # Here we assume the folders in train_dir are sorted alphabetically.
+    available_classes = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
+    if len(available_classes) &lt; 2:
+        print("Not enough classes found in training data.")
+        return
+    class_names = [available_classes[0], available_classes[1]]
+    print("Using classes:", class_names)
+    
+    # Load the datasets
+    X_train, y_train = load_dataset(train_dir, class_names)
+    X_test, y_test = load_dataset(test_dir, class_names)
+    
+    print(f"Training samples: {X_train.shape[0]}, Test samples: {X_test.shape[0]}")
+    # ----------------------------------
+    # SVM via LIBLINEAR (using LinearSVC)
+    # ----------------------------------
+    liblinear_clf = LinearSVC(C=1.0, max_iter=10000, random_state=42)
+    start_time = time.time()
+    liblinear_clf.fit(X_train, y_train)
+    liblinear_time = time.time() - start_time
+
+    predictions_liblinear = liblinear_clf.predict(X_test)
+    liblinear_accuracy = accuracy_score(y_test, predictions_liblinear)
+
+    print("LIBLINEAR (LinearSVC) Training Time: {:.4f} seconds".format(liblinear_time))
+    print("LIBLINEAR (LinearSVC) Test Accuracy: {:.2f}%".format(liblinear_accuracy * 100))
+    
+    # ### --- Linear Kernel SVM ---
+    # print("Training SVM with linear kernel...")
+    # clf_linear = SVC(kernel="linear", C=1.0)
+    # t1 = time.time()
+    # clf_linear.fit(X_train, y_train)
+    # t2 = time.time()
+    # print(f"Training time: {t2 - t1:.2f} seconds")
+    # sklearn_model = {'w': clf_linear.coef_[0], 'b': clf_linear.intercept_[0]}
+    # with open('sklearn_svm_model.pkl', 'wb') as f:
+    #     pickle.dump(sklearn_model, f)
+    # print("scikit-learn SVM model saved.")
+    
+    # # Predictions and accuracy
+    # predictions_linear = clf_linear.predict(X_test)
+    # acc_linear = accuracy_score(y_test, predictions_linear)
+    # print(f"Linear SVM Test Accuracy: {acc_linear * 100:.2f}%")
+    
+    # # Support vectors for linear SVM
+    # num_sv_linear = clf_linear.support_vectors_.shape[0]
+    # perc_sv_linear = num_sv_linear / X_train.shape[0] * 100
+    # print(f"Linear SVM: Number of support vectors: {num_sv_linear}")
+    # print(f"Linear SVM: Percentage of training samples as support vectors: {perc_sv_linear:.2f}%")
+    
+    # Plot top 5 support vectors for linear SVM
+    # print("Plotting top 5 support vectors for linear SVM...")
+    # plot_top_support_vectors(clf_linear, title_prefix="Linear SV")
+    
+    # Plot weight vector for linear SVM (available via coef_)
+    # w_linear = clf_linear.coef_[0]  # shape (30000,)
+    # w_linear_norm = normalize_vector_to_image(w_linear)
+    # plt.figure()
+    # plt.title("Linear SVM Weight Vector")
+    # plt.imshow(w_linear_norm.reshape(100, 100, 3))
+    # plt.axis('off')
+    # plt.show()
+    
+    ### --- Gaussian (RBF) Kernel SVM ---
+    # print("Training SVM with Gaussian (RBF) kernel...")
+    # clf_rbf = SVC(kernel="rbf", C=1.0, gamma=0.001)
+    # clf_rbf.fit(X_train, y_train)
+    
+    # predictions_rbf = clf_rbf.predict(X_test)
+    # acc_rbf = accuracy_score(y_test, predictions_rbf)
+    # print(f"Gaussian SVM Test Accuracy: {acc_rbf * 100:.2f}%")
+    
+    # # Support vectors for Gaussian SVM
+    # num_sv_rbf = clf_rbf.support_vectors_.shape[0]
+    # perc_sv_rbf = num_sv_rbf / X_train.shape[0] * 100
+    # print(f"Gaussian SVM: Number of support vectors: {num_sv_rbf}")
+    # print(f"Gaussian SVM: Percentage of training samples as support vectors: {perc_sv_rbf:.2f}%")
+    
+    # # Plot top 5 support vectors for Gaussian SVM
+    # print("Plotting top 5 support vectors for Gaussian SVM...")
+    # plot_top_support_vectors(clf_rbf, title_prefix="Gaussian SV")
+
+if __name__ == '__main__':
+    main()
+
+# Assume X_train, y_train, X_test, y_test are already defined (preprocessed data)
+
+# -------------------------------
+# SVM via SGD (using hinge loss)
+# -------------------------------
+# sgd_clf = SGDClassifier(loss="hinge", max_iter=1000, tol=1e-3, random_state=42)
+# start_time = time.time()
+# sgd_clf.fit(X_train, y_train)
+# sgd_time = time.time() - start_time
+
+# predictions_sgd = sgd_clf.predict(X_test)
+# sgd_accuracy = accuracy_score(y_test, predictions_sgd)
+
+# print("SGD SVM Training Time: {:.4f} seconds".format(sgd_time))
+# print("SGD SVM Test Accuracy: {:.2f}%".format(sgd_accuracy * 100))
+
+
+
+
+
+
+import cvxopt
+import cvxopt.solvers
+import numpy as np
+import os
+import cv2
+import time
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+class SupportVectorMachine:
+    """
+    Binary SVM using CVXOPT for quadratic programming.
+    Supports 'linear' and 'gaussian' kernels.
+    """
+    def __init__(self):
+        self.w = None          # Weight vector (only computed for linear kernel)
+        self.b = 0.0           # Bias term
+        self.alphas = None     # Lagrange multipliers for support vectors
+        self.sv_X = None       # Support vector data
+        self.sv_y = None       # Support vector labels (converted to -1 and +1)
+        self.kernel_name = None
+        self.gamma = None      # For Gaussian kernel
+
+    def _kernel(self, X1, X2, kernel, gamma):
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match97-0.html#1" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        if kernel == 'linear':
+            return np.dot(X1, X2.T)
+        elif kernel == 'gaussian':
+            X1_sq = np.sum(X1**2, axis=1).reshape(-1, 1)
+</FONT>            X2_sq = np.sum(X2**2, axis=1).reshape(1, -1)
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match97-0.html#4" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            sq_dists = X1_sq + X2_sq - 2 * np.dot(X1, X2.T)
+            return np.exp(-gamma * sq_dists)
+        else:
+            raise ValueError("Unknown kernel type.")
+
+    def fit(self, X, y, kernel='gaussian', C=1.0, gamma=0.001):
+</FONT>        n_samples, n_features = X.shape
+        # Convert labels: expect binary labels 0 or 1; convert to -1, +1.
+        y_modified = np.where(y == 0, -1, 1).astype(np.double)
+        self.kernel_name = kernel
+        self.gamma = gamma
+
+        # Compute the Gram (kernel) matrix.
+        K = self._kernel(X, X, kernel, gamma)
+        # Formulate the QP problem:
+        # P_ij = y_i y_j K(x_i,x_j)
+        P = cvxopt.matrix(np.outer(y_modified, y_modified) * K)
+        q = cvxopt.matrix(-np.ones(n_samples))
+        A = cvxopt.matrix(y_modified.reshape(1, -1))
+        b = cvxopt.matrix(0.0)
+        # Inequality constraints: 0 &lt;= alpha_i &lt;= C
+        G_std = -np.eye(n_samples)
+        h_std = np.zeros(n_samples)
+        G_slack = np.eye(n_samples)
+        h_slack = np.ones(n_samples) * C
+        G = cvxopt.matrix(np.vstack((G_std, G_slack)))
+        h = cvxopt.matrix(np.hstack((h_std, h_slack)))
+
+        cvxopt.solvers.options['show_progress'] = False
+        solution = cvxopt.solvers.qp(P, q, G, h, A, b)
+        alphas = np.ravel(solution['x'])
+        sv = alphas &gt; 1e-5
+        self.alphas = alphas[sv]
+        self.sv_X = X[sv]
+        self.sv_y = y_modified[sv]
+
+        # Compute bias term b
+        b_sum = 0.0
+        count = 0
+        K_sv = self._kernel(self.sv_X, self.sv_X, kernel, gamma)
+        for i in range(len(self.alphas)):
+            if self.alphas[i] &gt; 1e-5 and self.alphas[i] &lt; C - 1e-5:
+                b_i = self.sv_y[i] - np.sum(self.alphas * self.sv_y * K_sv[:, i])
+                b_sum += b_i
+                count += 1
+        if count &gt; 0:
+            self.b = b_sum / count
+        else:
+            self.b = self.sv_y[0] - np.sum(self.alphas * self.sv_y * K_sv[:, 0])
+
+        if kernel == 'linear':
+            self.w = np.sum((self.alphas * self.sv_y)[:, None] * self.sv_X, axis=0)
+        else:
+            self.w = None
+
+    def decision_function(self, X):
+        if self.kernel_name == 'linear':
+            return np.dot(X, self.w) + self.b
+        elif self.kernel_name == 'gaussian':
+            K = self._kernel(X, self.sv_X, self.kernel_name, self.gamma)
+            return np.dot(K, self.alphas * self.sv_y) + self.b
+        else:
+            raise ValueError("Unknown kernel type.")
+
+    def predict(self, X):
+        decision = self.decision_function(X)
+        return np.where(decision &gt;= 0, 1, 0)
+
+
+class MultiClassSVM:
+    """
+    Multi-class SVM using one-vs-one strategy.
+    Trains a binary SVM for each pair of classes and votes for the final class.
+    """
+    def __init__(self, C=1.0, gamma=0.001):
+        self.C = C
+        self.gamma = gamma
+        # List of tuples: (class_i, class_j, binary_classifier)
+        self.classifiers = []
+        self.classes_ = None
+
+    def fit(self, X, y):
+        self.classes_ = np.unique(y)
+        n_classes = len(self.classes_)
+        # Train one binary classifier for each pair of classes.
+        for i in range(n_classes):
+            for j in range(i + 1, n_classes):
+                class_i = self.classes_[i]
+                class_j = self.classes_[j]
+                # Select training examples belonging to class_i or class_j.
+                idx = np.where((y == class_i) | (y == class_j))[0]
+                X_ij = X[idx]
+                y_ij = y[idx]
+                # Map class_i -&gt; 0 and class_j -&gt; 1.
+                y_binary = np.where(y_ij == class_i, 0, 1)
+                svm = SupportVectorMachine()
+                print(f"Training SVM for classes {class_i} vs {class_j}")
+                svm.fit(X_ij, y_binary, kernel='gaussian', C=self.C, gamma=self.gamma)
+                self.classifiers.append((class_i, class_j, svm))
+
+    def predict(self, X):
+        n_samples = X.shape[0]
+        # Initialize vote counts and aggregated confidence scores.
+        votes = np.zeros((n_samples, len(self.classes_)))
+        confidence = np.zeros((n_samples, len(self.classes_)))
+        for (class_i, class_j, clf) in self.classifiers:
+            scores = clf.decision_function(X)
+            # If score &gt;= 0, classifier votes for class_j; otherwise for class_i.
+            for idx in range(n_samples):
+                if scores[idx] &gt;= 0:
+                    # Vote for class_j; add the margin (score) as confidence.
+                    votes[idx, np.where(self.classes_ == class_j)[0][0]] += 1
+                    confidence[idx, np.where(self.classes_ == class_j)[0][0]] += scores[idx]
+                else:
+                    votes[idx, np.where(self.classes_ == class_i)[0][0]] += 1
+                    confidence[idx, np.where(self.classes_ == class_i)[0][0]] += -scores[idx]
+        # For each test sample, pick the class with maximum votes.
+        # In case of a tie, choose the class with the highest aggregated confidence.
+        final_pred = []
+        for idx in range(n_samples):
+            max_votes = np.max(votes[idx])
+            candidates = np.where(votes[idx] == max_votes)[0]
+            if len(candidates) == 1:
+                final_pred.append(self.classes_[candidates[0]])
+            else:
+                # Tie-breaker: choose candidate with maximum confidence.
+                candidate_confidences = confidence[idx, candidates]
+                chosen = candidates[np.argmax(candidate_confidences)]
+                final_pred.append(self.classes_[chosen])
+        return np.array(final_pred)
+
+def preprocess_image(image_path):
+    """
+    Reads an image from image_path, resizes it to 100x100 pixels with center cropping,
+    normalizes pixel values to [0, 1], and flattens it.
+    """
+    # Read image using cv2
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Image at {image_path} could not be loaded.")
+    
+    # Convert BGR to RGB (optional, depending on use-case)
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    # Resize image: To maintain aspect ratio, first resize so that the smaller side is 100,
+    # then perform a center crop.
+    h, w, _ = img.shape
+    if h &lt; w:
+        new_h = 100
+        new_w = int(w * (100 / h))
+    else:
+        new_w = 100
+        new_h = int(h * (100 / w))
+    resized = cv2.resize(img, (new_w, new_h))
+    
+    # Center crop to 100x100
+    start_x = (resized.shape[1] - 100) // 2
+    start_y = (resized.shape[0] - 100) // 2
+    cropped = resized[start_y:start_y+100, start_x:start_x+100]
+    
+    # Normalize to [0, 1]
+    normalized = cropped.astype(np.float32) / 255.0
+    
+    # Flatten the image into a 1D vector
+    flattened = normalized.flatten()
+    return flattened
+
+def load_dataset(base_dir, class_names):
+    """
+    Loads and preprocesses images from the specified base_dir.
+    Assumes that images for each class are in separate subdirectories given by class_names.
+    
+    Args:
+        base_dir: Path to the dataset folder (e.g., 'data/Q2/train' or 'data/Q2/test')
+        class_names: List of subdirectory names corresponding to the classes to load.
+                     Labels will be assigned in the order of class_names (0, 1, ...).
+                     
+    Returns:
+        X: np.array of shape (N, 30000) where each row is a flattened image.
+        y: np.array of shape (N,) containing class labels.
+    """
+    X, y = [], []
+    for label, cls in enumerate(class_names):
+        cls_dir = os.path.join(base_dir, cls)
+        if not os.path.exists(cls_dir):
+            print(f"Directory {cls_dir} does not exist, skipping.")
+            continue
+        # Consider common image extensions
+        for file in os.listdir(cls_dir):
+            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                img_path = os.path.join(cls_dir, file)
+                try:
+                    img_vector = preprocess_image(img_path)
+                    X.append(img_vector)
+                    y.append(label)
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+    return np.array(X), np.array(y)
+
+# ==========================
+# Main Function
+# ==========================
+def main():
+    # Directories for train and test sets.
+    # Adjust these paths according to your directory structure.
+    train_dir = 'data/Q2/train'
+    test_dir = 'data/Q2/test'
+    
+    # For binary classification, choose two classes.
+    # According to the assignment, these might be determined based on your entry number.
+    # For demonstration, we simply take the first two sorted directories.
+    available_classes = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
+    if len(available_classes) &lt; 2:
+        print("Not enough classes found in training data.")
+        return
+    # For example, we take the first two classes.
+    class_names = available_classes
+    print(f"Using classes: {class_names}")
+
+    # Cache file path for preprocessed data
+    cache_file = 'preprocessed_data_multiclass.npz'
+    
+    if os.path.exists(cache_file):
+        print("Loading cached data...")
+        cache = np.load(cache_file, allow_pickle=True)
+        X_train, y_train = cache['X_train'], cache['y_train']
+        X_test, y_test = cache['X_test'], cache['y_test']
+    else:
+        print("Preprocessing training data...")
+        X_train, y_train = load_dataset(train_dir, class_names)
+        print("Preprocessing test data...")
+        X_test, y_test = load_dataset(test_dir, class_names)
+        # Cache the preprocessed data
+        np.savez(cache_file, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
+        print(f"Cached preprocessed data to {cache_file}")
+
+    print(f"Training data: {X_train.shape[0]} samples")
+    print(f"Test data: {X_test.shape[0]} samples")
+    # Initialize and train the one-vs-one multi-class SVM.
+    multi_svm = MultiClassSVM(C=1.0, gamma=0.001)
+    t1 = time.time()
+    multi_svm.fit(X_train, y_train)
+    t2 = time.time()
+    print(f"Training time: {t2 - t1:.2f} seconds")  
+    predictions = multi_svm.predict(X_test)
+    cm_cvx = confusion_matrix(y_test, predictions)
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm_cvx, annot=True, fmt="d", cmap="Blues")
+    plt.title("Confusion Matrix - CVXOPT-based Multi-class SVM")
+    plt.xlabel("Predicted Label")
+    plt.ylabel("True Label")
+    plt.show()
+    acc = np.mean(predictions == y_test)
+    print("Multi-class SVM Test Accuracy: {:.2f}%".format(acc * 100))
+
+    misclassified_idx = np.where(predictions != y_test)[0]
+    print("Number of misclassified examples (LIBSVM):", len(misclassified_idx))
+    num_to_show = min(10, len(misclassified_idx))
+    for i in range(num_to_show):
+        idx = misclassified_idx[i]
+        # Reshape the flattened image back to (100, 100, 3)
+        img = X_test[idx].reshape(100, 100, 3)
+        true_label = y_test[idx]
+        pred_label = predictions[idx]
+        plt.figure()
+        plt.imshow(img)
+        plt.title(f"True Label: {true_label} | Predicted: {pred_label}")
+        plt.axis('off')
+        plt.show()
+
+
+if __name__ == '__main__':
+    main()
+
+
+
+
+import cvxopt
+import cvxopt.solvers
+import numpy as np
+import os
+import cv2
+import time
+from sklearn.svm import SVC
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+class SupportVectorMachine:
+    """
+    Binary SVM using CVXOPT for quadratic programming.
+    Supports 'linear' and 'gaussian' kernels.
+    """
+    def __init__(self):
+        self.w = None          # Weight vector (only computed for linear kernel)
+        self.b = 0.0           # Bias term
+        self.alphas = None     # Lagrange multipliers for support vectors
+        self.sv_X = None       # Support vector data
+        self.sv_y = None       # Support vector labels (converted to -1 and +1)
+        self.kernel_name = None
+        self.gamma = None      # For Gaussian kernel
+
+    def _kernel(self, X1, X2, kernel, gamma):
+        if kernel == 'linear':
+            return np.dot(X1, X2.T)
+        elif kernel == 'gaussian':
+            X1_sq = np.sum(X1**2, axis=1).reshape(-1, 1)
+            X2_sq = np.sum(X2**2, axis=1).reshape(1, -1)
+            sq_dists = X1_sq + X2_sq - 2 * np.dot(X1, X2.T)
+            return np.exp(-gamma * sq_dists)
+        else:
+            raise ValueError("Unknown kernel type.")
+
+    def fit(self, X, y, kernel='gaussian', C=1.0, gamma=0.001):
+        n_samples, n_features = X.shape
+        # Convert labels: expect binary labels 0 or 1; convert to -1, +1.
+        y_modified = np.where(y == 0, -1, 1).astype(np.double)
+        self.kernel_name = kernel
+        self.gamma = gamma
+
+        # Compute the Gram (kernel) matrix.
+        K = self._kernel(X, X, kernel, gamma)
+        # Formulate the QP problem:
+        # P_ij = y_i y_j K(x_i,x_j)
+        P = cvxopt.matrix(np.outer(y_modified, y_modified) * K)
+        q = cvxopt.matrix(-np.ones(n_samples))
+        A = cvxopt.matrix(y_modified.reshape(1, -1))
+        b = cvxopt.matrix(0.0)
+        # Inequality constraints: 0 &lt;= alpha_i &lt;= C
+        G_std = -np.eye(n_samples)
+        h_std = np.zeros(n_samples)
+        G_slack = np.eye(n_samples)
+        h_slack = np.ones(n_samples) * C
+        G = cvxopt.matrix(np.vstack((G_std, G_slack)))
+        h = cvxopt.matrix(np.hstack((h_std, h_slack)))
+
+        cvxopt.solvers.options['show_progress'] = False
+        solution = cvxopt.solvers.qp(P, q, G, h, A, b)
+        alphas = np.ravel(solution['x'])
+        sv = alphas &gt; 1e-5
+        self.alphas = alphas[sv]
+        self.sv_X = X[sv]
+        self.sv_y = y_modified[sv]
+
+        # Compute bias term b
+        b_sum = 0.0
+        count = 0
+        K_sv = self._kernel(self.sv_X, self.sv_X, kernel, gamma)
+        for i in range(len(self.alphas)):
+            if self.alphas[i] &gt; 1e-5 and self.alphas[i] &lt; C - 1e-5:
+                b_i = self.sv_y[i] - np.sum(self.alphas * self.sv_y * K_sv[:, i])
+                b_sum += b_i
+                count += 1
+        if count &gt; 0:
+            self.b = b_sum / count
+        else:
+            self.b = self.sv_y[0] - np.sum(self.alphas * self.sv_y * K_sv[:, 0])
+
+        if kernel == 'linear':
+            self.w = np.sum((self.alphas * self.sv_y)[:, None] * self.sv_X, axis=0)
+        else:
+            self.w = None
+
+    def decision_function(self, X):
+        if self.kernel_name == 'linear':
+            return np.dot(X, self.w) + self.b
+        elif self.kernel_name == 'gaussian':
+            K = self._kernel(X, self.sv_X, self.kernel_name, self.gamma)
+            return np.dot(K, self.alphas * self.sv_y) + self.b
+        else:
+            raise ValueError("Unknown kernel type.")
+
+    def predict(self, X):
+        decision = self.decision_function(X)
+        return np.where(decision &gt;= 0, 1, 0)
+
+
+class MultiClassSVM:
+    """
+    Multi-class SVM using one-vs-one strategy.
+    Trains a binary SVM for each pair of classes and votes for the final class.
+    """
+    def __init__(self, C=1.0, gamma=0.001):
+        self.C = C
+        self.gamma = gamma
+        # List of tuples: (class_i, class_j, binary_classifier)
+        self.classifiers = []
+        self.classes_ = None
+
+    def fit(self, X, y):
+        self.classes_ = np.unique(y)
+        n_classes = len(self.classes_)
+        # Train one binary classifier for each pair of classes.
+        for i in range(n_classes):
+            for j in range(i + 1, n_classes):
+                class_i = self.classes_[i]
+                class_j = self.classes_[j]
+                # Select training examples belonging to class_i or class_j.
+                idx = np.where((y == class_i) | (y == class_j))[0]
+                X_ij = X[idx]
+                y_ij = y[idx]
+                # Map class_i -&gt; 0 and class_j -&gt; 1.
+                y_binary = np.where(y_ij == class_i, 0, 1)
+                svm = SupportVectorMachine()
+                print(f"Training SVM for classes {class_i} vs {class_j}")
+                svm.fit(X_ij, y_binary, kernel='gaussian', C=self.C, gamma=self.gamma)
+                self.classifiers.append((class_i, class_j, svm))
+
+    def predict(self, X):
+        n_samples = X.shape[0]
+        # Initialize vote counts and aggregated confidence scores.
+        votes = np.zeros((n_samples, len(self.classes_)))
+        confidence = np.zeros((n_samples, len(self.classes_)))
+        for (class_i, class_j, clf) in self.classifiers:
+            scores = clf.decision_function(X)
+            # If score &gt;= 0, classifier votes for class_j; otherwise for class_i.
+            for idx in range(n_samples):
+                if scores[idx] &gt;= 0:
+                    # Vote for class_j; add the margin (score) as confidence.
+                    votes[idx, np.where(self.classes_ == class_j)[0][0]] += 1
+                    confidence[idx, np.where(self.classes_ == class_j)[0][0]] += scores[idx]
+                else:
+                    votes[idx, np.where(self.classes_ == class_i)[0][0]] += 1
+                    confidence[idx, np.where(self.classes_ == class_i)[0][0]] += -scores[idx]
+        # For each test sample, pick the class with maximum votes.
+        # In case of a tie, choose the class with the highest aggregated confidence.
+        final_pred = []
+        for idx in range(n_samples):
+            max_votes = np.max(votes[idx])
+            candidates = np.where(votes[idx] == max_votes)[0]
+            if len(candidates) == 1:
+                final_pred.append(self.classes_[candidates[0]])
+            else:
+                # Tie-breaker: choose candidate with maximum confidence.
+                candidate_confidences = confidence[idx, candidates]
+                chosen = candidates[np.argmax(candidate_confidences)]
+                final_pred.append(self.classes_[chosen])
+        return np.array(final_pred)
+
+def preprocess_image(image_path):
+    """
+    Reads an image from image_path, resizes it to 100x100 pixels with center cropping,
+    normalizes pixel values to [0, 1], and flattens it.
+    """
+    # Read image using cv2
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Image at {image_path} could not be loaded.")
+    
+    # Convert BGR to RGB (optional, depending on use-case)
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    # Resize image: To maintain aspect ratio, first resize so that the smaller side is 100,
+    # then perform a center crop.
+    h, w, _ = img.shape
+    if h &lt; w:
+        new_h = 100
+        new_w = int(w * (100 / h))
+    else:
+        new_w = 100
+        new_h = int(h * (100 / w))
+    resized = cv2.resize(img, (new_w, new_h))
+    
+    # Center crop to 100x100
+    start_x = (resized.shape[1] - 100) // 2
+    start_y = (resized.shape[0] - 100) // 2
+    cropped = resized[start_y:start_y+100, start_x:start_x+100]
+    
+    # Normalize to [0, 1]
+    normalized = cropped.astype(np.float32) / 255.0
+    
+    # Flatten the image into a 1D vector
+    flattened = normalized.flatten()
+    return flattened
+
+def load_dataset(base_dir, class_names):
+    """
+    Loads and preprocesses images from the specified base_dir.
+    Assumes that images for each class are in separate subdirectories given by class_names.
+    
+    Args:
+        base_dir: Path to the dataset folder (e.g., 'data/Q2/train' or 'data/Q2/test')
+        class_names: List of subdirectory names corresponding to the classes to load.
+                     Labels will be assigned in the order of class_names (0, 1, ...).
+                     
+    Returns:
+        X: np.array of shape (N, 30000) where each row is a flattened image.
+        y: np.array of shape (N,) containing class labels.
+    """
+    X, y = [], []
+    for label, cls in enumerate(class_names):
+        cls_dir = os.path.join(base_dir, cls)
+        if not os.path.exists(cls_dir):
+            print(f"Directory {cls_dir} does not exist, skipping.")
+            continue
+        # Consider common image extensions
+        for file in os.listdir(cls_dir):
+            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                img_path = os.path.join(cls_dir, file)
+                try:
+                    img_vector = preprocess_image(img_path)
+                    X.append(img_vector)
+                    y.append(label)
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+    return np.array(X), np.array(y)
+
+# ==========================
+# Main Function
+# ==========================
+def main():
+    # Directories for train and test sets.
+    # Adjust these paths according to your directory structure.
+    train_dir = 'data/Q2/train'
+    test_dir = 'data/Q2/test'
+    
+    # For binary classification, choose two classes.
+    # According to the assignment, these might be determined based on your entry number.
+    # For demonstration, we simply take the first two sorted directories.
+    available_classes = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
+    if len(available_classes) &lt; 2:
+        print("Not enough classes found in training data.")
+        return
+    # For example, we take the first two classes.
+    class_names = available_classes
+    print(f"Using classes: {class_names}")
+
+    # Cache file path for preprocessed data
+    cache_file = 'preprocessed_data_multiclass.npz'
+    
+    if os.path.exists(cache_file):
+        print("Loading cached data...")
+        cache = np.load(cache_file, allow_pickle=True)
+        X_train, y_train = cache['X_train'], cache['y_train']
+        X_test, y_test = cache['X_test'], cache['y_test']
+    else:
+        print("Preprocessing training data...")
+        X_train, y_train = load_dataset(train_dir, class_names)
+        print("Preprocessing test data...")
+        X_test, y_test = load_dataset(test_dir, class_names)
+        # Cache the preprocessed data
+        np.savez(cache_file, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
+        print(f"Cached preprocessed data to {cache_file}")
+
+    print(f"Training data: {X_train.shape[0]} samples")
+    print(f"Test data: {X_test.shape[0]} samples")
+    # Initialize and train the one-vs-one multi-class SVM.
+    # multi_svm = MultiClassSVM(C=1.0, gamma=0.001)
+    # multi_svm.fit(X_train, y_train)
+    # predictions = multi_svm.predict(X_test)
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match97-0.html#5" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    svc = SVC(kernel='rbf', C=1.0, gamma=0.001)
+
+    # Measure the training time
+    start_time = time.time()
+    svc.fit(X_train, y_train)
+    training_time = time.time() - start_time
+
+    # Predict on the test set and compute accuracy
+    predictions = svc.predict(X_test)
+</FONT>    cm_cvx = confusion_matrix(y_test, predictions)
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm_cvx, annot=True, fmt="d", cmap="Blues")
+    plt.title("Confusion Matrix - CVXOPT-based Multi-class SVM")
+    plt.xlabel("Predicted Label")
+    plt.ylabel("True Label")
+    plt.show()
+
+    print("scikit-learn SVC (Gaussian kernel) Training Time: {:.4f} seconds".format(training_time))
+    acc = np.mean(predictions == y_test)
+    print("Multi-class SVM Test Accuracy: {:.2f}%".format(acc * 100))
+    misclassified_idx = np.where(predictions != y_test)[0]
+    print("Number of misclassified examples (LIBSVM):", len(misclassified_idx))
+    num_to_show = min(10, len(misclassified_idx))
+    for i in range(num_to_show):
+        idx = misclassified_idx[i]
+        # Reshape the flattened image back to (100, 100, 3)
+        img = X_test[idx].reshape(100, 100, 3)
+        true_label = y_test[idx]
+        pred_label = predictions[idx]
+        plt.figure()
+        plt.imshow(img)
+        plt.title(f"True Label: {true_label} | Predicted: {pred_label}")
+        plt.axis('off')
+        plt.show()
+
+if __name__ == '__main__':
+    main()
+
+
+
+
+import os
+import cv2
+import numpy as np
+import time
+
+class SGD_SVM:
+    def __init__(self, lr=0.001, epochs=1000, C=1.0, tol=1e-4):
+        """
+        Initialize the SGD-based SVM.
+        
+        Args:
+            lr (float): Learning rate.
+            epochs (int): Maximum number of passes over the training data.
+            C (float): Regularization parameter.
+            tol (float): Tolerance for the stopping condition.
+        """
+        self.lr = lr
+        self.epochs = epochs
+        self.C = C
+        self.tol = tol
+        self.w = None   # Weight vector
+        self.b = 0.0    # Bias term
+
+    def _compute_loss(self, X, y_mod):
+        """
+        Compute the hinge loss with regularization.
+        """
+        margins = 1 - y_mod * (np.dot(X, self.w) + self.b)
+        loss = np.maximum(0, margins)
+        return 0.5 * np.dot(self.w, self.w) + self.C * np.sum(loss)
+
+    def fit(self, X, y):
+        """
+        Train the SVM using SGD on the given training data.
+        
+        Args:
+            X (np.array): Training data of shape (n_samples, n_features).
+            y (np.array): Labels of shape (n_samples,), with values 0 or 1.
+        """
+        # Convert labels: 0 becomes -1, and 1 remains +1.
+        y_mod = np.where(y == 0, -1, 1)
+        n_samples, n_features = X.shape
+        
+        # Initialize weights to zero.
+        self.w = np.zeros(n_features)
+        self.b = 0.0
+        
+        prev_loss = float('inf')
+        
+        # Iterate over epochs.
+        for epoch in range(self.epochs):
+            # Shuffle the data indices for each epoch.
+            indices = np.arange(n_samples)
+            np.random.shuffle(indices)
+            
+            for i in indices:
+                xi = X[i]
+                yi = y_mod[i]
+                # Check the margin condition.
+                if yi * (np.dot(self.w, xi) + self.b) &gt;= 1:
+                    # Correctly classified with margin:
+                    # Only regularization affects w.
+                    self.w = self.w - self.lr * self.w
+                    # b remains unchanged.
+                else:
+                    print("misclassified")
+                    # Misclassified or within margin:
+                    self.w = self.w - self.lr * (self.w - self.C * yi * xi)
+                    self.b = self.b + self.lr * self.C * yi
+            
+            # Compute the loss at the end of this epoch.
+            loss = self._compute_loss(X, y_mod)
+            # Optionally, print the loss for debugging.
+            # print(f"Epoch {epoch+1}: Loss = {loss:.4f}")
+            
+            # Check if the change in loss is below the tolerance.
+            if abs(prev_loss - loss) &lt; self.tol:
+                print(f"Stopping early at epoch {epoch+1} with loss: {loss:.4f}")
+                break
+            prev_loss = loss
+
+    def predict(self, X):
+        """
+        Predict class labels for samples in X.
+        
+        Args:
+            X (np.array): Data of shape (n_samples, n_features).
+            
+        Returns:
+            np.array: Predicted labels (0 or 1).
+        """
+        scores = np.dot(X, self.w) + self.b
+        return np.where(scores &gt;= 0, 1, 0)
+
+def preprocess_image(image_path):
+    """
+    Reads an image from image_path, resizes it to 100x100 pixels with center cropping,
+    normalizes pixel values to [0, 1], and flattens it.
+    """
+    # Read image using cv2
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Image at {image_path} could not be loaded.")
+    
+    # Convert BGR to RGB (optional, depending on use-case)
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    # Resize image: To maintain aspect ratio, first resize so that the smaller side is 100,
+    # then perform a center crop.
+    h, w, _ = img.shape
+    if h &lt; w:
+        new_h = 100
+        new_w = int(w * (100 / h))
+    else:
+        new_w = 100
+        new_h = int(h * (100 / w))
+    resized = cv2.resize(img, (new_w, new_h))
+    
+    # Center crop to 100x100
+    start_x = (resized.shape[1] - 100) // 2
+    start_y = (resized.shape[0] - 100) // 2
+    cropped = resized[start_y:start_y+100, start_x:start_x+100]
+    
+    # Normalize to [0, 1]
+    normalized = cropped.astype(np.float32) / 255.0
+    
+    # Flatten the image into a 1D vector
+    flattened = normalized.flatten()
+    return flattened
+
+def load_dataset(base_dir, class_names):
+    """
+    Loads and preprocesses images from the specified base_dir.
+    Assumes that images for each class are in separate subdirectories given by class_names.
+    
+    Args:
+        base_dir: Path to the dataset folder (e.g., 'data/Q2/train' or 'data/Q2/test')
+        class_names: List of subdirectory names corresponding to the classes to load.
+                     Labels will be assigned in the order of class_names (0, 1, ...).
+                     
+    Returns:
+        X: np.array of shape (N, 30000) where each row is a flattened image.
+        y: np.array of shape (N,) containing class labels.
+    """
+    X, y = [], []
+    for label, cls in enumerate(class_names):
+        cls_dir = os.path.join(base_dir, cls)
+        if not os.path.exists(cls_dir):
+            print(f"Directory {cls_dir} does not exist, skipping.")
+            continue
+        # Consider common image extensions
+        for file in os.listdir(cls_dir):
+            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                img_path = os.path.join(cls_dir, file)
+                try:
+                    img_vector = preprocess_image(img_path)
+                    X.append(img_vector)
+                    y.append(label)
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+    return np.array(X), np.array(y)
+
+# ==========================
+# Main Function
+# ==========================
+def main():
+    # Directories for train and test sets.
+    # Adjust these paths according to your directory structure.
+    train_dir = 'data/Q2/train_p1'
+    test_dir = 'data/Q2/test_p1'
+    
+    # For binary classification, choose two classes.
+    # According to the assignment, these might be determined based on your entry number.
+    # For demonstration, we simply take the first two sorted directories.
+    available_classes = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
+    if len(available_classes) &lt; 2:
+        print("Not enough classes found in training data.")
+        return
+    # For example, we take the first two classes.
+    class_names = [available_classes[0], available_classes[1]]
+    print(f"Using classes: {class_names}")
+
+    # Cache file path for preprocessed data
+    cache_file = 'preprocessed_data.npz'
+    
+    if os.path.exists(cache_file):
+        print("Loading cached data...")
+        cache = np.load(cache_file, allow_pickle=True)
+        X_train, y_train = cache['X_train'], cache['y_train']
+        X_test, y_test = cache['X_test'], cache['y_test']
+    else:
+        print("Preprocessing training data...")
+        X_train, y_train = load_dataset(train_dir, class_names)
+        print("Preprocessing test data...")
+        X_test, y_test = load_dataset(test_dir, class_names)
+        # Cache the preprocessed data
+        np.savez(cache_file, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
+        print(f"Cached preprocessed data to {cache_file}")
+
+    print(f"Training data: {X_train.shape[0]} samples")
+    print(f"Test data: {X_test.shape[0]} samples") 
+    sgd_svm = SGD_SVM(lr=0.001, epochs=10000, C=1.0, tol=1e-4)
+<A NAME="6"></A><FONT color = #00FF00><A HREF="match97-0.html#6" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    start_time = time.time()
+    sgd_svm.fit(X_train, y_train)
+    train_time = time.time() - start_time
+    
+    predictions = sgd_svm.predict(X_test)
+    test_accuracy = np.mean(predictions == y_test)
+</FONT>    
+    print("SGD SVM Training Time: {:.4f} seconds".format(train_time))
+    print("SGD SVM Test Accuracy: {:.2f}%".format(test_accuracy * 100))
+
+
+if __name__ == '__main__':
+    main()
+
+
+
+
+import os
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score
+import pickle
+import time
+
+def preprocess_image(image_path):
+    """
+    Reads an image, converts it to RGB, resizes with aspect ratio preservation,
+    center-crops to 100x100, normalizes to [0, 1], and flattens it.
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Image at {image_path} could not be loaded.")
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    h, w, _ = img.shape
+    # Resize: make the smaller dimension equal to 100 and then crop
+    if h &lt; w:
+        new_h = 100
+        new_w = int(w * (100 / h))
+    else:
+        new_w = 100
+        new_h = int(h * (100 / w))
+    resized = cv2.resize(img, (new_w, new_h))
+    start_x = (resized.shape[1] - 100) // 2
+    start_y = (resized.shape[0] - 100) // 2
+    cropped = resized[start_y:start_y+100, start_x:start_x+100]
+    normalized = cropped.astype(np.float32) / 255.0
+    return normalized.flatten()
+
+def load_dataset(base_dir, class_names):
+    """
+    Loads images from subdirectories named in class_names, preprocesses each image,
+    and assigns labels based on the order in class_names.
+    """
+    X, y = [], []
+    for label, cls in enumerate(class_names):
+        cls_dir = os.path.join(base_dir, cls)
+        if not os.path.exists(cls_dir):
+            print(f"Directory {cls_dir} does not exist, skipping.")
+            continue
+        for file in os.listdir(cls_dir):
+            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                img_path = os.path.join(cls_dir, file)
+                try:
+                    img_vector = preprocess_image(img_path)
+                    X.append(img_vector)
+                    y.append(label)
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+    return np.array(X), np.array(y)
+
+def normalize_vector_to_image(vector):
+    """
+    Normalizes a vector to the range [0, 1] using min-max normalization.
+    """
+    v_min = np.min(vector)
+    v_max = np.max(vector)
+    norm_vec = (vector - v_min) / (v_max - v_min)
+    return norm_vec
+
+def plot_top_support_vectors(clf, title_prefix="SV"):
+    """
+    Plots the top 5 support vectors from the classifier based on the magnitude
+    of the dual coefficients.
+    """
+    support_vectors = clf.support_vectors_
+    # For binary classification, dual_coef_ shape is (1, n_sv)
+    dual_coef = clf.dual_coef_[0]
+    abs_dual_coef = np.abs(dual_coef)
+    # Get indices of top 5 support vectors (by contribution)
+    top5_idx = np.argsort(abs_dual_coef)[-5:]
+    for i in top5_idx:
+        img = support_vectors[i].reshape(100, 100, 3)
+        plt.figure()
+        plt.title(f"{title_prefix} index: {i}, dual coef: {dual_coef[i]:.3f}")
+        plt.imshow(img)
+        plt.axis('off')
+        plt.show()
+
+def main():
+    # Directories for training and test data (adjust paths as needed)
+    train_dir = 'data/Q2/train_p1'
+    test_dir = 'data/Q2/test_p1'
+    
+    # For binary classification, we use two classes.
+    # Here we assume the folders in train_dir are sorted alphabetically.
+    available_classes = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
+    if len(available_classes) &lt; 2:
+        print("Not enough classes found in training data.")
+        return
+    class_names = [available_classes[0], available_classes[1]]
+    print("Using classes:", class_names)
+    
+    # Load the datasets
+    X_train, y_train = load_dataset(train_dir, class_names)
+    X_test, y_test = load_dataset(test_dir, class_names)
+    
+    print(f"Training samples: {X_train.shape[0]}, Test samples: {X_test.shape[0]}")
+    
+    ### --- Linear Kernel SVM ---
+    print("Training SVM with linear kernel...")
+    clf_linear = SVC(kernel="linear", C=1.0)
+    t1 = time.time()
+    clf_linear.fit(X_train, y_train)
+    t2 = time.time()
+    print(f"Training time: {t2 - t1:.2f} seconds")
+    sklearn_model = {'w': clf_linear.coef_[0], 'b': clf_linear.intercept_[0]}
+    with open('sklearn_svm_model.pkl', 'wb') as f:
+        pickle.dump(sklearn_model, f)
+    print("scikit-learn SVM model saved.")
+    
+    # Predictions and accuracy
+    predictions_linear = clf_linear.predict(X_test)
+    acc_linear = accuracy_score(y_test, predictions_linear)
+    print(f"Linear SVM Test Accuracy: {acc_linear * 100:.2f}%")
+    
+    # Support vectors for linear SVM
+    num_sv_linear = clf_linear.support_vectors_.shape[0]
+    perc_sv_linear = num_sv_linear / X_train.shape[0] * 100
+    print(f"Linear SVM: Number of support vectors: {num_sv_linear}")
+    print(f"Linear SVM: Percentage of training samples as support vectors: {perc_sv_linear:.2f}%")
+    
+    # Plot top 5 support vectors for linear SVM
+    # print("Plotting top 5 support vectors for linear SVM...")
+    # plot_top_support_vectors(clf_linear, title_prefix="Linear SV")
+    
+    # Plot weight vector for linear SVM (available via coef_)
+    # w_linear = clf_linear.coef_[0]  # shape (30000,)
+    # w_linear_norm = normalize_vector_to_image(w_linear)
+    # plt.figure()
+    # plt.title("Linear SVM Weight Vector")
+    # plt.imshow(w_linear_norm.reshape(100, 100, 3))
+    # plt.axis('off')
+    # plt.show()
+    
+    ### --- Gaussian (RBF) Kernel SVM ---
+    # print("Training SVM with Gaussian (RBF) kernel...")
+    # clf_rbf = SVC(kernel="rbf", C=1.0, gamma=0.001)
+    # clf_rbf.fit(X_train, y_train)
+    
+    # predictions_rbf = clf_rbf.predict(X_test)
+    # acc_rbf = accuracy_score(y_test, predictions_rbf)
+    # print(f"Gaussian SVM Test Accuracy: {acc_rbf * 100:.2f}%")
+    
+    # # Support vectors for Gaussian SVM
+    # num_sv_rbf = clf_rbf.support_vectors_.shape[0]
+    # perc_sv_rbf = num_sv_rbf / X_train.shape[0] * 100
+    # print(f"Gaussian SVM: Number of support vectors: {num_sv_rbf}")
+    # print(f"Gaussian SVM: Percentage of training samples as support vectors: {perc_sv_rbf:.2f}%")
+    
+    # # Plot top 5 support vectors for Gaussian SVM
+    # print("Plotting top 5 support vectors for Gaussian SVM...")
+    # plot_top_support_vectors(clf_rbf, title_prefix="Gaussian SV")
+
+if __name__ == '__main__':
+    main()
+
+
+
+
+# import cvxopt
+# import numpy as np
+
+# class SupportVectorMachine:
+#     '''
+#     Binary Classifier using Support Vector Machine
+#     '''
+#     def __init__(self):
+#         pass
+        
+#     def fit(self, X, y, kernel = 'linear', C = 1.0, gamma = 0.001):
+#         '''
+#         Learn the parameters from the given training data
+#         Classes are 0 or 1
+        
+#         Args:
+#             X: np.array of shape (N, D) 
+#                 where N is the number of samples and D is the flattened dimension of each image
+                
+#             y: np.array of shape (N,)
+#                 where N is the number of samples and y[i] is the class of the ith sample
+                
+#             kernel: str
+#                 The kernel to be used. Can be 'linear' or 'gaussian'
+                
+#             C: float
+#                 The regularization parameter
+                
+#             gamma: float
+#                 The gamma parameter for gaussian kernel, ignored for linear kernel
+#         '''
+#         pass
+
+#     def predict(self, X):
+#         '''
+#         Predict the class of the input data
+        
+#         Args:
+#             X: np.array of shape (N, D) 
+#                 where N is the number of samples and D is the flattened dimension of each image
+                
+#         Returns:
+#             np.array of shape (N,)
+#                 where N is the number of samples and y[i] is the class of the
+#                 ith sample (0 or 1)
+#         '''
+        
+#         pass
+
+import os
+import cv2
+import numpy as np
+import pickle
+import cvxopt
+import cvxopt.solvers
+import matplotlib.pyplot as plt
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match97-0.html#3" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+import time
+
+
+# ==========================
+# SVM Implementation
+# ==========================
+class SupportVectorMachine:
+    '''
+    Binary Classifier using Support Vector Machine
+    '''
+    def __init__(self):
+        # Parameters will be set during fitting
+        self.w = None          # Weight vector for linear kernel
+        self.b = 0.0           # Bias term
+</FONT>        self.alphas = None     # Lagrange multipliers for support vectors
+        self.sv_X = None       # Support vector data
+        self.sv_y = None       # Support vector labels (-1 or 1)
+        self.kernel_name = None
+        self.gamma = None      # Only used for Gaussian kernel
+
+    def _kernel(self, X1, X2, kernel, gamma):
+        '''
+        Computes the kernel matrix between rows of X1 and X2.
+        For a linear kernel, this is just the dot product.
+        For a Gaussian kernel, we compute the RBF kernel.
+        '''
+        if kernel == 'linear':
+            return np.dot(X1, X2.T)
+        elif kernel == 'gaussian':
+            # Efficient squared Euclidean distance calculation
+            X1_sq = np.sum(X1**2, axis=1).reshape(-1, 1)
+            X2_sq = np.sum(X2**2, axis=1).reshape(1, -1)
+            sq_dists = X1_sq + X2_sq - 2 * np.dot(X1, X2.T)
+            return np.exp(-gamma * sq_dists)
+        else:
+            raise ValueError("Unknown kernel type.")
+
+    def fit(self, X, y, kernel='linear', C=1.0, gamma=0.001):
+        '''
+        Learn the parameters from the given training data.
+        Classes are assumed to be 0 or 1.
+        
+        Args:
+            X: np.array of shape (N, D)
+               where N is the number of samples and D is the flattened dimension of each image
+            y: np.array of shape (N,)
+               where y[i] is the class label (0 or 1) for the i-th sample
+            kernel: str
+               The kernel to be used. Can be 'linear' or 'gaussian'
+            C: float
+               The regularization parameter
+            gamma: float
+               The gamma parameter for gaussian kernel, ignored for linear kernel
+        '''
+        n_samples, n_features = X.shape
+
+        # Convert labels from {0,1} to {-1, +1}
+        y_modified = np.where(y==0, -1, 1).astype(np.double)
+        
+        self.kernel_name = kernel
+        self.gamma = gamma
+
+        # Compute the kernel (Gram) matrix
+        K = self._kernel(X, X, kernel, gamma)
+        
+        # Set up the quadratic programming parameters:
+        # Minimize (1/2) * alpha^T P alpha - q^T alpha
+        P = cvxopt.matrix(np.outer(y_modified, y_modified) * K)
+        q = cvxopt.matrix(-np.ones(n_samples))
+        
+        # Equality constraint: A * alpha = b, where A = y_modified^T and b = 0
+        A = cvxopt.matrix(y_modified.reshape(1, -1))
+        b = cvxopt.matrix(0.0)
+        
+        # Inequality constraints: 0 &lt;= alpha_i &lt;= C
+        G_std = -np.eye(n_samples)
+        h_std = np.zeros(n_samples)
+        G_slack = np.eye(n_samples)
+        h_slack = np.ones(n_samples) * C
+        G = cvxopt.matrix(np.vstack((G_std, G_slack)))
+        h = cvxopt.matrix(np.hstack((h_std, h_slack)))
+        
+        # Solve QP problem using CVXOPT
+        cvxopt.solvers.options['show_progress'] = True
+        solution = cvxopt.solvers.qp(P, q, G, h, A, b)
+        alphas = np.ravel(solution['x'])
+        
+        # Select support vectors where alpha is non-zero
+        sv = alphas &gt; 1e-5
+        # print(sv.sum(), "support vectors out of", n_samples)
+        # print("Support vector percentage: {:.2f}%".format(sv.sum() / n_samples * 100))
+        self.alphas = alphas[sv]
+        self.sv_X = X[sv]
+        self.sv_y = y_modified[sv]
+        # # Compute the absolute contribution of each support vector.
+        # contributions = np.abs(self.alphas * self.sv_y)
+        # # Get indices of the top-5 contributions.
+        # top5_idx = np.argsort(contributions)[-5:]
+        # top5_sv = self.sv_X[top5_idx]
+
+        # for i, sv in enumerate(top5_sv):
+        #     img = sv.reshape(100, 100, 3)
+        #     plt.figure()
+        #     plt.title(f"Top Support Vector {i+1}")
+        #     plt.imshow(img)
+        #     plt.axis('off')
+        #     plt.show()
+        
+        # Compute bias term b using support vectors with 0 &lt; alpha &lt; C
+        b_sum = 0.0
+        count = 0
+        K_sv = self._kernel(self.sv_X, self.sv_X, kernel, gamma)
+        for i in range(len(self.alphas)):
+            if self.alphas[i] &gt; 1e-5 and self.alphas[i] &lt; C - 1e-5:
+                b_i = self.sv_y[i] - np.sum(self.alphas * self.sv_y * K_sv[:, i])
+                b_sum += b_i
+                count += 1
+        if count &gt; 0:
+            self.b = b_sum / count
+        else:
+            self.b = self.sv_y[0] - np.sum(self.alphas * self.sv_y * K_sv[:, 0])
+        
+        # For linear kernel, compute the weight vector explicitly
+        if kernel == 'linear':
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match97-0.html#0" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            self.w = np.sum((self.alphas * self.sv_y)[:, None] * self.sv_X, axis=0)
+            # w_min = np.min(self.w)
+            # w_max = np.max(self.w)
+            # w_norm = (self.w - w_min) / (w_max - w_min)
+            # w_img = w_norm.reshape(100, 100, 3)
+            # plt.figure()
+            # plt.title("Weight Vector Visualization")
+            # plt.imshow(w_img)
+            # plt.axis('off')
+            # plt.show()
+            
+        else:
+            self.w = None
+        
+
+    def predict(self, X):
+        '''
+        Predict the class of the input data.
+</FONT>        
+        Args:
+            X: np.array of shape (N, D)
+               where N is the number of samples and D is the flattened dimension of each image
+               
+        Returns:
+            np.array of shape (N,)
+               where each entry is the predicted class label (0 or 1)
+        '''
+        if self.kernel_name == 'linear':
+            decision = np.dot(X, self.w) + self.b
+        elif self.kernel_name == 'gaussian':
+            K = self._kernel(X, self.sv_X, self.kernel_name, self.gamma)
+            decision = np.dot(K, self.alphas * self.sv_y) + self.b
+        else:
+            raise ValueError("Unknown kernel type.")
+        
+        return np.where(decision &gt;= 0, 1, 0)
+
+# ==========================
+# Data Preprocessing Functions
+# ==========================
+def preprocess_image(image_path):
+    """
+    Reads an image from image_path, resizes it to 100x100 pixels with center cropping,
+    normalizes pixel values to [0, 1], and flattens it.
+    """
+    # Read image using cv2
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Image at {image_path} could not be loaded.")
+    
+    # Convert BGR to RGB (optional, depending on use-case)
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    # Resize image: To maintain aspect ratio, first resize so that the smaller side is 100,
+    # then perform a center crop.
+    h, w, _ = img.shape
+    if h &lt; w:
+        new_h = 100
+        new_w = int(w * (100 / h))
+    else:
+        new_w = 100
+        new_h = int(h * (100 / w))
+    resized = cv2.resize(img, (new_w, new_h))
+    
+    # Center crop to 100x100
+    start_x = (resized.shape[1] - 100) // 2
+    start_y = (resized.shape[0] - 100) // 2
+    cropped = resized[start_y:start_y+100, start_x:start_x+100]
+    
+    # Normalize to [0, 1]
+    normalized = cropped.astype(np.float32) / 255.0
+    
+    # Flatten the image into a 1D vector
+    flattened = normalized.flatten()
+    return flattened
+
+def load_dataset(base_dir, class_names):
+    """
+    Loads and preprocesses images from the specified base_dir.
+    Assumes that images for each class are in separate subdirectories given by class_names.
+    
+    Args:
+        base_dir: Path to the dataset folder (e.g., 'data/Q2/train' or 'data/Q2/test')
+        class_names: List of subdirectory names corresponding to the classes to load.
+                     Labels will be assigned in the order of class_names (0, 1, ...).
+                     
+    Returns:
+        X: np.array of shape (N, 30000) where each row is a flattened image.
+        y: np.array of shape (N,) containing class labels.
+    """
+    X, y = [], []
+    for label, cls in enumerate(class_names):
+        cls_dir = os.path.join(base_dir, cls)
+        if not os.path.exists(cls_dir):
+            print(f"Directory {cls_dir} does not exist, skipping.")
+            continue
+        # Consider common image extensions
+        for file in os.listdir(cls_dir):
+            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                img_path = os.path.join(cls_dir, file)
+                try:
+                    img_vector = preprocess_image(img_path)
+                    X.append(img_vector)
+                    y.append(label)
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+    return np.array(X), np.array(y)
+
+# ==========================
+# Main Function
+# ==========================
+def main():
+    # Directories for train and test sets.
+    # Adjust these paths according to your directory structure.
+    train_dir = 'data/Q2/train_p1'
+    test_dir = 'data/Q2/test_p1'
+    
+    # For binary classification, choose two classes.
+    # According to the assignment, these might be determined based on your entry number.
+    # For demonstration, we simply take the first two sorted directories.
+    available_classes = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
+    if len(available_classes) &lt; 2:
+        print("Not enough classes found in training data.")
+        return
+    # For example, we take the first two classes.
+    class_names = [available_classes[0], available_classes[1]]
+    print(f"Using classes: {class_names}")
+
+    # Cache file path for preprocessed data
+    cache_file = 'preprocessed_data.npz'
+    
+    if os.path.exists(cache_file):
+        print("Loading cached data...")
+        cache = np.load(cache_file, allow_pickle=True)
+        X_train, y_train = cache['X_train'], cache['y_train']
+        X_test, y_test = cache['X_test'], cache['y_test']
+    else:
+        print("Preprocessing training data...")
+        X_train, y_train = load_dataset(train_dir, class_names)
+        print("Preprocessing test data...")
+        X_test, y_test = load_dataset(test_dir, class_names)
+        # Cache the preprocessed data
+        np.savez(cache_file, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
+        print(f"Cached preprocessed data to {cache_file}")
+
+    print(f"Training data: {X_train.shape[0]} samples")
+    print(f"Test data: {X_test.shape[0]} samples")
+
+    # Initialize and train the SVM.
+    svm = SupportVectorMachine()
+    # You can change kernel to 'gaussian' and adjust gamma as needed.
+    print("Training SVM...")
+    t1 = time.time()
+    svm.fit(X_train, y_train, kernel='gaussian', C=1.0, gamma=0.001)
+    t2 = time.time()
+    print("Training time: {:.2f} seconds".format(t2 - t1))
+    custom_model = {'w': svm.w, 'b': svm.b}
+    with open('custom_svm_model.pkl', 'wb') as f:
+        pickle.dump(custom_model, f)
+    print("Custom SVM model saved.")
+    # Predict on test set
+    predictions = svm.predict(X_test)
+    accuracy = np.mean(predictions == y_test)
+    print(f"Test Accuracy: {accuracy*100:.2f}%")
+
+if __name__ == '__main__':
+    main()
+
+
+
+
+# import cvxopt
+# import numpy as np
+
+# class SupportVectorMachine:
+#     '''
+#     Binary Classifier using Support Vector Machine
+#     '''
+#     def __init__(self):
+#         pass
+        
+#     def fit(self, X, y, kernel = 'linear', C = 1.0, gamma = 0.001):
+#         '''
+#         Learn the parameters from the given training data
+#         Classes are 0 or 1
+        
+#         Args:
+#             X: np.array of shape (N, D) 
+#                 where N is the number of samples and D is the flattened dimension of each image
+                
+#             y: np.array of shape (N,)
+#                 where N is the number of samples and y[i] is the class of the ith sample
+                
+#             kernel: str
+#                 The kernel to be used. Can be 'linear' or 'gaussian'
+                
+#             C: float
+#                 The regularization parameter
+                
+#             gamma: float
+#                 The gamma parameter for gaussian kernel, ignored for linear kernel
+#         '''
+#         pass
+
+#     def predict(self, X):
+#         '''
+#         Predict the class of the input data
+        
+#         Args:
+#             X: np.array of shape (N, D) 
+#                 where N is the number of samples and D is the flattened dimension of each image
+                
+#         Returns:
+#             np.array of shape (N,)
+#                 where N is the number of samples and y[i] is the class of the
+#                 ith sample (0 or 1)
+#         '''
+        
+#         pass
+
+import os
+import cv2
+import numpy as np
+# import pickle
+import cvxopt
+import cvxopt.solvers
+
+
+class SupportVectorMachine:
+    '''
+    Binary Classifier using Support Vector Machine
+    '''
+    def __init__(self):
+        # Parameters will be set during fitting
+        self.w = None          # Weight vector for linear kernel
+        self.b = 0.0           # Bias term
+        self.alphas = None     # Lagrange multipliers for support vectors
+        self.sv_X = None       # Support vector data
+        self.sv_y = None       # Support vector labels (-1 or 1)
+        self.kernel_name = None
+        self.gamma = None      # Only used for Gaussian kernel
+
+    def _kernel(self, X1, X2, kernel, gamma):
+        '''
+        Computes the kernel matrix between rows of X1 and X2.
+        For a linear kernel, this is just the dot product.
+        For a Gaussian kernel, we compute the RBF kernel.
+        '''
+        if kernel == 'linear':
+            return np.dot(X1, X2.T)
+        elif kernel == 'gaussian':
+            # Efficient squared Euclidean distance calculation
+            X1_sq = np.sum(X1**2, axis=1).reshape(-1, 1)
+            X2_sq = np.sum(X2**2, axis=1).reshape(1, -1)
+            sq_dists = X1_sq + X2_sq - 2 * np.dot(X1, X2.T)
+            return np.exp(-gamma * sq_dists)
+        else:
+            raise ValueError("Unknown kernel type.")
+
+    def fit(self, X, y, kernel='linear', C=1.0, gamma=0.001):
+        '''
+        Learn the parameters from the given training data.
+        Classes are assumed to be 0 or 1.
+        
+        Args:
+            X: np.array of shape (N, D)
+               where N is the number of samples and D is the flattened dimension of each image
+            y: np.array of shape (N,)
+               where y[i] is the class label (0 or 1) for the i-th sample
+            kernel: str
+               The kernel to be used. Can be 'linear' or 'gaussian'
+            C: float
+               The regularization parameter
+            gamma: float
+               The gamma parameter for gaussian kernel, ignored for linear kernel
+        '''
+        n_samples, n_features = X.shape
+
+        # Convert labels from {0,1} to {-1, +1}
+        y_modified = np.where(y==0, -1, 1).astype(np.double)
+        
+        self.kernel_name = kernel
+        self.gamma = gamma
+
+        # Compute the kernel (Gram) matrix
+        K = self._kernel(X, X, kernel, gamma)
+        
+        # Set up the quadratic programming parameters:
+        # Minimize (1/2) * alpha^T P alpha - q^T alpha
+        P = cvxopt.matrix(np.outer(y_modified, y_modified) * K)
+        q = cvxopt.matrix(-np.ones(n_samples))
+        
+        # Equality constraint: A * alpha = b, where A = y_modified^T and b = 0
+        A = cvxopt.matrix(y_modified.reshape(1, -1))
+        b = cvxopt.matrix(0.0)
+        
+        # Inequality constraints: 0 &lt;= alpha_i &lt;= C
+        G_std = -np.eye(n_samples)
+        h_std = np.zeros(n_samples)
+        G_slack = np.eye(n_samples)
+        h_slack = np.ones(n_samples) * C
+        G = cvxopt.matrix(np.vstack((G_std, G_slack)))
+        h = cvxopt.matrix(np.hstack((h_std, h_slack)))
+        
+        # Solve QP problem using CVXOPT
+        cvxopt.solvers.options['show_progress'] = True
+        solution = cvxopt.solvers.qp(P, q, G, h, A, b)
+        alphas = np.ravel(solution['x'])
+        
+        # Select support vectors where alpha is non-zero
+        sv = alphas &gt; 1e-5
+        print(sv.sum(), "support vectors out of", n_samples)
+        print("Support vector percentage: {:.2f}%".format(sv.sum() / n_samples * 100))
+        self.alphas = alphas[sv]
+        self.sv_X = X[sv]
+        self.sv_y = y_modified[sv]
+        
+        # Compute bias term b using support vectors with 0 &lt; alpha &lt; C
+        b_sum = 0.0
+        count = 0
+        K_sv = self._kernel(self.sv_X, self.sv_X, kernel, gamma)
+        for i in range(len(self.alphas)):
+            if self.alphas[i] &gt; 1e-5 and self.alphas[i] &lt; C - 1e-5:
+                b_i = self.sv_y[i] - np.sum(self.alphas * self.sv_y * K_sv[:, i])
+                b_sum += b_i
+                count += 1
+        if count &gt; 0:
+            self.b = b_sum / count
+        else:
+            self.b = self.sv_y[0] - np.sum(self.alphas * self.sv_y * K_sv[:, 0])
+        
+        # For linear kernel, compute the weight vector explicitly
+        if kernel == 'linear':
+            self.w = np.sum((self.alphas * self.sv_y)[:, None] * self.sv_X, axis=0)
+        else:
+            self.w = None
+
+    def predict(self, X):
+        '''
+        Predict the class of the input data.
+        
+        Args:
+            X: np.array of shape (N, D)
+               where N is the number of samples and D is the flattened dimension of each image
+               
+        Returns:
+            np.array of shape (N,)
+               where each entry is the predicted class label (0 or 1)
+        '''
+        if self.kernel_name == 'linear':
+            decision = np.dot(X, self.w) + self.b
+        elif self.kernel_name == 'gaussian':
+            K = self._kernel(X, self.sv_X, self.kernel_name, self.gamma)
+            decision = np.dot(K, self.alphas * self.sv_y) + self.b
+        else:
+            raise ValueError("Unknown kernel type.")
+        
+        return np.where(decision &gt;= 0, 1, 0)
+
+
+def preprocess_image(image_path):
+    """
+    Reads an image from image_path, resizes it to 100x100 pixels with center cropping,
+    normalizes pixel values to [0, 1], and flattens it.
+    """
+    # Read image using cv2
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Image at {image_path} could not be loaded.")
+    
+    h, w, _ = img.shape
+    if h &lt; w:
+        new_h = 100
+        new_w = int(w * (100 / h))
+    else:
+        new_w = 100
+        new_h = int(h * (100 / w))
+    resized = cv2.resize(img, (new_w, new_h))
+    
+    # Center crop to 100x100
+    start_x = (resized.shape[1] - 100) // 2
+    start_y = (resized.shape[0] - 100) // 2
+    cropped = resized[start_y:start_y+100, start_x:start_x+100]
+    
+    # Normalize to [0, 1]
+    normalized = cropped.astype(np.float32) / 255.0
+    
+    # Flatten the image into a 1D vector
+    flattened = normalized.flatten()
+    return flattened
+
+def load_dataset(base_dir, class_names):
+    """
+    Loads and preprocesses images from the specified base_dir.
+    Assumes that images for each class are in separate subdirectories given by class_names.
+    
+    Args:
+        base_dir: Path to the dataset folder (e.g., 'data/Q2/train' or 'data/Q2/test')
+        class_names: List of subdirectory names corresponding to the classes to load.
+                     Labels will be assigned in the order of class_names (0, 1, ...).
+                     
+    Returns:
+        X: np.array of shape (N, 30000) where each row is a flattened image.
+        y: np.array of shape (N,) containing class labels.
+    """
+    X, y = [], []
+    for label, cls in enumerate(class_names):
+        cls_dir = os.path.join(base_dir, cls)
+        if not os.path.exists(cls_dir):
+            print(f"Directory {cls_dir} does not exist, skipping.")
+            continue
+        for file in os.listdir(cls_dir):
+            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                img_path = os.path.join(cls_dir, file)
+                try:
+                    img_vector = preprocess_image(img_path)
+                    X.append(img_vector)
+                    y.append(label)
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+    return np.array(X), np.array(y)
+
+
+# def main():
+
+#     train_dir = 'data/Q2/train_p1'
+#     test_dir = 'data/Q2/test_p1'
+    
+   
+#     available_classes = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
+#     if len(available_classes) &lt; 2:
+#         print("Not enough classes found in training data.")
+#         return
+#     # For example, we take the first two classes.
+#     class_names = [available_classes[0], available_classes[1]]
+#     print(f"Using classes: {class_names}")
+
+#     # Cache file path for preprocessed data
+#     cache_file = 'preprocessed_data.npz'
+    
+#     if os.path.exists(cache_file):
+#         print("Loading cached data...")
+#         cache = np.load(cache_file, allow_pickle=True)
+#         X_train, y_train = cache['X_train'], cache['y_train']
+#         X_test, y_test = cache['X_test'], cache['y_test']
+#     else:
+#         print("Preprocessing training data...")
+#         X_train, y_train = load_dataset(train_dir, class_names)
+#         print("Preprocessing test data...")
+#         X_test, y_test = load_dataset(test_dir, class_names)
+#         # Cache the preprocessed data
+#         np.savez(cache_file, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
+#         print(f"Cached preprocessed data to {cache_file}")
+
+#     print(f"Training data: {X_train.shape[0]} samples")
+#     print(f"Test data: {X_test.shape[0]} samples")
+
+#     # Initialize and train the SVM.
+#     svm = SupportVectorMachine()
+#     print("Training SVM...")
+#     svm.fit(X_train, y_train, kernel='linear', C=1.0, gamma=0.001)
+    
+#     # Predict on test set
+#     predictions = svm.predict(X_test)
+#     accuracy = np.mean(predictions == y_test)
+#     print(f"Test Accuracy: {accuracy*100:.2f}%")
+
+# if __name__ == '__main__':
+#     main()
+
+
+
+
+import pickle
+import numpy as np
+
+# Load the custom SVM model
+with open('custom_svm_model.pkl', 'rb') as f:
+    custom_model = pickle.load(f)
+
+# Load the scikit-learn SVM model
+with open('sklearn_svm_model.pkl', 'rb') as f:
+    sklearn_model = pickle.load(f)
+
+# Extract weight vector and bias from each model
+w_custom = custom_model['w']
+b_custom = custom_model['b']
+w_sklearn = sklearn_model['w']
+b_sklearn = sklearn_model['b']
+
+# Compare the weight vectors using the L2 norm of their difference
+diff_w = np.linalg.norm(w_custom - w_sklearn)
+# Compare the bias terms (absolute difference)
+diff_b = abs(b_custom - b_sklearn)
+
+print("Difference in weight vectors (L2 norm):", diff_w)
+print("Difference in bias terms:", diff_b)
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
