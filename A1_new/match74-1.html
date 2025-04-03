@@ -1,0 +1,736 @@
+<HTML>
+<HEAD>
+<TITLE>./A1_processed_new_hash_2/combined_62Q7T.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A1_processed_new_hash_2/combined_ZLOVO.py<p><PRE>
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from linear_regression import *
+
+# Load data
+x = np.loadtxt("data/Q1/linearX.csv", delimiter=",")
+y = np.loadtxt("data/Q1/linearY.csv", delimiter=",")
+m = len(x)
+shuffled = np.random.permutation(m)
+x = x[shuffled]
+y = y[shuffled]
+# Train model
+lr = LinearRegressor()
+learning_rates = [0.001,0.025,0.1]
+idx = 0
+for l_rate in learning_rates:
+    idx+=1
+    theta_list = lr.fit(x, y, l_rate)
+    print(f"theta for learning rate {l_rate} :\n {lr.theta}")
+
+    # Plot data and regression line
+    plt.scatter(x, y, c='red', marker='x')
+    x_vals = np.linspace(min(x), max(x), 100)
+    plt.plot(x_vals, lr.predict(x_vals), 'b-')
+    plt.title(f"Linear Regression Fit for learning_rate {l_rate}")
+    # plt.savefig(f"q1_line{idx}.png")
+    plt.show()
+    plt.close()
+
+    # 3D Surface plot
+    X_bias = np.c_[np.ones((len(x), 1)), x]
+    theta0_vals = np.linspace(-2, 2, 100)
+    theta1_vals = np.linspace(-1, 1, 100)
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match74-0.html#4" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    J_vals = np.zeros((len(theta0_vals), len(theta1_vals)))
+
+    for i, t0 in enumerate(theta0_vals):
+        for j, t1 in enumerate(theta1_vals):
+            J_vals[i, j] = lr.loss_fxn(X_bias, y, np.array([[t0], [t1]]))
+</FONT>
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    T0, T1 = np.meshgrid(theta0_vals, theta1_vals)
+    ax.plot_surface(T0, T1, J_vals.T, cmap='viridis', alpha=0.8)
+    # theta_hist = np.array(lr.theta_history)
+    # ax.plot(theta_hist[:, 0], theta_hist[:, 1], lr.cost_history, 'r.-')
+    # cost_history = np.array(lr.cost_history).flatten()
+    # ax.plot(theta_hist[:-1, 0], theta_hist[:-1, 1], lr.cost_history, 'r.-')
+
+    # Convert lists to NumPy arrays
+    theta_hist = np.array(lr.theta_list).squeeze()  # Removes extra dimension
+    loss_history = np.array(lr.loss_list).reshape(-1)  # Ensure 1D shape
+
+    # print(f"theta_hist shape after squeeze: {theta_hist.shape}")  # Should be (1143, 2)
+    # print(f"cost_history shape: {loss_history.shape}")  # Should be (1142,)
+
+    # Ensure correct slicing for matching dimensions
+    ax.plot(theta_hist[:len(loss_history), 0],  # First column
+            theta_hist[:len(loss_history), 1],  # Second column
+            loss_history, 'r.-')
+
+    plt.title(f"Cost Function Surface for learning Rate {l_rate}")
+    plt.show()
+    # plt.savefig(f"q1_3d_{idx}.png")
+    plt.close()
+
+    # Contour plots
+    # plt.contour(T0, T1, J_vals.T, levels=np.logspace(-2, 3, 20))
+    # plt.plot(theta_hist[:, 0], theta_hist[:, 1], 'r.-')
+    # plt.title("Contour Plot")
+    # plt.savefig("q1_contour.png")
+    # plt.close()
+    import matplotlib.patches as patches
+
+    plt.figure()
+    contour = plt.contour(T0, T1, J_vals.T, levels=np.logspace(-2, 3, 20))
+    plt.plot(theta_hist[:, 0], theta_hist[:, 1], 'r.-')
+
+    # Compute covariance for reference ellipses
+    cov_matrix = np.linalg.inv(X_bias.T @ X_bias)  # Approximation of cost function curvature
+    eigvals, eigvecs = np.linalg.eigh(cov_matrix)
+
+    # Scale factor to make ellipses visible
+    scale_factor = 100  # Adjust this value as needed
+
+    # Draw reference ellipses
+    for scale in [1, 2, 3]:  # Different scale levels to show shape
+        width, height = 2 * scale * np.sqrt(eigvals) * scale_factor  # Scale up ellipse dimensions
+        angle = np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))  # Rotation angle
+        
+        ellipse = patches.Ellipse(
+            xy=lr.theta.ravel(),  # Center of ellipse
+            width=width,
+            height=height,
+            angle=angle,  # Use keyword argument explicitly
+            edgecolor='g',
+            facecolor='none',
+            linestyle="--",
+            alpha=0.7
+        )
+        plt.gca().add_patch(ellipse)
+
+    plt.title(f"Contour Plot with Reference Ellipses for learning rate = {l_rate}")
+    plt.xlabel(r"$\theta_0$")
+    plt.ylabel(r"$\theta_1$")
+    # plt.savefig(f"q1_contour_ellipses_{idx}.png")
+    plt.show()
+    plt.close()
+
+
+
+# Imports - you can add any other permitted libraries
+import numpy as np
+from matplotlib import pyplot as plt
+
+# You may add any other functions to make your code more modular. However,
+# do not change the function signatures (name and arguments) of the given functions,
+# as these functions will be called by the autograder.
+
+class LinearRegressor:
+    def __init__(self):
+        # pass
+        self.theta = None
+        self.stop_criteria = 1e-9
+        self.max_iter = 10000
+        self.theta_list = []
+        self.loss_list = []
+    def loss_fxn(self, x, y, theta):
+        m = len(y)
+        predict = x @ theta
+        err = predict - y.reshape(-1, 1)
+        cost = (1 / (2 * m)) * np.sum(err ** 2)
+        return cost
+    
+    def fit(self, X, y, learning_rate=0.01):
+        """
+        Fit the linear regression model to the data using Gradient Descent.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        y : numpy array of shape (n_samples,)
+            The target values.
+
+        learning_rate : float
+            The learning rate to use in the update rule.
+            
+        Returns
+        -------
+        List of Parameters: numpy array of shape (n_iter, n_features+1,)
+            The list of parameters obtained after each iteration of Gradient Descent.
+        """
+        # max_iters=10000
+        # tol=1e-9
+        """
+        Fit the linear regression model using Gradient Descent.
+        """
+        X = X.reshape(-1, 1)  # Ensure X is 2D
+        m, n = X.shape
+        X_bias = np.c_[np.ones((m, 1)), X]  
+        y = y.reshape(-1, 1)  
+        self.theta = np.zeros((n + 1, 1))  
+
+        self.theta_list = [self.theta.copy()]
+        self.loss_list = []
+
+        for _ in range(self.max_iter):
+            pred = X_bias @ self.theta
+            err = pred - y
+            grad = (1 / m) * (X_bias.T @ err)
+            self.theta -= learning_rate * grad  
+
+            loss = self.loss_fxn(X_bias, y, self.theta)
+            self.loss_list.append(loss)
+            self.theta_list.append(self.theta.copy())
+            if len(self.loss_list)&gt;1 and abs(self.loss_list[-1]-self.loss_list[-2]) &lt; self.stop_criteria:
+                break
+
+        return self.theta_list
+        # pass
+    
+    def predict(self, X):
+        """
+        Predict the target values for the input data.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        Returns
+        -------
+        y_pred : numpy array of shape (n_samples,)
+            The predicted target values.
+        """
+        # pass
+        X = X.reshape(-1, 1)  # Ensure X is 2D
+        X_bias = np.c_[np.ones((X.shape[0], 1)), X]  
+        return X_bias @ self.theta
+
+
+
+
+
+from matplotlib import pyplot as plt
+from sampling_sgd import *
+import numpy as np
+
+np.random.seed(43)
+N = 1000000
+theta_true = np.array([3, 1, 2])
+mean_x = np.array([3, -1])
+delta_x = np.array([2, 2])
+delta_y = np.sqrt(2)
+
+X, y = generate(N, theta_true, mean_x, delta_x, delta_y)
+
+size_train = int(N * 0.8)
+X_train = X[:size_train]
+y_train = y[:size_train]
+X_test = X[size_train:]
+y_test = y[size_train:]
+
+# batch_sizes = [1, 800, 8000, 80000]
+batch_sizes = [800,8000,80000]
+
+# Closed-form solution
+m, n = X_train.shape
+X_train_closed = np.c_[np.ones((m, 1)), X_train]
+y_train = y_train.reshape(-1, 1)
+theta_closed = np.linalg.inv(X_train_closed.T @ X_train_closed) @ X_train_closed.T @ y_train
+print(f"Closed form Theta : {theta_closed.flatten()}")
+
+# Plotting separate graphs for each batch size
+for batch_size in batch_sizes:
+    sgd = StochasticLinearRegressor()
+    sgd.batch_size = batch_size
+    sgd.fit(X_train, y_train, learning_rate=0.001)
+    print(sgd.theta)
+
+    theta_history = np.array(sgd.theta_list)  # Convert list to numpy array
+
+    # Create a 3D plot for the current batch size
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match74-0.html#2" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_1.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Extract each parameter's trajectory
+    theta_0 = theta_history[:, 0]
+    theta_1 = theta_history[:, 1]
+    theta_2 = theta_history[:, 2]
+
+    # Plot trajectory
+    ax.plot(theta_0, theta_1, theta_2, marker='o', markersize=2, label=f"SGD Trajectory (Batch Size {batch_size})", color='b')
+</FONT>
+    # Mark the start and end points
+    ax.scatter(theta_0[0], theta_1[0], theta_2[0], color='g', marker='x', s=100, label=f"Start (Batch {batch_size})")
+    ax.scatter(theta_0[-1], theta_1[-1], theta_2[-1], color='r', marker='o', s=100, label=f"End (Batch {batch_size})")
+
+    # Mark the closed-form solution
+    ax.scatter(theta_closed[0], theta_closed[1], theta_closed[2], color='k', marker='*', s=200, label="Closed-form Solution")
+
+    # Labels and legend
+    ax.set_xlabel("Theta 0")
+    ax.set_ylabel("Theta 1")
+    ax.set_zlabel("Theta 2")
+    ax.set_title(f"SGD Parameter Convergence (Batch Size {batch_size})")
+    ax.legend()
+    plt.show()
+
+
+
+# Imports - you can add any other permitted libraries
+import numpy as np
+
+# You may add any other functions to make your code more modular. However,
+# do not change the function signatures (name and arguments) of the given functions,
+# as these functions will be called by the autograder.
+
+def generate(N, theta, input_mean, input_sigma, noise_sigma):
+    """
+    Generate normally distributed input data and target values
+    Note that we have 2 input features
+    Parameters
+    ----------
+    N : int
+        The number of samples to generate.
+        
+    theta : numpy array of shape (3,)
+        The true parameters of the linear regression model.
+        
+    input_mean : numpy array of shape (2,)
+        The mean of the input data.
+        
+    input_sigma : numpy array of shape (2,)
+        The standard deviation of the input data.
+        
+    noise_sigma : float
+        The standard deviation of the Gaussian noise.
+        
+    Returns
+    -------
+    X : numpy array of shape (N, 2)
+        The input data.
+        
+    y : numpy array of shape (N,)
+        The target values.
+    """
+    # pass
+    X = np.random.normal(input_mean,input_sigma,(N,2))
+    y = theta[0] + X@theta[1:] + np.random.normal(0,noise_sigma,N)
+    return X,y
+
+class StochasticLinearRegressor:
+    def __init__(self):
+        # pass
+        self.batch_size = 1
+        self.maximum_epochs = 100
+        self.theta = None
+        self.theta_list = []
+        self.stopping_criteria = 1e-6
+    
+    def fit(self, X, y, learning_rate=0.01):
+        """
+        Fit the linear regression model to the data using Gradient Descent.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        y : numpy array of shape (n_samples,)
+            The target values.
+
+        learning_rate : float
+            The learning rate to use in the update rule.
+            
+        Returns
+        -------
+        List of Parameters: numpy array of shape (n_iter, n_features+1,)
+            The list of parameters obtained after each iteration of Gradient Descent.
+        """
+        # pass
+        batch_size = self.batch_size
+        maximum_epochs = self.maximum_epochs
+        
+        m,n = X.shape
+        X_bias = np.c_[np.ones((m,1)),X]
+        self.theta = np.zeros((n+1,1))
+        self.theta_list = [self.theta.copy()]
+
+        for ep in range(maximum_epochs):
+            shuffled_index = np.random.permutation(m)
+            shuffled_X = X_bias[shuffled_index]
+            shuffled_Y = y[shuffled_index].reshape(-1,1)
+
+            for i in range(0,m,batch_size):
+                batch_X = shuffled_X[i:i+batch_size]
+                batch_Y = shuffled_Y[i:i+batch_size]
+                pred = batch_X@self.theta
+                error = pred-batch_Y
+                gradient = (batch_X.T @ error)/batch_size
+                self.theta -= learning_rate*gradient
+                self.theta_list.append(self.theta.copy())
+            if(len(self.theta_list)&gt;1 and np.linalg.norm(self.theta_list[-1] - self.theta_list[-2])&lt;self.stopping_criteria):
+                break
+        return self.theta_list
+
+    
+    def predict(self, X):
+        """
+        Predict the target values for the input data.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        Returns
+        -------
+        y_pred : numpy array of shape (n_samples,)
+            The predicted target values.
+        """
+        # pass
+        m,n = X.shape
+        X_bias = np.c_[np.ones((m,1)),X]
+        return (X_bias@self.theta).flatten()
+
+def mean_squared_error(y_true, y_pred):
+    return np.mean((y_pred-y_true) ** 2)
+
+
+
+
+
+
+
+
+import matplotlib.pyplot as plt
+from logistic_regression import *
+# Load data
+X = np.loadtxt("data/Q3/logisticX.csv", delimiter=",")
+y = np.loadtxt("data/Q3/logisticY.csv", delimiter=",")
+
+# Train logistic regression model
+lr = LogisticRegressor()
+lr.fit(X, y, learning_rate=0.01)
+theta = lr.theta
+print(f"theta for logistic regression :\n{theta}")
+# print(lr.predict(X))
+
+# Plot decision boundary
+plt.scatter(X[y == 0, 0], X[y == 0, 1], c='red', marker='x', label="Class 0")
+plt.scatter(X[y == 1, 0], X[y == 1, 1], c='blue', marker='o', label="Class 1")
+
+# Decision boundary line
+x1_vals = np.linspace(min(X[:, 0]), max(X[:, 0]), 100)
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match74-0.html#3" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+x2_vals = -(theta[0] + theta[1] * x1_vals) / theta[2]
+plt.plot(x1_vals, x2_vals, 'g-', label="Decision Boundary")
+
+plt.xlabel("Feature 1 (x1)")
+plt.ylabel("Feature 2 (x2)")
+plt.title("Logistic Regression Decision Boundary")
+plt.legend()
+# plt.savefig("q3_decision_boundary.png")
+plt.show()  
+</FONT>
+
+
+# Imports - you can add any other permitted libraries
+import numpy as np
+
+# You may add any other functions to make your code more modular. However,
+# do not change the function signatures (name and arguments) of the given functions,
+# as these functions will be called by the autograder.
+
+
+class LogisticRegressor:
+    # Assume Binary Classification
+    def __init__(self):
+        # pass
+        self.theta = None
+        self.maximum_iter = 10000
+        self.stopping_criteria = 1e-5
+        self.theta_list = []
+
+    def sigmoid(self,x):
+        return 1/(1+np.exp(-x))
+    
+    def fit(self, X, y, learning_rate=0.01):
+        """
+        Fit the linear regression model to the data using Newton's Method.
+        Remember to normalize the input data X before fitting the model.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        y : numpy array of shape (n_samples,)
+            The target labels - 0 or 1.
+        
+        learning_rate : float
+            The learning rate to use in the update rule.
+        
+        Returns
+        -------
+        List of Parameters: numpy array of shape (n_iter, n_features+1,)
+            The list of parameters obtained after each iteration of Newton's Method.
+        """
+        # pass
+        m,n = X.shape
+        X_bias = np.c_[np.ones((m,1)),X]
+        y = y.reshape(-1,1)
+        self.theta = np.zeros((n+1,1))
+        for _ in range(self.maximum_iter):
+            hyp = self.sigmoid(X_bias @ self.theta)
+            grad = X_bias.T @ (y-hyp)
+            S_deri = np.diagflat(hyp*(1-hyp))
+            Hessian = -(X_bias.T @ S_deri @ X_bias)
+            delta = np.linalg.inv(Hessian) @ grad
+            self.theta -= learning_rate*delta
+            self.theta_list.append(self.theta.copy())
+            if np.linalg.norm(delta) &lt; self.stopping_criteria:
+                break
+        return self.theta_list
+    
+    def predict(self, X):
+        """
+        Predict the target values for the input data.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        Returns
+        -------
+        y_pred : numpy array of shape (n_samples,)
+            The predicted target label.
+        """
+        # pass
+        X = (X - np.mean(X, axis=0)) / np.std(X, axis=0)
+        X_bias = np.c_[np.ones((X.shape[0], 1)), X]
+        return (self.sigmoid(X_bias @ self.theta) &gt; 0.5).astype(int).flatten()
+
+
+
+
+# Imports - you can add any other permitted libraries
+import numpy as np
+
+# You may add any other functions to make your code more modular. However,
+# do not change the function signatures (name and arguments) of the given functions,
+# as these functions will be called by the autograder.
+
+
+class GaussianDiscriminantAnalysis:
+    # Assume Binary Classification
+    def __init__(self):
+        # pass
+        self.mean0 = None
+        self.mean1 = None
+        self.sigma = None
+        self.sigma0 = None
+        self.sigma1 = None
+        self.linear_case = True
+        self.X_mean = None
+        self.X_std = None
+    
+    def fit(self, X, y, assume_same_covariance=False):
+        """
+        Fit the Gaussian Discriminant Analysis model to the data.
+        Remember to normalize the input data X before fitting the model.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        y : numpy array of shape (n_samples,)
+            The target labels - 0 or 1.
+        
+        learning_rate : float
+            The learning rate to use in the update rule.
+        
+        Returns
+        -------
+        Parameters: 
+            If assume_same_covariance = True - 3-tuple of numpy arrays mu_0, mu_1, sigma 
+            If assume_same_covariance = False - 4-tuple of numpy arrays mu_0, mu_1, sigma_0, sigma_1
+            The parameters learned by the model.
+        """
+        # pass
+        # normalise
+        self.X_mean = np.mean(X,0)
+        self.X_std = np.std(X,0)
+        X = (X-self.X_mean)/self.X_std
+        y = y.reshape(-1)
+
+        self.mean0 = X[y==0].mean(axis = 0)
+        self.mean1 = X[y==1].mean(axis =  0)
+
+        if assume_same_covariance:
+            covar0 = np.cov(X[y==0].T)
+            covar1 = np.cov(X[y==1].T)
+            # m = len(y)
+            # self.sigma = (covar0*np.sum(X[y==0]) + covar1*np.sum(X[y==1]))/m
+            m = len(y)
+            self.sigma = ((X[y == 0] - self.mean0).T @ (X[y == 0] - self.mean0) + (X[y == 1] - self.mean1).T @ (X[y == 1] - self.mean1)) / m
+            return self.mean0 , self.mean1 , self.sigma
+        else:
+            self.linear_case = False
+            self.sigma0 = np.cov(X[y == 0].T)
+            self.sigma1 = np.cov(X[y == 1].T)
+            return self.mean0, self.mean1, self.sigma0, self.sigma1
+
+    
+    def predict(self, X):
+        """
+        Predict the target values for the input data.
+        
+        Parameters
+        ----------
+        X : numpy array of shape (n_samples, n_features)
+            The input data.
+            
+        Returns
+        -------
+        y_pred : numpy array of shape (n_samples,)
+            The predicted target label.
+        """
+        # pass
+        # X = (X-self.X_mean) / self.X_std
+        # if(self.linear_case):
+        #     sigma_inv = np.linalg.inv(self.sigma)
+        #     del0 = (X-self.mean0) @ sigma_inv @ (X-self.mean0).T
+        #     del1 = (X-self.mean1) @ sigma_inv @ (X-self.mean1).T
+        # else:
+        #     sigma0_inv = np.linalg.inv(self.sigma0)
+        #     sigma1_inv = np.linalg.inv(self.sigma1)
+        #     del0 = np.diag((X-self.mean0) @ sigma0_inv @ (X-self.mean0).T)
+        #     del1 = np.diag((X-self.mean1) @ sigma1_inv @ (X-self.mean1).T)
+        # return (del0 &gt; del1).astype(int)
+        X = (X - self.X_mean) / self.X_std  # Normalize input data
+        if self.linear_case:
+            sigma_inv = np.linalg.inv(self.sigma)
+            del0 = np.sum((X - self.mean0) @ sigma_inv * (X - self.mean0), axis=1)  
+            del1 = np.sum((X - self.mean1) @ sigma_inv * (X - self.mean1), axis=1)  
+        else:
+            sigma0_inv = np.linalg.inv(self.sigma0)
+            sigma1_inv = np.linalg.inv(self.sigma1)
+            del0 = np.sum((X - self.mean0) @ sigma0_inv * (X - self.mean0), axis=1)  
+            del1 = np.sum((X - self.mean1) @ sigma1_inv * (X - self.mean1), axis=1)
+        return (del0 &gt; del1).astype(int)
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from gda import *
+
+# Load data
+X = np.loadtxt("data/Q4/q4x.dat")
+y = np.loadtxt("data/Q4/q4y.dat", dtype=str)
+y = (y == "Canada").astype(int)  # Convert labels to 0 (Alaska) and 1 (Canada)
+
+# Train GDA model with shared covariance
+gda = GaussianDiscriminantAnalysis()
+mu0, mu1, sigma = gda.fit(X, y, assume_same_covariance=True)
+print(f" mean0 : {mu0}\n mean1 : {mu1}\n sigma : {sigma}\n")
+# print(gda.predict(X))
+
+# Plot data points
+plt.scatter(X[y == 0, 0], X[y == 0, 1], c='red', marker='x', label="Alaska")
+plt.scatter(X[y == 1, 0], X[y == 1, 1], c='blue', marker='o', label="Canada")
+
+# Plot decision boundary (linear)
+# x1_vals = np.linspace(min(X[:, 0]), max(X[:, 0]), 100)
+# # x2_vals = -(sigma[0, 0] * x1_vals + (mu0[0] - mu1[0])) / sigma[1, 1]
+# sigma_inv = np.linalg.inv(sigma)
+# w = sigma_inv @ (mu1 - mu0)
+# w0 = -0.5 * (mu1.T @ sigma_inv @ mu1 - mu0.T @ sigma_inv @ mu0)
+# x2_vals = -(w[0] * x1_vals + w0) / w[1]
+# After fitting the model:
+sigma_inv = np.linalg.inv(sigma)
+w_norm = sigma_inv @ (mu1 - mu0)
+w0_norm = -0.5 * (mu1.T @ sigma_inv @ mu1 - mu0.T @ sigma_inv @ mu0)
+
+# Transform coefficients to original space
+A = w_norm[0] * gda.X_std[1]
+B = w_norm[1] * gda.X_std[0]
+C = - (w_norm[0] * gda.X_std[1] * gda.X_mean[0] + w_norm[1] * gda.X_std[0] * gda.X_mean[1]) + w0_norm * gda.X_std[0] * gda.X_std[1]
+
+# Decision boundary in original coordinates: A*x1 + B*x2 + C = 0
+x1_vals = np.linspace(min(X[:, 0]), max(X[:, 0]), 100)
+x2_vals = (-A * x1_vals - C) / B  # Solve for x2
+
+plt.plot(x1_vals, x2_vals, 'g-', label="Decision Boundary")
+
+plt.xlabel("Feature 1 (x1)")
+plt.ylabel("Feature 2 (x2)")
+plt.title("GDA with Shared Covariance (Linear Boundary)")
+plt.legend()
+# plt.savefig("q4_linear_boundary.png")
+plt.show()
+
+
+
+
+# Load data
+X = np.loadtxt("data/Q4/q4x.dat")
+y = np.loadtxt("data/Q4/q4y.dat", dtype=str)
+y = (y == "Canada").astype(int)  # Convert labels to 0 (Alaska) and 1 (Canada)
+
+# Train GDA model with separate covariances
+gda = GaussianDiscriminantAnalysis()
+mu0, mu1, sigma0, sigma1 = gda.fit(X, y, assume_same_covariance=False)
+print("\n Not assuming Same Covariance\n")
+print(f" mean0 : {mu0}\n mean1 : {mu1}\n sigma0 : {sigma0}\n sigma1 : {sigma1}\n")
+
+# Plot data points
+plt.scatter(X[y == 0, 0], X[y == 0, 1], c='red', marker='x', label="Alaska")
+plt.scatter(X[y == 1, 0], X[y == 1, 1], c='blue', marker='o', label="Canada")
+
+# Plot quadratic decision boundary
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match74-0.html#0" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_1.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+x1_vals = np.linspace(min(X[:, 0]), max(X[:, 0]), 100)
+x2_vals = np.linspace(min(X[:, 1]), max(X[:, 1]), 100)
+X1, X2 = np.meshgrid(x1_vals, x2_vals)
+Z = np.zeros_like(X1)
+</FONT>
+# Compute decision boundary
+for i in range(len(x1_vals)):
+    for j in range(len(x2_vals)):
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match74-0.html#5" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        x = np.array([X1[i, j], X2[i, j]])
+        delta0 = (x - mu0) @ np.linalg.inv(sigma0) @ (x - mu0).T
+</FONT><A NAME="1"></A><FONT color = #00FF00><A HREF="match74-0.html#1" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_1.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        delta1 = (x - mu1) @ np.linalg.inv(sigma1) @ (x - mu1).T
+        Z[i, j] = delta1 - delta0
+
+# Plot contour at Z = 0 (decision boundary)
+plt.contour(X1, X2, Z, levels=[0], colors='green', label="Quadratic Boundary")
+
+plt.xlabel("Feature 1 (x1)")
+plt.ylabel("Feature 2 (x2)")
+plt.title("GDA with Separate Covariances (Quadratic Boundary)")
+plt.legend()
+# plt.savefig("q4_quadratic_boundary.png")
+plt.show()
+</FONT>
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
