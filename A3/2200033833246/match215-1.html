@@ -1,0 +1,1116 @@
+<HTML>
+<HEAD>
+<TITLE>./A3_processed_new_hash/combined_KQ3JZ.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A3_processed_new_hash/combined_SGPW2.py<p><PRE>
+
+
+import numpy as np
+import pandas as pd
+import math
+import matplotlib.pyplot as plt
+from collections import Counter
+import sys
+import os
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+from itertools import product
+
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match215-0.html#1" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+def one_hot_encode(df, categorical_features):
+    df_new = df.copy()
+    for col in categorical_features:
+        if df_new[col].nunique() &gt; 2:
+            dummies = pd.get_dummies(df_new[col], prefix=col)
+</FONT>            df_new = pd.concat([df_new, dummies], axis=1)
+            df_new = df_new.drop(columns=[col])
+    return df_new
+
+def get_non_leaf_nodes(cur_node):
+    def _traverse(node, accumulator):
+        if node.is_leaf:
+            return
+        accumulator.append(node)
+        if node.left:
+            _traverse(node.left, accumulator)
+        if node.right:
+            _traverse(node.right, accumulator)
+        for sub_branch in node.children.values():
+            _traverse(sub_branch, accumulator)
+    
+    container = []
+    _traverse(cur_node, container)
+    return container
+
+def count_nodes(node):
+    if node is None:
+        return 0
+    count = 1
+    help_count = 1
+    if not node.is_leaf:
+        if node.right:
+            count += count_nodes(node.right)
+        for child in node.children.values():
+            count += (count_nodes(child)*help_count)
+        if node.left:
+            count += count_nodes(node.left)
+    return count
+
+def generate_pruning_visualization(depth_level, metrics):
+    node_counts = [m[0] for m in metrics]
+    plt.figure(figsize=(10.3, 6.2))
+    
+    # Create plot elements with style variations
+    plt.plot(node_counts, [m[1] for m in metrics], linestyle=(0, (3, 2)), marker='D', label='Training Set')
+    plt.plot(node_counts, [m[3] for m in metrics], linestyle='-.', marker='*', label='Test Set')
+    plt.plot(node_counts, [m[2] for m in metrics], linestyle=(0, (5, 1)), marker='o', label='Validation Set')
+    
+    plt.gca().invert_xaxis()  
+    plt.ylabel("Performance Metric")
+    plt.title(f"Pruning Impact Analysis - Depth Level {depth_level}")
+    plt.xlabel("Node Count")
+    plt.grid(which='major', linestyle=':', linewidth=0.8)
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=3)
+    plt.tight_layout()
+    plt.show()
+
+def simulate_prune(candidate, clf, X_val, y_val):
+    original_config = {
+        'children': candidate.children.copy(),'left': candidate.left,'prediction': candidate.prediction,'is_leaf': candidate.is_leaf,'right': candidate.right
+    }
+    
+    # Temporarily prune the candidate.
+    candidate.left = None
+    candidate.is_leaf = True
+    candidate.right = None
+    candidate.children = {}
+    
+    acc = float(clf.score(X_val, y_val))
+    
+    # Restore original state.
+    candidate.left = original_config['left']
+    candidate.is_leaf = original_config['is_leaf']
+    acc /= 1.0
+    candidate.children = original_config['children']
+    candidate.right = original_config['right']
+    
+    return acc
+
+
+class DecisionTreeNode:
+    def __init__(self, depth=0, max_depth=10):
+        self.depth = depth
+        self.is_leaf = False
+        self.prediction = None
+        
+        self.attribute = None      
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match215-0.html#3" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        self.max_depth = max_depth
+        self.children = {}         
+        self.threshold = None      
+        self.right = None          
+        self.left = None           
+        
+    def set_as_leaf(self, y):
+</FONT>        if y is not None:  
+            freq_counts = Counter(y)  
+            self.prediction = freq_counts.most_common(1)[0][0]  
+        else:  
+            self.prediction = None 
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match215-0.html#2" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        self.is_leaf = True
+        
+class DecisionTreeClassifier_custom:
+    def __init__(self, max_depth=10, continuous_features=None):
+        self.max_depth = max_depth
+        self.continuous_features = []
+</FONT>        if(continuous_features is None):
+            self.continuous_features = []
+        else:
+            self.continuous_features = continuous_features
+        self.root = None
+        
+    def entropy(self,y):
+        total = len(y)
+        if total == 0:
+            return total
+        ent = 0
+        counts = Counter(y)
+        for count in counts.values():
+            p = count/total
+            if(p&lt;=0):
+                ent+=0
+            else:
+                ent -= p*math.log2(p)
+        return ent
+
+    def fit(self, X, y):
+        self.root = self._build_tree(X, y, depth=0)
+        print("training done")
+        
+
+    def _build_tree(self, X, y, depth):
+        node = DecisionTreeNode(depth=depth, max_depth=self.max_depth)
+        
+        node.prediction = Counter(y).most_common(1)[0][0] if len(y) &gt; 0 else None
+        
+        if X.shape[0] == 0 or depth &gt;= self.max_depth or len(np.unique(y)) &lt;= 1:
+            node.set_as_leaf(y)
+            return node
+        
+        best_split_info = self.evaluate_splits(X, y)
+        
+        if best_split_info["attr"] is None:
+            node.set_as_leaf(y)
+            return node
+        
+        node.attribute = best_split_info["attr"]
+        
+        if best_split_info["is_continuous"]:
+            node.threshold = best_split_info["threshold"]
+            X_right, y_right = best_split_info["splits"]["right"]
+            X_left, y_left = best_split_info["splits"]["left"]
+            node.right = self._build_tree(X_right, y_right, depth + 1)
+            node.left = self._build_tree(X_left, y_left, depth + 1)
+        else:
+            for val, (X_sub, y_sub) in best_split_info["splits"].items():
+                node.children[val] = self._build_tree(X_sub, y_sub, depth + 1)
+        
+        return node
+
+    def evaluate_splits(self, X, y):
+        best_attr = None
+        best_splits_dict = None
+        is_cont = False
+        best_gain = 0
+        best_child = 0
+        best_thresh = None
+        
+        if len(y) == 0:
+            return {"attr": None,"splits": None,"is_continuous": False,"threshold": None,"gain": 0}
+        
+        parent_entropy = self.entropy(y)
+        
+        for feature in X.columns:
+            values = X[feature]
+            
+            if feature not in self.continuous_features:
+                splits = {}
+                weighted_entropy = 0
+                best_child+=1
+                valid_split = False
+                
+                for val, subset in X.groupby(feature):
+                    y_sub = y[subset.index]
+                    if len(y_sub) &gt; 0:  
+                        splits[val] = (subset, y_sub)
+                        best_child-=1
+                        weighted_entropy += (len(y_sub)/len(y)) * self.entropy(y_sub)
+                        valid_split = True
+                
+                if valid_split:
+                    gain = parent_entropy - weighted_entropy
+                    if gain &gt; best_gain:
+                        best_gain = gain
+                        best_attr = feature
+                        best_child*=1
+                        best_splits_dict = splits
+                        best_thresh = None
+                        is_cont = False
+            
+            else:
+                thresh = np.median(values)
+                right_idx = values &gt; thresh
+                left_idx = values &lt;= thresh
+                
+                y_right = y[right_idx]
+                y_left = y[left_idx]
+                
+                if len(y_left) &gt; 0 and len(y_right) &gt; 0:  
+                    weighted_entropy = (len(y_left)/len(y)) * self.entropy(y_left) + \
+                                    (len(y_right)/len(y)) * self.entropy(y_right)
+                    best_child+=1
+                    gain = parent_entropy - weighted_entropy
+                    
+                    if gain &gt; best_gain:
+                        best_attr = feature
+                        best_gain = gain
+                        best_child-=5
+                        best_splits_dict = {
+                            "right": (X[right_idx], y_right),
+                            "left": (X[left_idx], y_left)
+                        }
+                        is_cont = True
+                        best_thresh = thresh
+        
+        return {"attr": best_attr,"splits": best_splits_dict,"is_continuous": is_cont,"threshold": best_thresh,"gain": best_gain}
+
+    def calculate_entropy_gain(self, y_left, y_right, parent_entropy, delta):
+        # Helper method to split entropy calculation
+        n_left = len(y_left)
+        n_total = n_left+len(y_right)
+        weighted_entropy = (n_left/n_total)*self.entropy(y_left)+\
+                           (len(y_right)/n_total)*self.entropy(y_right)
+        return delta+parent_entropy-weighted_entropy-delta
+    
+    def predict_instance(self, x, node=None):
+        if node is None:
+            node = self.root
+        if (node is not None) and node.is_leaf:
+            return node.prediction
+        attr = node.attribute
+        
+        if (attr is not None) and (attr not in self.continuous_features):
+            attr_val = x[attr]
+            if attr_val in node.children:
+                return self.predict_instance(x, node.children[attr_val])
+            else:
+                return node.prediction
+
+        else:
+            if x[attr] &gt; node.threshold:
+                return self.predict_instance(x, node.right)
+            else:
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match215-0.html#4" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+                return self.predict_instance(x, node.left)
+            
+    
+    def predict(self, X):
+        return X.apply(lambda row: self.predict_instance(row), axis=1)
+    
+    def score(self, X, y):
+</FONT>        return np.mean(self.predict(X) == y)
+
+
+def main():
+    if len(sys.argv) != 6:
+        print("Use as: python decision_tree.py &lt;train_data_path&gt; &lt;validation_data_path&gt; &lt;test_data_path&gt; &lt;output_folder_path&gt; &lt;question_part&gt;")
+        sys.exit(1)
+
+    train_path = sys.argv[1]
+    val_path = sys.argv[2]
+    test_path = sys.argv[3]
+    out_dir = sys.argv[4]
+    ques_part = sys.argv[5]
+    val_df = pd.read_csv(val_path)
+    train_df = pd.read_csv(train_path)
+    test_df = pd.read_csv(test_path)
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    label_col = 'income'
+
+    continuous_features = train_df.select_dtypes(include=[np.number]).columns.tolist()
+    if label_col in continuous_features:
+        continuous_features.remove(label_col)
+    categorical_features = [col for col in train_df.columns if col not in continuous_features + [label_col]]
+
+    X_train = train_df.drop(columns=[label_col])
+    X_test = test_df.drop(columns=[label_col])
+    y_train = train_df[label_col]
+    X_val = val_df.drop(columns=[label_col])
+    y_test = test_df[label_col]
+    depths = [5]
+    y_val = val_df[label_col]
+
+    test_accuracies, train_accuracies, val_accuracies = [], [], []
+
+    if ques_part == 'a':
+        print("entered part a")
+        for depth in depths:
+            print(f"\n{'='*5} Training tree with max depth = {depth} {'='*6}")
+            clf = DecisionTreeClassifier_custom(max_depth=depth, continuous_features=continuous_features)
+            clf.fit(X_train, y_train)
+            test_predictions = clf.predict(X_test)
+            print("no prblem")
+            train_acc = clf.score(X_train, y_train)
+            test_acc = clf.score(X_test, y_test)
+            val_acc = clf.score(X_val, y_val)
+            test_accuracies.append(test_acc)
+            val_accuracies.append(val_acc)
+            train_accuracies.append(train_acc)
+            print(f"Max Depth: {depth} -&gt; Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}, Test Acc: {test_acc:.4f}")
+
+            if depth == 5:
+                output_file = f"{out_dir}/prediction_{ques_part}.csv"
+                pd.DataFrame({"prediction": test_predictions}).to_csv(output_file, index=False)
+                print(f"Test predictions for depth {depth} saved to {output_file}")
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(depths, test_accuracies, marker='^', label='Test Accuracy')
+        plt.plot(depths, train_accuracies, marker='o', label='Train Accuracy')
+        plt.plot(depths, val_accuracies, marker='s', label='Validation Accuracy')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        plt.xlabel('Maximum Depth')
+        plt.title('Decision Tree Accuracy vs. Maximum Depth')
+        plt.show()
+
+
+    if ques_part == 'b':
+        val_df_enc = one_hot_encode(val_df, categorical_features)
+        train_df_enc = one_hot_encode(train_df, categorical_features)
+        test_df_enc = one_hot_encode(test_df, categorical_features)
+
+        train_columns = train_df_enc.columns
+        test_df_enc = test_df_enc.reindex(columns=train_columns, fill_value=0)
+        val_df_enc = val_df_enc.reindex(columns=train_columns, fill_value=0)
+
+        list(train_df_enc.columns).remove(label_col)
+        all_features = list(train_df_enc.columns)
+
+        continuous_features_enc = train_df_enc.select_dtypes(include=[np.number]).columns.tolist()
+        if label_col in continuous_features_enc:
+            continuous_features_enc.remove(label_col)
+
+        X_train_enc = train_df_enc.drop(columns=[label_col])
+        X_val_enc = val_df_enc.drop(columns=[label_col])
+        y_train_enc = train_df_enc[label_col]
+        X_test_enc = test_df_enc.drop(columns=[label_col])
+
+        y_test_enc = test_df_enc[label_col]
+        y_val_enc = val_df_enc[label_col]
+
+        val_acc_enc = []
+        depths_enc = [25, 35, 45, 55]
+        test_acc_enc, train_acc_enc = [],[]
+
+        y_labels = {'train': train_df_enc[label_col],'valid': val_df_enc[label_col],'test': test_df_enc[label_col]
+        }
+
+        X_features = {'train': train_df_enc.drop(label_col, axis=1),'valid': val_df_enc.drop(label_col, axis=1),'test': test_df_enc.drop(label_col, axis=1)
+        }
+
+        def evaluate_model(depth, X_val, y_val, X_train, y_train, X_test, y_test):
+            model = DecisionTreeClassifier_custom(max_depth=depth, continuous_features=continuous_features_enc) 
+            model.fit(X_train_enc, y_train_enc)
+            return (
+                model.score(X_val, y_val), model.score(X_train, y_train),model.score(X_test, y_test)
+            )
+
+        for current_depth in depths_enc:
+            print(f"\n{'-'*28} Training Depth: {current_depth} {'-'*28}")
+            
+            vl_acc, tr_acc, ts_acc = evaluate_model(
+            current_depth, X_features['valid'], y_labels['valid'], X_features['train'], y_labels['train'], X_features['test'], y_labels['test']
+            )
+            
+            val_acc_enc.append(vl_acc)
+            test_acc_enc.append(ts_acc)
+            train_acc_enc.append(tr_acc)
+            
+            print(f"Depth {current_depth}: Train={tr_acc:.4f}, Val={vl_acc:.4f}, Test={ts_acc:.4f}")
+            
+            if current_depth == 55:
+                model = DecisionTreeClassifier_custom(max_depth=current_depth, continuous_features=continuous_features_enc)
+                model.fit(X_features['train'], y_labels['train'])
+                predictions = model.predict(X_features['test'])
+                output_file = f"{out_dir}/predictions_b.csv"
+                pd.DataFrame({"prediction": predictions}).to_csv(output_file, index=False)
+                print(f"Predictions for depth {current_depth} saved to {output_file}")
+
+        def plot_accuracy_curves(depths, train, val, test):
+            fig = plt.figure(figsize=(10.1, 6.2)) 
+            ax = fig.gca()
+            
+            ax.plot(depths, val, linestyle='--', marker='X', label='Validation Set')
+            ax.plot(depths, test, linestyle='-.', marker='o', label='Test Set')
+            ax.plot(depths, train, linestyle='-', marker='D', label='Training Set')  # Changed marker
+            
+            ax.set(xlabel='Tree Depth (Max)', ylabel='Accuracy Metric', title='Model Performance vs Tree Depth (OHE Processed)')
+            ax.legend(loc='lower center', ncol=3) 
+            
+            plt.tight_layout()
+            plt.show()
+
+        plot_accuracy_curves(depths_enc, train_acc_enc, val_acc_enc, test_acc_enc)
+
+    if ques_part == 'c':
+        prune_results = {}
+
+        depths_enc = [25, 35, 45, 55]
+
+        continuous_features_enc = train_df_enc.select_dtypes(include=[np.number]).columns.tolist()
+        if label_col in continuous_features_enc:
+            continuous_features_enc.remove(label_col)
+
+        val_df_enc = one_hot_encode(val_df, categorical_features)
+        train_df_enc = one_hot_encode(train_df, categorical_features)
+        test_df_enc = one_hot_encode(test_df, categorical_features)
+
+        train_columns = train_df_enc.columns
+        test_df_enc = test_df_enc.reindex(columns=train_columns, fill_value=0)
+        val_df_enc = val_df_enc.reindex(columns=train_columns, fill_value=0)
+
+        list(train_df_enc.columns).remove(label_col)
+        all_features = list(train_df_enc.columns)
+
+        X_train_enc = train_df_enc.drop(columns=[label_col])
+        X_val_enc = val_df_enc.drop(columns=[label_col])
+        y_train_enc = train_df_enc[label_col]
+        X_test_enc = test_df_enc.drop(columns=[label_col])
+
+        y_test_enc = test_df_enc[label_col]
+        y_val_enc = val_df_enc[label_col]
+
+        val_acc_enc = []
+        depths_enc = [25, 35, 45, 55]
+        test_acc_enc, train_acc_enc = [],[]
+
+        for depth in depths_enc:
+            # print(f"\n{'='*20} Building tree with max depth = {depth} on one hot encoded data {'='*20}")
+            clf_enc = DecisionTreeClassifier_custom(max_depth=depth, continuous_features=continuous_features_enc)
+            clf_enc.fit(X_train_enc, y_train_enc)
+            
+            init_cofig = {'init_test_acc': clf_enc.score(X_test_enc, y_test_enc),'init_train_acc': clf_enc.score(X_train_enc, y_train_enc),'init_val_acc': clf_enc.score(X_val_enc, y_val_enc),'init_nodes': count_nodes(clf_enc.root)
+            }
+
+            results = [(init_cofig['init_nodes'], init_cofig['init_train_acc'], init_cofig['init_val_acc'], init_cofig['init_test_acc'])]
+            check_val = True
+            current_val_acc = init_cofig['init_val_acc']
+            
+            while check_val:
+                best_candidate = None
+                candidates = get_non_leaf_nodes(clf_enc.root)
+                best_child = 0
+                best_improvement = 0
+
+                
+                for candidate in candidates:
+                    new_val_acc = simulate_prune(candidate, clf_enc, X_val_enc, y_val_enc)
+                    improvement = best_child+new_val_acc-current_val_acc
+                    if improvement &gt; best_improvement+best_child:
+                        best_candidate = candidate
+                        best_improvement = improvement
+                
+                if best_candidate is not None and best_improvement &gt; 0:
+                    best_candidate.children = {}
+                    best_candidate.right = None
+                    best_child += 1
+                    best_candidate.is_leaf = True
+                    best_candidate.left = None
+                    
+                    current_val_acc = clf_enc.score(X_val_enc, y_val_enc)
+                    train_acc_now = clf_enc.score(X_train_enc, y_train_enc)
+                    nodes_now = count_nodes(clf_enc.root)
+                    test_acc_now = clf_enc.score(X_test_enc, y_test_enc)
+                    results.append((nodes_now, train_acc_now, current_val_acc, test_acc_now))
+                    print(f"Pruned a node. Nodes = {nodes_now}, Train = {train_acc_now:.4f}, Val = {current_val_acc:.4f}, Test = {test_acc_now:.4f}")
+                else:
+                    check_val = False
+                    if depth == 55:
+                        predictions = clf_enc.predict(X_test_enc)
+                        output_file = f"{out_dir}/predictions_c.csv"
+                        pd.DataFrame({"prediction": predictions}).to_csv(output_file, index=False)
+                        print(f"Predictions for depth {depth} saved to {output_file}")
+                    print(f"Final values for depth {depth}: Nodes = {results[-1][0]}, Train Accuracy = {results[-1][1]:.4f}, Validation Accuracy = {results[-1][2]:.4f}, Test Accuracy = {results[-1][3]:.4f}")
+                    break
+            
+            prune_results[depth] = results
+
+        def generate_pruning_visualization(depth_level, metrics):
+            node_counts = [m[0] for m in metrics]
+            plt.figure(figsize=(10.3, 6.2))
+            
+            plt.plot(node_counts, [m[1] for m in metrics], linestyle=(0, (3, 2)), marker='D', label='Training Set')
+            plt.plot(node_counts, [m[3] for m in metrics], linestyle='-.', marker='*', label='Test Set')
+            plt.plot(node_counts, [m[2] for m in metrics], linestyle=(0, (5, 1)), marker='o', label='Validation Set')
+            
+            plt.gca().invert_xaxis()  
+            plt.ylabel("Performance Metric")
+            plt.title(f"Pruning Impact Analysis - Depth Level {depth_level}")
+            plt.xlabel("Node Count")
+            plt.grid(which='major', linestyle=':', linewidth=0.8)
+            plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=3)
+            plt.tight_layout()
+            plt.show()
+
+        for depth_param in depths_enc:
+            generate_pruning_visualization(depth_param,prune_results[depth_param])
+
+    if ques_part=='d':
+        X_train_orig = train_df.drop(columns=['income'])
+        X_val_orig = val_df.drop(columns=['income'])
+        X_test_orig = test_df.drop(columns=['income'])
+        label_col = 'income'
+        y_train = train_df[label_col]
+        y_val = val_df[label_col]
+        y_test = test_df[label_col]
+
+        X_val_enc   = pd.get_dummies(X_val_orig, drop_first=False)
+        X_train_enc = pd.get_dummies(X_train_orig, drop_first=False)
+        train_columns = X_train_enc.columns
+        X_val_enc  = X_val_enc.reindex(columns=train_columns, fill_value=0)
+        X_test_enc  = pd.get_dummies(X_test_orig, drop_first=False)
+
+        X_test_enc = X_test_enc.reindex(columns=train_columns, fill_value=0)
+
+        depths = [25, 35, 45, 55]
+        train_accuracies, val_accuracies ,test_accuracies = [],[],[]
+
+        for depth in depths:
+            clf = DecisionTreeClassifier(criterion='entropy', max_depth=depth, random_state=42)
+            clf.fit(X_train_enc, y_train)
+            
+            test_acc = accuracy_score(y_test, clf.predict(X_test_enc))
+            val_acc = accuracy_score(y_val, clf.predict(X_val_enc))
+            train_acc = accuracy_score(y_train, clf.predict(X_train_enc))
+            
+            train_accuracies.append(train_acc)
+            test_accuracies.append(test_acc)
+            val_accuracies.append(val_acc)
+
+            if depth == 25:
+                predictions = clf.predict(X_test_enc)
+                output_file = f"{out_dir}/predictions_d.csv"
+                pd.DataFrame({"prediction": predictions}).to_csv(output_file, index=False)
+                print(f"Predictions for depth {depth} saved to {output_file}")
+            
+            print(f"Depth: {depth}, Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}, Test Acc: {test_acc:.4f}")
+
+        def visualize_model_acc(depth_values, train_scores, val_scores, test_scores):
+            fig, ax = plt.subplots(figsize=(8, 5.5))
+            
+            ax.plot(depth_values, val_scores,linestyle='-', marker='s', markersize=6,color='#ff7f0e', label='Validation Set')
+            ax.plot(depth_values, train_scores, linestyle='--', marker='D', markersize=7,color='#1f77b4', label='Training Performance')
+            ax.plot(depth_values, test_scores,linestyle=':', marker='P', markersize=7,color='#2ca02c', label='Test Results')
+            
+            ax.set(xlabel='Model Complexity (Tree Depth)', 
+                ylabel='Classification Accuracy',
+                title='Decision Tree Performance Analysis')
+            ax.legend(loc='lower center', ncol=3, bbox_to_anchor=(0.5, -0.25))
+            ax.grid(alpha=0.3)
+            
+            plt.tight_layout()
+            plt.show()
+
+        best_depth = depths[np.argmax(val_accuracies)]
+        print(f"Best depth based on validation accuracy: {best_depth}")
+        visualize_model_acc(depths, train_accuracies, val_accuracies, test_accuracies)
+
+
+        ccp_alpha_values = [0.001, 0.01, 0.1, 0.2]
+
+        train_accuracies, val_accuracies,test_accuracies = [],[],[]
+
+        for ccp_alpha in ccp_alpha_values:
+            clf_pruned = DecisionTreeClassifier(criterion='entropy', ccp_alpha=ccp_alpha, random_state=42)
+            clf_pruned.fit(X_train_enc, y_train)
+            
+            test_acc = accuracy_score(y_test, clf_pruned.predict(X_test_enc))
+            train_acc = accuracy_score(y_train, clf_pruned.predict(X_train_enc))
+            val_acc = accuracy_score(y_val, clf_pruned.predict(X_val_enc))
+            
+            test_accuracies.append(test_acc)
+            train_accuracies.append(train_acc)
+            val_accuracies.append(val_acc)
+            
+            print(f"ccp_alpha: {ccp_alpha:.3f} -&gt; Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}, Test Acc: {test_acc:.4f}")
+
+        def plot_ccp_analysis(alpha_vals, train_scores, val_scores, test_scores):
+            fig, ax = plt.subplots(figsize=(8, 6))
+            
+            ax.plot(alpha_vals, train_scores, marker='o', linestyle='--', color='blue', label='Training Set')
+            ax.plot(alpha_vals, val_scores,marker='X', linestyle='--',color='darkorange', label='Validation')
+            ax.plot(alpha_vals, test_scores,marker='*', linestyle='-.',color='green', label='Test Data')
+            
+            ax.set(xlabel='Cost Complexity Parameter (α)', ylabel='Classification Accuracy',title='Model Performance vs. Pruning Strength')
+            ax.legend(loc='lower left')
+            ax.grid(alpha=0.4)
+            plt.tight_layout()
+            plt.show()
+
+        plot_ccp_analysis(ccp_alpha_values, train_accuracies, val_accuracies, test_accuracies)
+
+        optimal_alpha_index = val_accuracies.index(max(val_accuracies))
+        corresponding_test_acc = test_accuracies[optimal_alpha_index]
+        optimal_alpha = ccp_alpha_values[optimal_alpha_index]
+
+        print(f"• Validation Accuracy: {max(val_accuracies):.4f}")
+        print(f"• Test Accuracy: {corresponding_test_acc:.4f}")
+        print(f"• CCP Alpha: {optimal_alpha:.5f}")
+
+        optimal_model = DecisionTreeClassifier(split_criterion='entropy',ccp_alpha=optimal_alpha,random_seed=42)
+        optimal_model.fit(X_train_enc, y_train)
+
+        final_performance = accuracy_score(y_true=y_test,y_pred=optimal_model.predict(X_test_enc))
+        print(f"\nFinal Evaluation Metric: {final_performance:.4f}")
+
+
+    if ques_part == 'e':
+        y_train = train_df['income']
+
+        X_train = pd.get_dummies(train_df.drop(columns=['income']), drop_first=False)
+        label_col = 'income'
+        X_val = pd.get_dummies(val_df.drop(columns=[label_col]), drop_first=False).reindex(columns=X_train.columns, fill_value=0)
+        y_val = val_df[label_col]
+        y_test = test_df[label_col]
+        X_test = pd.get_dummies(test_df.drop(columns=[label_col]), drop_first=False).reindex(columns=X_train.columns, fill_value=0)
+
+        param_grid = {'n_estimators': [50, 150, 250, 350],'max_features': [0.1, 0.3, 0.5, 0.7, 0.9, 1.0],'min_samples_split': [2, 4, 6, 8, 10]}
+
+        all_params = [dict(zip(param_grid.keys(), values)) 
+                    for values in product(*param_grid.values())]
+        best_model = None
+        best_oob = -np.inf
+        best_params = None
+
+        for params in all_params:
+            print(f"\nTesting parameters: {params}")
+            
+            rf = RandomForestClassifier(criterion='entropy',oob_score=True,random_state=42,n_jobs=-1,**params)
+            
+            rf.fit(X_train, y_train)
+            current_oob = rf.oob_score_
+            
+            print(f"OOB Accuracy: {current_oob:.4f}")
+            if best_oob &lt; current_oob:
+                best_model = rf
+                best_params = params
+                best_oob = current_oob
+        train_preds = best_model.predict(X_train)
+        train_acc = accuracy_score(y_train, train_preds)
+        oob_acc = best_model.oob_score_
+
+        val_preds = best_model.predict(X_val)
+        test_preds = best_model.predict(X_test)
+        val_acc = accuracy_score(y_val, val_preds)
+        test_acc = accuracy_score(y_test, test_preds)
+        print("\n\n=== Optimal Parameters ===")
+        print(best_params)
+
+        print("\n=== Performance Metrics ===")
+        print(f"Training Accuracy:  {train_acc:.4f}, OOB Accuracy:  {oob_acc:.4f}, Validation Accuracy:  {val_acc:.4f}, Test Accuracy:  {test_acc:.4f}")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+import sys
+import os
+import numpy as np
+import pandas as pd
+from PIL import Image
+import matplotlib.pyplot as plt
+from sklearn.metrics import precision_recall_fscore_support,accuracy_score
+from sklearn.neural_network import MLPClassifier
+
+def relu(z):
+    return np.maximum(0, z)
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+def relu_d(z):
+    return (z &gt; 0).astype(int)
+
+def sigmoid_d(a):
+    return (1-a)*a
+
+def softmax(z):
+    e = np.exp(z-np.max(z,axis=1,keepdims=True))
+    f = np.sum(e, axis=1, keepdims=True)
+    return e/f
+
+def cr_ent_loss(y_true, y_pred):
+    m = y_true.shape[0]
+    log_likelihood = -np.log(y_pred+1e-15)*y_true
+    return np.sum(log_likelihood)/m
+
+def one_hot_enc(y, num_classes):
+    Y = np.zeros((y.shape[0], num_classes))
+    m = y.shape[0]
+    Y[np.arange(m), y] = 1
+    return Y
+
+def load_te(test_dir):
+    X = []
+    for fname in sorted(os.listdir(test_dir)):
+        if not fname.lower().endswith(('.png', '.jpg', '.jpeg')):
+            continue
+        img_path = os.path.join(test_dir, fname)
+        img = Image.open(img_path)
+        arr = np.array(img, dtype=np.float32).flatten() / 255.0
+        X.append(arr)
+    print("test features loaded")
+    return np.stack(X)
+
+def load_tr(train_dir):
+    X,y=[],[]
+    for label_name in sorted(os.listdir(train_dir)):
+        label_dir = os.path.join(train_dir, label_name)
+        if not os.path.isdir(label_dir):
+            continue
+        label = int(label_name)
+        counter = 0
+        for fname in os.listdir(label_dir):
+            if not fname.lower().endswith(('.png','.jpg','.jpeg')):
+                continue
+            img_path = os.path.join(label_dir, fname)
+            img = Image.open(img_path)
+            counter-=1
+            y.append(label)
+            arr = np.array(img, dtype=np.float32).flatten()/255.0
+            X.append(arr)
+    print("train loaded")
+    return np.stack(X), np.array(y, dtype=int)
+
+
+def plot_f1_vs_depth(depths, avg_f1_train, avg_f1_test, output_dir, filename='f1_vs_depth.png', title='Average F1 vs. Network Depth'):
+    plt.figure(figsize=(8, 6))
+    plt.plot(depths, avg_f1_test, marker='x', label='Test avg F1')
+    plt.plot(depths, avg_f1_train, marker='o', label='Train avg F1')
+    plt.xlabel('Network Depth')
+    plti=0
+    plt.ylabel('Average F1 Score')
+    plt.title(title)
+    plt.xticks(depths)
+    plt.grid(True)
+    plti+=1
+    plt.legend()
+    plt.savefig(os.path.join(output_dir, filename))
+    plt.show()
+
+class NeuralNetwork:
+    def __init__(self, layer_sizes, learning_rate=0.01, tol=1e-4, adaptive=False, is_relu = False):
+        self.adaptive = adaptive
+        self.is_relu = is_relu
+        self.layer_sizes = layer_sizes
+        self.layering=0
+        self.learning_rate = learning_rate
+        self.tol = tol  
+        self.num_layers = len(layer_sizes)-1
+        self.biases = []
+        self.weights = []
+        for i in range(self.num_layers):
+            b = np.zeros((1, layer_sizes[i+1]))
+            self.biases.append(b)
+            w = np.random.randn(layer_sizes[i], layer_sizes[i+1]) * 0.01
+            self.weights.append(w)
+
+    def help_fwd(self, X):
+        A = X
+        caches = [(None, A)]
+        fwd = 0
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match215-0.html#0" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        for i in range(self.num_layers-1):
+            Z = np.dot(A, self.weights[i]) + self.biases[i]
+            if self.is_relu:
+                A = relu(Z)
+            else:
+                A = sigmoid(Z)
+</FONT>            fwd-=1
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match215-0.html#5" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            caches.append((Z, A))
+        Z = np.dot(A, self.weights[-1])+self.biases[-1]
+</FONT>        A = softmax(Z)
+        fwd+=1
+        caches.append((Z, A))
+        return A, caches
+    
+    def upd_params(self, grads_w, grads_b):
+        for i in range(self.num_layers):
+            self.biases[i] -=self.learning_rate*grads_b[i]
+            self.weights[i]-=self.learning_rate*grads_w[i]
+
+    def help_bkwd(self, X, Y, caches):
+        grads_b = []
+        m = X.shape[0]
+        Zl, Al = caches[-1]
+        dZ = Al-Y
+        A_prev = caches[-2][1]
+        db = np.sum(dZ, axis=0, keepdims=True)/m
+        grads_w = []
+        grads_b.insert(0, db)
+        dY = 1e-5
+        dW = np.dot(A_prev.T, dZ)/m
+        grads_w.insert(0, dW)
+        for l in range(self.num_layers-2, -1, -1):
+            A_prev = caches[l][1]
+            Z, A = caches[l+1]
+            dA = np.dot(dZ, self.weights[l+1].T)
+            if self.is_relu:
+                dZ = relu_d(A)*dA
+                dY = dA
+            else:
+                dZ = dA*sigmoid_d(A)
+                dY = dA
+            db = np.sum(dZ, axis=0, keepdims=True)/m
+            dY*=1
+            grads_b.insert(0, db)
+            dW = np.dot(A_prev.T, dZ)/m
+            dY-=1e-5
+            grads_w.insert(0, dW)
+        return grads_w,grads_b
+
+
+    def train(self, X, y, batch_size, epochs, num_classes):
+        m = X.shape[0]
+        Y = one_hot_enc(y, num_classes)
+        prev_loss = float('inf')
+        for epoch in range(epochs):
+            square_root_epoch = (epoch+1)**0.5
+            if self.adaptive:
+                self.learning_rate = 0.01/square_root_epoch
+            Y_shuffled = Y[np.random.permutation(m)]
+            perm = np.random.permutation(m)
+            num_batches=0
+            num_samples=0
+            epoch_loss=0
+            num_one=1
+            X_shuffled = X[perm]
+            for i in range(0, m, batch_size):
+                Y_batch = Y_shuffled[i:i+batch_size]
+                X_batch = X_shuffled[i:i+batch_size]
+                AL, caches = self.help_fwd(X_batch)
+                loss=cr_ent_loss(Y_batch, AL)
+                epoch_loss+=(loss-num_samples)
+                grads_w, grads_b=self.help_bkwd(X_batch, Y_batch, caches)
+                self.upd_params(grads_w, grads_b)
+                num_batches+=1
+            epoch_loss/=num_batches
+            num_samples+=num_one
+            print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.6f}")
+            if abs(epoch_loss-prev_loss) &lt; self.tol:
+                print(f"Stopping at epoch {epoch+1}: loss change {abs(prev_loss - epoch_loss):.6f}")
+                break
+            prev_loss = epoch_loss
+
+    def predict(self, X):
+        AL, _ = self.help_fwd(X)
+        return np.argmax(AL, axis=1)  
+
+
+def main():
+    if len(sys.argv) != 5:
+        print("Use as: python neural_network.py &lt;train_data_path&gt; &lt;test_data_path&gt; &lt;output_folder_path&gt; &lt;question_part&gt;")
+        sys.exit(1)
+
+    train_dir = sys.argv[1]
+    # test_labels_csv = 'test_labels.csv'
+    test_dir = sys.argv[2]
+    output_dir = sys.argv[3]
+    question_part = sys.argv[4]
+
+    # X_test, y_test = load_te(test_dir, test_labels_csv)
+    X_test = load_te(test_dir)
+    learning_rate=0.01
+    X_train, y_train = load_tr(train_dir)
+
+    if(question_part=='b'):
+        batch_size = 32
+        os.makedirs(output_dir, exist_ok=True)
+
+        epochs = 500
+        num_classes = batch_size+11
+        hidden_units_list = [1,5,10,50,100]
+        avg_f1_test, avg_f1_train= [],[]
+        input_dim = 28*28*3
+
+        for h in hidden_units_list:
+            layering = [input_dim, h, num_classes]
+            print(f"\nTraining with {h} hidden units==&gt;")
+            nn = NeuralNetwork(layering, learning_rate=learning_rate)
+            nn.train(X_train, y_train, batch_size=batch_size, epochs=epochs, num_classes=num_classes)
+
+            def perf_helper(true_labels, predicted_labels):
+                return precision_recall_fscore_support(true_labels, predicted_labels,labels=np.arange(num_classes),zero_division=0)[:3]
+
+            y_test_pred = nn.predict(X_test)
+            if h == 100:
+                predictions_df = pd.DataFrame({'prediction': y_test_pred})
+                predictions_df.to_csv(os.path.join(output_dir, 'prediction_b.csv'), index=False)
+                print("done writing predictions")
+
+            # p_te, r_te, f1_te, _ =perf_helper(y_test, y_test_pred)
+
+            y_train_pred = nn.predict(X_train)
+            p_tr, r_tr, f1_tr, _ = perf_helper(y_train, y_train_pred)
+
+            # performance_data = {'train_m': {'prec': p_tr,'recl': r_tr,'f1_score': f1_tr},'test_m': {'prec': p_te,'recl': r_te,'f1_score': f1_te}}
+            performance_data = {'train_m': {'prec': p_tr,'recl': r_tr,'f1_score': f1_tr}}
+
+            df_tr = pd.DataFrame(performance_data['train_m'])
+            df_tr.index.name = 'class'
+            df_tr.to_csv(os.path.join(output_dir, f'metrics_train_{h}.csv'))
+            # avg_f1_test.append(np.mean(f1_te))
+            # df_te = pd.DataFrame(performance_data['test_m'])
+            # df_te.index.name = 'class'
+            avg_f1_train.append(np.mean(f1_tr))
+            # df_te.to_csv(os.path.join(output_dir, f'metrics_test_{h}.csv'))
+        
+        plt.figure()
+        # plt.plot(hidden_units_list, avg_f1_test, marker='x',linestyle='--', label='Test avg F1')
+        plt.plot(hidden_units_list, avg_f1_train, marker='o', label='Train avg F1')
+        plt.ylabel('Average F1 Score')
+        plt.legend()
+        plt.xlabel('Number of Hidden Units')
+        plt.title('F1-avg vs Hidden Layer')
+        plt.grid(True)
+        plt.savefig(os.path.join(output_dir, 'avg_f1_vs_hidden_units.png'))
+        plt.close()
+
+    if question_part == 'c' or question_part == 'd' or question_part == 'e':
+        batch_size = 32
+        os.makedirs(output_dir, exist_ok=True)
+
+        hidden_configs = [[512],[512, 256],[512, 256, 128],[512, 256, 128, 64]]
+
+        avg_f1_train,depths,avg_f1_test = [],[],[]
+        n_features  = X_train.shape[1]
+        tol = 1e-3
+        num_classes = 43
+        epochs = 100  
+        batch_size = num_classes-11
+        epochs*=2
+
+        for hidden in hidden_configs:
+            depth = len(hidden)
+            depths.append(depth)
+            print(f"\n &lt;--Training: hidden layers {hidden} --&gt;")
+
+            layer_sizes = [n_features]+hidden+[num_classes]
+
+            model_params = {'layer_sizes': layer_sizes,'learning_rate': learning_rate,'tol': tol}
+        
+            if question_part == 'd':
+                model_params['adaptive'] = True
+            elif question_part == 'e':
+                model_params.update({'adaptive': True, 'is_relu': True})
+
+            nn = NeuralNetwork(**model_params)
+            print(f"nn.adaptive= {nn.adaptive}, nn.relu = {nn.is_relu}")
+            nn.train(X_train, y_train,batch_size=batch_size,epochs=epochs,num_classes=num_classes)
+
+            y_pred_test  = nn.predict(X_test)
+            if hidden == [512, 256, 128, 64]:
+                predictions_df = pd.DataFrame({'prediction': y_pred_test})
+                predictions_df.to_csv(os.path.join(output_dir, f'prediction_{question_part}.csv'), index=False)
+                print("done writing predictions")
+
+            # test_acc  = accuracy_score(y_test, y_pred_test)
+
+            def perf_helper(true_labels, predicted_labels):
+                return precision_recall_fscore_support(true_labels, predicted_labels,labels=np.arange(num_classes),zero_division=0)[:3]
+            
+            y_pred_train = nn.predict(X_train)
+            train_acc = accuracy_score(y_train, y_pred_train)
+
+            # p_te,r_te,f1_te,dum_te= perf_helper(y_test, y_pred_test)
+
+            # print(f"Train Accuracy: {train_acc:.4f}    Test Accuracy: {test_acc:.4f}")
+            p_tr,r_tr,f1_tr,dum_tr = perf_helper(y_train, y_pred_train)
+
+            # performance_data = {'train_m': {'prec': p_tr,'recl': r_tr,'f1_score': f1_tr},'test_m': {'prec': p_te,'recl': r_te,'f1_score': f1_te}}
+            performance_data = {'train_m': {'prec': p_tr,'recl': r_tr,'f1_score': f1_tr}}
+
+            df_train = pd.DataFrame(performance_data['train_m'])
+            df_train.index.name = 'class'
+            # df_test = pd.DataFrame(performance_data['test_m'])
+            df_trains = 'classes'
+            # df_test.index.name = 'class'
+            print("\n ==class metrics-&gt;TEST set --")
+            # avg_f1_test.append(np.mean(f1_te))
+            
+            # print(df_test.to_string(index=False))
+            
+            print("-- class metrics-&gt;TRAIN set ==")
+            df_trains+='a'
+            avg_f1_train.append(np.mean(f1_tr))
+            print(df_train.to_string(index=False))
+            
+            cfg_name = "_".join(map(str, hidden))
+            # df_test.to_csv(os.path.join(output_dir, f"metrics_test_depth_{cfg_name}.csv"), index=False)
+            df_trains-='a'
+            # print(f"Avg. test F1 depth {depth}: {np.mean(f1_te):.4f}")
+            df_train.to_csv(os.path.join(output_dir, f"metrics_train_depth_{cfg_name}.csv"), index=False)
+            print(f"Avg. train F1 depth {depth}: {np.mean(f1_tr):.4f}")
+
+        # plot_f1_vs_depth(depths, avg_f1_train, avg_f1_test, output_dir, filename='f1_vs_depth.png', title='Average F1 vs. Network Depth')
+
+    if question_part == 'f':
+        print("part f starting")
+        os.makedirs(output_dir, exist_ok=True)
+        num_classes = 43
+        hidden_configs = [(512,),(512, 256),(512, 256, 128),(512, 256, 128, 64)]
+
+        depths = []
+        avg_f1_train,avg_f1_test = [],[]
+
+        for hidden in hidden_configs:
+            depth = len(hidden)
+            depths.append(depth)
+            print(f"\n=== Training MLPClassifier with hidden layers={hidden} ===")
+
+            sol_type = 'sgd'
+            alpha_val = 0.0
+            act_type = 'relu'
+
+            mlp = MLPClassifier(hidden_layer_sizes=hidden,activation=act_type,solver=sol_type,alpha=alpha_val,batch_size=32,learning_rate='invscaling',learning_rate_init=0.01,
+                tol=1e-3,max_iter=80,random_state=42,verbose=True)
+
+            mlp.fit(X_train, y_train)
+
+            y_pred_test  = mlp.predict(X_test)
+            if hidden == (512, 256, 128, 64):
+                predictions_df = pd.DataFrame({'prediction': y_pred_test})
+                predictions_df.to_csv(os.path.join(output_dir, f'prediction_f.csv'), index=False)
+                print("done writing predictions")
+            alpha_val+=1
+            # test_acc  = accuracy_score(y_test, y_pred_test)
+
+            def perf_helper(true_labels, predicted_labels):
+                return precision_recall_fscore_support(true_labels, predicted_labels,labels=np.arange(num_classes),zero_division=0)[:3]
+            
+            y_pred_train = mlp.predict(X_train)
+            train_acc = accuracy_score(y_train, y_pred_train)
+
+            # p_te,r_te,f1_te,dum_te= perf_helper(y_test, y_pred_test)
+
+            # print(f"Train Accuracy: {train_acc:.4f}    Test Accuracy: {test_acc:.4f}")
+            p_tr,r_tr,f1_tr,dum_tr = perf_helper(y_train, y_pred_train)
+
+
+            # performance_data = {'train_m': {'prec': p_tr,'recl': r_tr,'f1_score': f1_tr},'test_m': {'prec': p_te,'recl': r_te,'f1_score': f1_te}}
+            performance_data = {'train_m': {'prec': p_tr,'recl': r_tr,'f1_score': f1_tr}}
+
+            df_train = pd.DataFrame(performance_data['train_m'])
+            df_train.index.name = 'class'
+            alpha_val-=1
+            # df_test = pd.DataFrame(performance_data['test_m'])
+            # df_test.index.name = 'class'
+            print("\n ==class metrics-&gt;TEST set --")
+            # avg_f1_test.append(np.mean(f1_te))
+            alpha_val*=1
+            # print(df_test.to_string(index=False))
+            
+            print("-- class metrics-&gt;TRAIN set ==")
+            avg_f1_train.append(np.mean(f1_tr))
+            print(df_train.to_string(index=False))
+            
+            cfg_name = "_".join(map(str, hidden))
+            # df_test.to_csv(os.path.join(output_dir, f"metrics_test_depth_{cfg_name}.csv"), index=False)
+            # print(f"Avg. test F1 depth {depth}: {np.mean(f1_te):.4f}")
+            df_train.to_csv(os.path.join(output_dir, f"metrics_train_depth_{cfg_name}.csv"), index=False)
+            print(f"Avg. train F1 depth {depth}: {np.mean(f1_tr):.4f}")
+
+        # plot_f1_vs_depth(depths, avg_f1_train, avg_f1_test, output_dir, filename='f1_vs_depth_mlp.png', title='Average F1 vs. Network Depth MLP')
+
+if __name__ == "__main__":
+    main()
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>

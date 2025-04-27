@@ -1,0 +1,1247 @@
+<HTML>
+<HEAD>
+<TITLE>./A3_processed_new_hash/combined_A3DHE.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A3_processed_new_hash/combined_A3DHE.py<p><PRE>
+
+
+import numpy as np
+import math
+from sklearn.metrics import accuracy_score
+from copy import deepcopy
+
+class DecisionTreeNode:
+	def __init__(self):
+		# Store the attribute index corresponding to the node. 
+		self.attribute_index = None
+		# Keep a flag indicating continuous or discrete attributes.
+		# It is True for categorical attributes.
+		# It is False for continuous attributes. 
+		self.discrete_flag = None
+		# Keep a flag to indicate if a node is a leaf or not.
+		self.leaf_flag = None
+		# For continuous valued attributes, store the median (threshold value), left and right subtrees.
+		self.median = None
+		self.left_subtree = None
+		self.right_subtree = None
+		# Store children nodes for categorical attributes. 
+		self.children = {}
+		# For a leaf node, store the label.
+		self.leaf_label = None
+		# For all non-leaf nodes, store the majority label. 
+		self.majority_label = None
+		return 
+
+class DecisionTree:
+
+	# Initialise the decision tree. 
+
+	def __init__(self, maximum_depth, column_names, column_types):
+		self.root = None
+		self.maximum_depth = maximum_depth
+		self.column_names = column_names
+		self.column_types = column_types
+		return
+
+	# Compute the entropy for a set of values. 
+
+	def compute_entropy(self, y):
+		categories, counts = np.unique(y, return_counts=True)
+		total_samples = len(y)
+		probabilities = counts/len(y)
+		entropy = -np.sum(probabilities * np.log2(probabilities))
+		return entropy
+
+	# Find the information gained by splitting on a particular attribute (characterised by entropy). 
+
+	def compute_information_gain_of_attribute(self, X, y, attribute_index):
+		# Given an attribute index, estimate the information gained by splitting at that attribute. 
+		old_entropy = self.compute_entropy(y)
+		total_samples = len(y)
+
+		attribute_name = self.column_names[attribute_index]
+		if np.issubdtype(self.column_types[attribute_name], np.floating):
+			# print('We have a continuous valued attribute.')
+			# The attribute is continuous valued. 
+			median = np.median(X[:, attribute_index])
+			left_child_indices = X[:, attribute_index] &lt;= median
+			right_child_indices = X[:, attribute_index] &gt; median
+			left_child_entropy = self.compute_entropy(y[left_child_indices])
+			right_child_entropy = self.compute_entropy(y[right_child_indices])
+			new_entropy = (np.sum(left_child_indices)*left_child_entropy + np.sum(right_child_indices)*right_child_entropy)/total_samples
+			return old_entropy - new_entropy, median
+
+		else:
+			# The attribute is categorical. 
+			categories = np.unique(X[:, attribute_index])
+			# new_entropy = sum((np.sum(X[:, attribute] == value) / len(y)) * self.entropy(y[X[:, attribute] == value])
+			# 	for value in categories)
+			new_entropy = 0.0
+			for value in categories:
+				prob = np.sum(X[:, attribute_index] == value) / total_samples
+				entropy_val = self.compute_entropy(y[X[:, attribute_index] == value])
+				new_entropy += prob * entropy_val
+
+			return old_entropy - new_entropy, None
+
+	# Compute the information gained by splitting over all attributes and choose the most optimal attribute in a greedy way. 
+
+	def choose_attribute_to_split(self, X, y):
+		split_attribute = None
+		split_median = None
+		number_of_attributes = X.shape[1]
+
+		best_information_gain = -math.inf
+		for attribute_index in range(number_of_attributes):
+			# Check the information gained by splitting at the attribute. 
+			information_gain, median = self.compute_information_gain_of_attribute(X, y, attribute_index)
+			if (information_gain &gt; best_information_gain):
+				best_information_gain = information_gain
+				split_attribute = attribute_index
+				split_median = median
+
+		return split_attribute, split_median
+
+	# Having chosen the attribute to split, divide data among different children nodes. 
+
+	def split_on_attribute(self, X, y, attribute_index, median):
+		# Now, actually split on the attribute. 
+		children = []
+
+		if median is not None:
+			# The attribute is continuous valued.
+			# print('We have a continuous valued attribute.') 
+			left_child_indices = X[:, attribute_index] &lt;= median
+			right_child_indices = X[:, attribute_index] &gt; median
+			children.append((X[left_child_indices], y[left_child_indices]))
+			children.append((X[right_child_indices], y[right_child_indices]))
+
+		else:
+			# The attribute is categorical.
+			categories = np.unique(X[:, attribute_index])
+			for value in categories:
+				value_indices = X[:, attribute_index] == value
+				children.append((X[value_indices], y[value_indices], value))
+
+		return children 
+
+	# Construct the tree by choosing the attribute to split at each level and then recursively build subtrees. 
+
+	def construct_tree(self, X, y, parent_majority_label, depth):
+		# Recursively construct the tree.
+		# First handle base cases. 
+
+		# No samples reach this node. 
+		if (len(y) == 0):
+			leaf = DecisionTreeNode()
+			leaf.leaf_label = parent_majority_label
+			leaf.leaf_flag = True
+			return leaf 
+
+		# The maximum depth has been reached.
+		if self.maximum_depth is not None:
+			if depth == self.maximum_depth:
+				parent_prediction_class = np.bincount(y).argmax()
+				leaf = DecisionTreeNode()
+				leaf.leaf_label = parent_prediction_class
+				leaf.leaf_flag = True
+				return leaf 
+
+		# All samples have the same label. 
+		if (len(np.unique(y)) == 1):
+			leaf = DecisionTreeNode()
+			leaf.leaf_label = y[0]
+			leaf.leaf_flag = True
+			return leaf
+
+		# There are no more attributes for splitting. 
+		if (X.shape[1] == 0):
+			parent_prediction_class = np.bincount(y).argmax()
+			leaf = DecisionTreeNode()
+			leaf.leaf_label = parent_prediction_class
+			leaf.leaf_flag = True
+			return leaf
+
+		# Now, recursively construct the tree. 
+
+		attribute_to_split, median_to_split = self.choose_attribute_to_split(X, y)
+		# print(attribute_to_split, median_to_split)
+		if attribute_to_split is None:
+			# No attribute gives any information gain.
+			# There is no objective utility in splitting. 
+			parent_prediction_class = np.bincount(y).argmax()
+			leaf = DecisionTreeNode()
+			leaf.leaf_label = parent_prediction_class
+			leaf.leaf_flag = True 
+			return leaf 
+
+		# There is an attribute for splitting. 
+		attribute_node = DecisionTreeNode()
+		attribute_node.attribute_index = attribute_to_split
+		attribute_node.majority_label = np.bincount(y).argmax() 
+
+		# print(f"Constructing node at depth {depth}, num samples: {len(y)}")
+		# Split at the chosen node. 
+
+		if median_to_split is not None:
+			# The attribute is continuous valued.
+			attribute_node.median = median_to_split
+			attribute_node.discrete_flag = False
+			left_right_subtrees = self.split_on_attribute(X, y, attribute_to_split, median_to_split)
+			(X_left, y_left) = left_right_subtrees[0]
+			(X_right, y_right) = left_right_subtrees[1]
+			attribute_node.left_subtree = self.construct_tree(X_left, y_left, attribute_node.majority_label, depth+1)
+			attribute_node.right_subtree = self.construct_tree(X_right, y_right, attribute_node.majority_label, depth+1)
+
+		else:
+			# The attribute is categorical. 
+			attribute_node.discrete_flag = True
+			children = self.split_on_attribute(X, y, attribute_to_split, median_to_split)
+			for X_child, y_child, value in children:
+				# For each value of the attribute, create a child subtree. 
+				child_subtree = self.construct_tree(X_child, y_child,  attribute_node.majority_label, depth+1)
+				# Store the subtree in the children of the parent node. 
+				attribute_node.children[value] = child_subtree
+
+		return attribute_node
+
+	# As a wrapper around the recursive function, it simply calls create_tree and sets the root of the tree, 
+
+	def create_tree(self, X, y):
+		root_majority_label = np.bincount(y).argmax() 
+		# print(root_majority_label)
+		root_node = self.construct_tree(X, y, root_majority_label, 0)
+		self.root = root_node
+		return
+
+	# Traverse the tree for a given example and predict its class. 
+
+	def traverse_node(self, node, example):
+		# If the node is a leaf, return the predicted class. 
+		if (node.leaf_flag):
+			return node.leaf_label
+
+		else:
+			# The node is an attribute node. 
+			value = example[node.attribute_index]
+
+			if not node.discrete_flag:
+				# The attribute is continuous valued. 
+				median_value = node.median 
+				if value &lt;= median_value:
+					return self.traverse_node(node.left_subtree, example)
+				else:
+					return self.traverse_node(node.right_subtree, example)
+
+			else:
+				# The attribute is categorical. 
+				if value in node.children:
+					return self.traverse_node(node.children[value], example)
+				else:
+					# The category is unseen. 
+					return node.majority_label
+
+	# Return a NumPy array for predictions corresponding to all given examples. 
+
+	def predict(self, X):
+		return np.array([self.traverse_node(self.root, example) for example in X])
+
+	# Recursively count the number of nodes in the tree. 
+
+	def count_nodes(self, node=None):
+		if node is None:
+			node = self.root
+		if node is None or node.leaf_flag:
+			return 1
+		if node.discrete_flag:
+			# Discrete valued attributes have children.
+			return 1 + sum(self.count_nodes(child) for child in node.children.values())
+		else:
+			# Continuous valued attributes have left and right subtrees. 
+			return 1 + self.count_nodes(node.left_subtree) + self.count_nodes(node.right_subtree)
+
+	# Perform post-training pruning in a greedy, iterative fashion.
+
+	def get_all_children(self, node, all_nodes):
+		if node is None or node.leaf_flag:
+			return
+		if node.discrete_flag:
+			if all(child.leaf_flag for child in node.children.values()):
+				all_nodes.append(node)
+			for child in node.children.values():
+				self.get_all_children(child, all_nodes)
+		else:
+			if node.left_subtree.leaf_flag and node.right_subtree.leaf_flag:
+				all_nodes.append(node)
+			self.get_all_children(node.left_subtree, all_nodes)
+			self.get_all_children(node.right_subtree, all_nodes)
+
+	def get_all_nodes(self):
+		all_nodes = []
+		self.get_all_children(self.root, all_nodes)
+		return all_nodes
+
+	def prune_node(self, node):
+		node.leaf_flag = True 
+		node.leaf_label = node.majority_label
+		# if node.discrete_flag:
+		# 	node.left_subtree = None
+		# 	node.right_subtree = None
+		# else:
+		# 	node.children = {}
+		node.left_subtree = None
+		node.right_subtree = None
+		node.children = {}
+
+	def find_node_in_copy(self, original_node, copied_node, target_node):
+		if original_node is target_node:
+			return copied_node
+		if original_node is None or copied_node is None:
+			return None
+		if original_node.discrete_flag:
+			for category in original_node.children:
+				output = self.find_node_in_copy(original_node.children[category], copied_node.children[category], target_node)
+				if output:
+					return output
+		else: 
+			output = self.find_node_in_copy(original_node.left_subtree, copied_node.left_subtree, target_node)
+			if output:
+				return output
+			return self.find_node_in_copy(original_node.right_subtree, copied_node.right_subtree, target_node)
+		return None 
+
+	def prune(self, X_valid, y_valid, X_train, y_train, X_test, y_test):
+	# Do pruning after training to reduce overfitting using post-pruning.
+	# Iteratively prune the node whose pruning improves validation accuracy the most.
+
+		y_valid_predicted = self.predict(X_valid)
+		old_accuracy = accuracy_score(y_valid_predicted, y_valid)
+
+		training_accuracies = []
+		testing_accuracies = []
+		validation_accuracies = []
+		node_counts = []
+
+		while True:
+
+			best_node = None
+			best_accuracy = old_accuracy
+			all_nodes = self.get_all_nodes()
+
+			for node in all_nodes:
+				# Save the original subtree metadata. 
+				# It is essential to revert to the original tree. 
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match218-1.html#3" TARGET="1"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+				original_state = {
+					'leaf_flag': node.leaf_flag,
+					'leaf_label': node.leaf_label,
+					'left_subtree': node.left_subtree,
+					'right_subtree': node.right_subtree,
+					'children': node.children.copy()
+</FONT>				}
+
+				# Prune the specific node. 
+				self.prune_node(node)
+				y_valid_predicted = self.predict(X_valid)
+				new_accuracy = accuracy_score(y_valid_predicted, y_valid)
+
+				if new_accuracy &gt; best_accuracy:
+					# The pruned tree gives higher accuracy. 
+					# Store the new best_accuracy and best_original_state. 
+					best_node = node
+					best_accuracy = new_accuracy
+		
+				# Restore original state in every situation. 
+				# We get the original tree. 
+				node.leaf_flag = original_state['leaf_flag']
+				node.leaf_label = original_state['leaf_label']
+				node.left_subtree = original_state['left_subtree']
+				node.right_subtree = original_state['right_subtree']
+				node.children = original_state['children']
+
+			if best_node is None:
+				# There is no improvement from pruning any node. 
+				break  
+			else:
+				# Prune the best possible node. 
+				self.prune_node(best_node)
+
+			print(best_accuracy)
+
+			old_accuracy = best_accuracy
+
+			y_train_predicted = self.predict(X_train)
+			y_test_predicted = self.predict(X_test)
+
+			training_accuracy = accuracy_score(y_train_predicted, y_train)
+			testing_accuracy = accuracy_score(y_test_predicted, y_test)
+
+			node_count = self.count_nodes()
+
+			training_accuracies.append(training_accuracy)
+			testing_accuracies.append(testing_accuracy)
+			validation_accuracies.append(best_accuracy)
+			node_counts.append(node_count)
+
+		return (node_counts, training_accuracies, testing_accuracies, validation_accuracies)
+
+# Visualise tree. 
+
+
+
+import numpy as np
+import math
+
+# class NeuralNetwork:
+
+# 	def __init__(self, minibatch_size, n_features, hidden_layers_list, n_classes, epsilon, max_epochs, alpha):
+
+# 		# These parameters are passed during initialisation. 
+
+# 		self.minibatch_size = minibatch_size
+# 		self.n_features = n_features
+# 		self.hidden_layers_list = hidden_layers_list
+# 		self.n_classes = n_classes
+# 		self.epsilon = epsilon
+# 		self.max_epochs = max_epochs
+# 		self.alpha = alpha 
+
+# 		# These parameters are not passed during initialisation. 
+
+# 		self.weights_list = []
+# 		self.biases_list = []
+# 		self.weights_gradients = []
+# 		self.biases_gradients = []
+# 		self.activated_linear_combinations = None
+# 		self.linear_combinations = None
+# 		self.loss = 0.0
+# 		self.n_layers = len(self.hidden_layers_list)
+
+# 		return 
+
+# 	def initialise_weights_and_biases(self):
+# 		all_layers = [self.n_features] + self.hidden_layers_list + [self.n_classes]
+# 		for j in range(len(all_layers)-1):
+# 			weight_matrix = np.random.randn(all_layers[j], all_layers[j+1]) * np.sqrt(1/all_layers[j])
+# 			bias_matrix = np.zeros((1, all_layers[j+1]))
+# 			self.weights_list.append(weight_matrix)
+# 			self.biases_list.append(bias_matrix)
+
+# 		self.weights_gradients = [None] * len(self.weights_list)
+# 		self.biases_gradients = [None] * len(self.biases_list)
+
+# 	def sigmoid(self, x):
+# 		x_sigmoid = 1/(1+np.exp(-x))
+# 		return x_sigmoid
+
+# 	def sigmoid_derivative(self, x):
+# 		x_sigmoid_derivative = x * (1-x)
+# 		return x_sigmoid_derivative
+
+# 	def compute_cross_entropy_loss(self, y_predicted, y):
+# 		# y_predicted has shape (n_examples, n_classes). y_predicted stores the softmax probabilities. 
+# 		# y has shape (n_examples, n_classes). y is one hot encoded. 
+# 		epsilon = 1e-15
+# 		n_examples = y.shape[0]
+# 		y_predicted = np.clip(y_predicted, epsilon, 1 - epsilon)
+# 		loss = -np.sum(y * np.log(y_predicted))/n_examples
+# 		self.loss = loss
+
+# 	def check_converged(self):
+# 		return self.loss &lt; self.epsilon
+
+# 	def softmax_stable(self, x):
+# 		x_exponent = np.exp(x - np.max(x, axis=1, keepdims=True))
+# 		x_softmax = x_exponent/np.sum(x_exponent, axis=1, keepdims=True)
+# 		return x_softmax
+
+# 	def forward_pass(self, X):
+# 		# X has shape (n_examples, n_features). 
+# 		linear_combinations = []
+# 		activated_linear_combinations = [X]
+# 		changing_X = X
+
+# 		for j in range(self.n_layers):
+# 			linear_combination = np.dot(changing_X, self.weights_list[j]) + self.biases_list[j]
+# 			linear_combinations.append(linear_combination)
+# 			activated_linear_combination = self.sigmoid(linear_combination)
+# 			activated_linear_combinations.append(activated_linear_combination)
+# 			changing_X = activated_linear_combination
+
+# 		output = np.dot(changing_X, self.weights_list[-1]) + self.biases_list[-1]
+# 		linear_combinations.append(output)
+# 		softmax_output = self.softmax_stable(output)
+# 		activated_linear_combinations.append(softmax_output)
+
+# 		self.activated_linear_combinations = activated_linear_combinations
+# 		self.linear_combinations = linear_combinations
+
+# 		return 
+
+# 	def backward_pass(self, X, y):
+# 		activated_linear_combinations = self.activated_linear_combinations
+# 		linear_combinations = self.linear_combinations
+# 		weights_gradients = self.weights_gradients
+# 		biases_gradients = self.biases_gradients
+# 		n_examples = X.shape[0]
+
+# 		# y is one hot encoded.
+# 		# y has shape (n_examples, n_classes).
+
+# 		output_error_term = activated_linear_combinations[-1] - y 
+
+# 		weights_gradients[-1] = np.dot(activated_linear_combinations[-2].T, output_error_term)/n_examples
+# 		biases_gradients[-1] = np.sum(output_error_term, axis=0, keepdims=True)/n_examples
+
+# 		for j in reversed(range(self.n_layers)):
+# 			output_error_term = np.dot(output_error_term, self.weights_list[j+1].T) * self.sigmoid_derivative(activated_linear_combinations[j+1])
+# 			weights_gradients[j] = np.dot(activated_linear_combinations[j].T, output_error_term)/n_examples
+# 			biases_gradients[j] = np.sum(output_error_term, axis=0, keepdims=True)/n_examples
+
+# 		self.weights_gradients = weights_gradients
+# 		self.biases_gradients = biases_gradients
+
+# 		return 
+
+# 	def update_weights(self):
+# 		for j in range(len(self.weights_list)):
+# 			self.weights_list[j] -= self.weights_gradients[j] * self.alpha
+
+# 		return 
+
+# 	def update_biases(self):
+# 		for j in range(len(self.biases_list)):
+# 			self.biases_list[j] -= self.biases_gradients[j] * self.alpha
+
+# 		return 
+
+# 	def predict(self, X):
+# 		self.forward_pass(X)
+# 		y_predicted = np.argmax(self.activated_linear_combinations[-1], axis=1)
+# 		return y_predicted
+
+# 	def fit(self, X, y):
+# 		# X has shape (n_examples, n_features). 
+# 		# y has shape (n_examples, n_classes). 
+
+# 		n_examples = X.shape[0]
+# 		minibatch_size = self.minibatch_size
+
+# 		epoch = 0
+
+# 		self.initialise_weights_and_biases()
+
+# 		while (epoch &lt; self.max_epochs):
+
+# 			reorder = np.random.permutation(n_examples)
+# 			X_shuffled = X[reorder]
+# 			y_shuffled = y[reorder]
+
+# 			for j in range(0, n_examples, minibatch_size):
+# 				X_temp = X_shuffled[j:j+minibatch_size]
+# 				y_temp = y_shuffled[j:j+minibatch_size]
+# 				self.forward_pass(X_temp)
+# 				self.backward_pass(X_temp, y_temp)
+# 				self.update_weights()
+# 				self.update_biases()
+
+# 			# Compute the loss. 
+
+# 			self.forward_pass(X)
+# 			y_predicted = self.activated_linear_combinations[-1]
+# 			self.compute_cross_entropy_loss(y_predicted, y)
+
+# 			if self.check_converged():
+# 				break
+
+# 			epoch += 1
+
+# 		return 
+
+class NeuralNetwork:
+
+    def __init__(self, minibatch_size, n_features, hidden_layers_list, n_classes, epsilon, max_epochs, alpha, adaptive_seed, adaptive_flag):
+        self.minibatch_size = minibatch_size
+        self.n_features = n_features
+        self.hidden_layers_list = hidden_layers_list
+        self.n_classes = n_classes
+        self.epsilon = epsilon
+        self.max_epochs = max_epochs
+        self.alpha = alpha 
+        self.adaptive_seed= adaptive_seed
+        self.adaptive_flag = adaptive_flag
+
+        self.weights_list = []
+        self.biases_list = []
+        self.weights_gradients = []
+        self.biases_gradients = []
+        self.activated_linear_combinations = None
+        self.linear_combinations = None
+        self.loss = 0.0
+        self.n_layers = len(self.hidden_layers_list)
+
+    def initialise_weights_and_biases(self):
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match218-1.html#1" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        all_layers = [self.n_features] + self.hidden_layers_list + [self.n_classes]
+        for j in range(len(all_layers)-1):
+            weight_matrix = np.random.randn(all_layers[j], all_layers[j+1]) * np.sqrt(1 / all_layers[j])
+</FONT><A NAME="4"></A><FONT color = #FF00FF><A HREF="match218-1.html#4" TARGET="1"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            bias_matrix = np.zeros((1, all_layers[j+1]))
+            self.weights_list.append(weight_matrix)
+            self.biases_list.append(bias_matrix)
+</FONT>
+        self.weights_gradients = [None] * len(self.weights_list)
+        self.biases_gradients = [None] * len(self.biases_list)
+
+    def sigmoid(self, x):
+        return 1 / (1 + np.exp(-x))
+
+    def relu(self, x):
+    	return 
+
+    def sigmoid_derivative(self, x):
+        return x * (1 - x)
+
+    def compute_cross_entropy_loss(self, y_predicted, y):
+        epsilon = 1e-15
+        n_examples = y.shape[0]
+        y_predicted = np.clip(y_predicted, epsilon, 1 - epsilon)
+        loss = -np.sum(y * np.log(y_predicted)) / n_examples
+        self.loss = loss
+
+    def check_converged(self):
+        return self.loss &lt; self.epsilon
+
+    def softmax_stable(self, x):
+        x_exponent = np.exp(x - np.max(x, axis=1, keepdims=True))
+        return x_exponent / np.sum(x_exponent, axis=1, keepdims=True)
+
+    def forward_pass(self, X):
+        linear_combinations = []
+        activated_linear_combinations = [X]
+        changing_X = X
+
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match218-1.html#0" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        for j in range(self.n_layers):
+            linear_combination = np.dot(changing_X, self.weights_list[j]) + self.biases_list[j]
+            linear_combinations.append(linear_combination)
+            activated_linear_combination = self.sigmoid(linear_combination)
+            activated_linear_combinations.append(activated_linear_combination)
+</FONT>            changing_X = activated_linear_combination
+
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match218-1.html#2" TARGET="1"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        output = np.dot(changing_X, self.weights_list[-1]) + self.biases_list[-1]
+        linear_combinations.append(output)
+        softmax_output = self.softmax_stable(output)
+        activated_linear_combinations.append(softmax_output)
+</FONT>
+        self.linear_combinations = linear_combinations
+        self.activated_linear_combinations = activated_linear_combinations
+
+    def backward_pass(self, X, y):
+        activated_linear_combinations = self.activated_linear_combinations
+        linear_combinations = self.linear_combinations
+        weights_gradients = self.weights_gradients
+        biases_gradients = self.biases_gradients
+        n_examples = X.shape[0]
+
+        output_error_term = activated_linear_combinations[-1] - y
+        weights_gradients[-1] = np.dot(activated_linear_combinations[-2].T, output_error_term) / n_examples
+        biases_gradients[-1] = np.sum(output_error_term, axis=0, keepdims=True) / n_examples
+
+        for j in reversed(range(self.n_layers)):
+            output_error_term = np.dot(output_error_term, self.weights_list[j+1].T) * self.sigmoid_derivative(activated_linear_combinations[j+1])
+            weights_gradients[j] = np.dot(activated_linear_combinations[j].T, output_error_term) / n_examples
+            biases_gradients[j] = np.sum(output_error_term, axis=0, keepdims=True) / n_examples
+
+        self.weights_gradients = weights_gradients
+        self.biases_gradients = biases_gradients
+
+    def update_weights(self, epoch):
+    	if self.adaptive_flag:
+    		for j in range(len(self.weights_list)):
+    			self.weights_list[j] -= self.weights_gradients[j] * (self.adaptive_seed/epoch)
+    	else:
+	        for j in range(len(self.weights_list)):
+	            self.weights_list[j] -= self.weights_gradients[j] * self.alpha
+
+    def update_biases(self, epoch):
+    	if self.adaptive_flag:
+	        for j in range(len(self.biases_list)):
+	            self.biases_list[j] -= self.biases_gradients[j] * (self.adaptive_seed/epoch)
+        else:
+        	for j in range(len(self.biases_list)):
+        		self.biases_list[j] -= self.biases_gradients[j] * self.alpha
+
+    def predict(self, X):
+        self.forward_pass(X)
+        return np.argmax(self.activated_linear_combinations[-1], axis=1)
+
+    def fit(self, X, y):
+        n_examples = X.shape[0]
+        minibatch_size = self.minibatch_size
+        epoch = 0
+
+        self.initialise_weights_and_biases()
+
+        while epoch &lt; self.max_epochs:
+            
+            reorder = np.random.permutation(n_examples)
+            # print(type(reorder))
+            X_shuffled = X[reorder]
+            y_shuffled = y[reorder]
+
+            for j in range(0, n_examples, minibatch_size):
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match218-1.html#5" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+                X_temp = X_shuffled[j:j+minibatch_size]
+                y_temp = y_shuffled[j:j+minibatch_size]
+                self.forward_pass(X_temp)
+                self.backward_pass(X_temp, y_temp)
+</FONT>                self.update_weights(epoch)
+                self.update_biases(epoch)
+
+            self.forward_pass(X)
+            y_predicted = self.activated_linear_combinations[-1]
+            self.compute_cross_entropy_loss(y_predicted, y)
+
+            print(epoch, self.loss)
+
+            if self.check_converged():
+                print("Converged!")
+                break
+
+            epoch += 1
+            
+        return 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import numpy as np
+import math
+import pandas as pd
+from itertools import product
+from sklearn.metrics import accuracy_score
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV
+from decision_tree import DecisionTreeNode, DecisionTree
+
+######################################################################################################################
+
+# Read the data. 
+
+train_df = pd.read_csv("/Users/aanyakhurana/Desktop/S8/academics/COL774/assignments/A3/Assignment3/data/Q1/train.csv")
+test_df = pd.read_csv("/Users/aanyakhurana/Desktop/S8/academics/COL774/assignments/A3/Assignment3/data/Q1/test.csv")
+valid_df = pd.read_csv("/Users/aanyakhurana/Desktop/S8/academics/COL774/assignments/A3/Assignment3/data/Q1/valid.csv")
+
+# train_df.columns = train_df.columns.str.strip()
+# test_df.columns = test_df.columns.str.strip()
+# train_df = train_df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+# test_df = test_df.applymap(lambda x: x.strip() if isinstance(x, str) else x) 
+
+# Remove trailing spaces to get uniform data. 
+
+str_cols = train_df.select_dtypes(include=["object"]).columns
+train_df[str_cols] = train_df[str_cols].apply(lambda col: col.str.strip())
+str_cols = test_df.select_dtypes(include=["object"]).columns
+test_df[str_cols] = test_df[str_cols].apply(lambda col: col.str.strip())
+str_cols = valid_df.select_dtypes(include=["object"]).columns
+valid_df[str_cols] = valid_df[str_cols].apply(lambda col: col.str.strip()) 
+
+# Construct y. 
+
+y_train = train_df["income"].map({"&lt;=50K": 0, "&gt;50K": 1}).values
+y_test = test_df["income"].map({"&lt;=50K": 0, "&gt;50K": 1}).values
+y_valid = valid_df["income"].map({"&lt;=50K": 0, "&gt;50K": 1}).values
+
+# Drop the income labels from the data set. 
+
+train_df = train_df.drop(columns=["income"])
+test_df = test_df.drop(columns=["income"])
+valid_df = valid_df.drop(columns=["income"])
+
+# Explicitly typecast the columns corresponding to continuous valued attributes as floats.
+
+numerical_columns = ["age", "fnlwgt", "education.num", "capital.gain", "capital.loss", "hours.per.week"]
+train_df[numerical_columns] = train_df[numerical_columns].astype(float)
+test_df[numerical_columns] = test_df[numerical_columns].astype(float)
+valid_df[numerical_columns] = valid_df[numerical_columns].astype(float)
+
+column_type_dictionary = train_df.dtypes.to_dict()
+features_list = train_df.columns.tolist()
+
+# Convert to NumPy arrays. 
+
+X_train = train_df.values
+X_test = test_df.values
+X_valid = valid_df.values
+
+######################################################################################################################
+
+# # Instantiate and build the tree. 
+
+# tree = DecisionTree(maximum_depth = 30, column_names = features_list, column_types = column_type_dictionary)
+# tree.create_tree(X_train, y_train)
+# # print("Node count:", tree.count_nodes())
+
+# # Check training accuracy.
+# y_train_predicted = tree.predict(X_train)
+# training_accuracy = accuracy_score(y_train_predicted, y_train)
+# print("Training accuracy:", training_accuracy)
+
+# # Check testing accuracy. 
+# y_test_predicted = tree.predict(X_test)
+# testing_accuracy = accuracy_score(y_test_predicted, y_test)
+# print("Testing accuracy:", testing_accuracy)
+
+######################################################################################################################
+
+# Implement one hot encoding. 
+
+categorical_features = ["workclass", "education", "marital.status","occupation", "relationship", "race", "sex", "native.country"]
+
+# print("Columns:", train_df.columns)
+# print("Categorical features list:", categorical_features)
+
+# One-hot encode the columns corresponding to categorical features. 
+
+X_train_encoded_df = pd.get_dummies(train_df, columns=categorical_features)
+X_test_encoded_df = pd.get_dummies(test_df, columns=categorical_features)
+X_valid_encoded_df = pd.get_dummies(valid_df, columns=categorical_features)
+
+# Align the columns in all data sets. 
+
+X_train_encoded_df, X_test_encoded_df = X_train_encoded_df.align(X_test_encoded_df, join='left', axis=1, fill_value=0)
+X_train_encoded_df, X_valid_encoded_df = X_train_encoded_df.align(X_valid_encoded_df, join='left', axis=1, fill_value=0)
+
+column_type_dictionary = X_train_encoded_df.dtypes.to_dict()
+features_list = X_train_encoded_df.columns.tolist()
+
+X_train_encoded = X_train_encoded_df.values
+X_test_encoded = X_test_encoded_df.values
+X_valid_encoded = X_valid_encoded_df.values
+
+# tree = DecisionTree(maximum_depth = 55, column_names = features_list, column_types = column_type_dictionary)
+# tree.create_tree(X_train_encoded, y_train)
+# nodes, training, testing, validation = tree.prune(X_valid_encoded, y_valid, X_train_encoded, y_train, X_test_encoded, y_test)
+# print("Number of nodes:", nodes)
+# print("Training accuracies:",training)
+# print("Testing accuracies:",testing)
+# print("Validation accuracies:",validation)
+
+# y_train_predicted = tree.predict(X_train_encoded)
+# training_accuracy = accuracy_score(y_train_predicted, y_train)
+# print("Training accuracy:", training_accuracy)
+
+# y_test_predicted = tree.predict(X_test_encoded)
+# testing_accuracy = accuracy_score(y_test_predicted, y_test)
+# print("Testing accuracy:", testing_accuracy)
+
+######################################################################################################################
+
+# Train using the sci-kit implementation. 
+
+# tree = DecisionTreeClassifier(criterion="entropy", ccp_alpha = 0.001, max_depth = 25, random_state=42)
+# tree.fit(X_train_encoded, y_train)
+
+# y_train_predicted = tree.predict(X_train_encoded)
+# training_accuracy = accuracy_score(y_train_predicted, y_train)
+# print(training_accuracy)
+
+# y_test_predicted = tree.predict(X_test_encoded)
+# testing_accuracy = accuracy_score(y_test_predicted, y_test)
+# print(testing_accuracy)
+
+# y_valid_precicted = tree.predict(X_valid_encoded)
+# validation_accuracy = accuracy_score(y_valid_precicted, y_valid)
+# print(validation_accuracy)
+
+######################################################################################################################
+
+# Train random forests using the scikit implementation. 
+
+# forest = RandomForestClassifier(criterion='entropy', random_state=42)
+# forest.fit(X_train_encoded, y_train)
+
+# parameters_grid = {
+#     'n_estimators': [50, 150, 250, 350],
+#     'max_features': [0.1, 0.3, 0.5, 0.7, 0.9, 1.0],
+#     'min_samples_split': [2, 4, 6, 8, 10]
+# }
+
+# best_OOB = 0
+# best_parameters = None
+
+# # Loop through all parameter combinations
+# for estimators, features, samples in product(parameters_grid['n_estimators'],
+#                           parameters_grid['max_features'],
+#                           parameters_grid['min_samples_split']):
+
+#     forest = RandomForestClassifier(
+#         criterion='entropy',
+#         n_estimators=estimators,
+#         max_features=features,
+#         min_samples_split=samples,
+#         oob_score=True,
+#         bootstrap=True,
+#         random_state=42,
+#         n_jobs=-1
+#     )
+
+#     forest.fit(X_train_encoded, y_train)
+#     oob_accuracy = forest.oob_score_
+
+#     if oob_accuracy &gt; best_OOB:
+#         best_OOB = oob_accuracy
+#         best_parameters = {
+#             'n_estimators': estimators,
+#             'max_features': features,
+#             'min_samples_split': samples 
+#         }
+
+# # Print best configuration
+# print("Best Parameters based on OOB Accuracy:")
+# print(best_parameters)
+# print(f"OOB Accuracy: {best_OOB:.4f}")
+
+# forest = RandomForestClassifier(criterion='entropy', n_estimators=350, max_features=0.3, min_samples_split=10, oob_score=True, bootstrap=True, random_state=42)
+# forest.fit(X_train_encoded, y_train)
+
+# OOB_accuracy = forest.oob_score_
+# training_accuracy = accuracy_score(y_train, forest.predict(X_train_encoded))
+# testing_accuracy = accuracy_score(y_test, forest.predict(X_test_encoded))
+# validation_accuracy = accuracy_score(y_valid, forest.predict(X_valid_encoded))
+
+# print("Training accuracy:", training_accuracy)
+# print("Testing accuracy:", testing_accuracy)
+# print("Validation accuracy:", validation_accuracy)
+# print("OOB accuracy:", OOB_accuracy)
+
+# for n_estimator in parameters_grid['n_estimators']:
+# 	forest = RandomForestClassifier(n_estimators=n_estimator, criterion='entropy', oob_score=True, bootstrap=True, random_state=42)
+# 	forest.fit(X_train_encoded, y_train)
+
+# 	training_accuracy = accuracy_score(y_train, forest.predict(X_train_encoded))
+# 	testing_accuracy = accuracy_score(y_test, forest.predict(X_test_encoded))
+# 	validation_accuracy = accuracy_score(y_valid, forest.predict(X_valid_encoded))
+# 	OOB_accuracy = forest.oob_score_ 
+
+# 	print(n_estimator)
+# 	print(training_accuracy)
+# 	print(testing_accuracy)
+# 	print(validation_accuracy)
+# 	print(OOB_accuracy)
+
+# for features in parameters_grid['max_features']:
+# 	forest = RandomForestClassifier(max_features=features, criterion='entropy', oob_score=True, bootstrap=True, random_state=42)
+# 	forest.fit(X_train_encoded, y_train)
+
+# 	training_accuracy = accuracy_score(y_train, forest.predict(X_train_encoded))
+# 	testing_accuracy = accuracy_score(y_test, forest.predict(X_test_encoded))
+# 	validation_accuracy = accuracy_score(y_valid, forest.predict(X_valid_encoded))
+# 	OOB_accuracy = forest.oob_score_ 
+
+# 	print(features)
+# 	print(training_accuracy)
+# 	print(testing_accuracy)
+# 	print(validation_accuracy)
+# 	print(OOB_accuracy)
+
+# for samples in parameters_grid['min_samples_split']:
+# 	forest = RandomForestClassifier(min_samples_split=samples, criterion='entropy', oob_score=True, bootstrap=True, random_state=42)
+# 	forest.fit(X_train_encoded, y_train)
+
+# 	training_accuracy = accuracy_score(y_train, forest.predict(X_train_encoded))
+# 	testing_accuracy = accuracy_score(y_test, forest.predict(X_test_encoded))
+# 	validation_accuracy = accuracy_score(y_valid, forest.predict(X_valid_encoded))
+# 	OOB_accuracy = forest.oob_score_ 
+
+# 	print(samples)
+# 	print(training_accuracy)
+# 	print(testing_accuracy)
+# 	print(validation_accuracy)
+# 	print(OOB_accuracy)
+
+import matplotlib.pyplot as plt
+
+# depths = [5, 10, 15, 20, 25, 30]
+# training_accuracies = [0.8669, 0.9393, 0.9898, 0.9983, 0.9983, 0.9983]
+# test_accuracies = [0.8231, 0.8009, 0.7888, 0.7877, 0.7877, 0.7877]
+
+# plt.figure(figsize=(8, 8))
+# plt.plot(depths, training_accuracies, marker='o', label='Training Accuracy', color='blue')
+# plt.plot(depths, test_accuracies, marker='x', label='Testing Accuracy', color='green')
+
+# plt.title('Accuracies vs Maximum Depth')
+# plt.xlabel('Maximum Depth')
+# plt.ylabel('Accuracies')
+# plt.xticks(depths)
+# plt.ylim(0.75, 1.0)
+# plt.grid(True, linestyle='--', alpha=0.5)
+# plt.legend()
+# plt.tight_layout()
+# plt.savefig('A_graph.png')
+
+import matplotlib.pyplot as plt
+
+# nodes = [11947, 11945, 11943, 11941, 11939, 11937, 11935, 11933, 11931, 11929, 11927, 11925, 11923, 11921, 11919, 11917, 11915, 11913, 11911, 11909, 11907, 11905, 11903, 11901, 11899, 11897, 11895, 11893, 11891, 11889, 11887, 11885, 11883, 11881, 11879, 11877, 11875, 11873, 11871, 11869, 11867, 11865, 11863, 11861, 11859, 11857, 11855, 11853, 11851, 11849, 11847, 11845, 11843, 11841, 11839, 11837, 11835, 11833, 11831, 11829, 11827, 11825, 11823, 11821, 11819, 11817, 11815, 11813, 11811, 11809, 11807, 11805, 11803, 11801, 11799, 11797, 11795, 11793, 11791, 11789, 11787, 11785, 11783, 11781, 11779, 11777, 11775, 11773, 11771, 11769, 11767, 11765, 11763, 11761, 11759, 11757, 11755, 11753, 11751, 11749, 11747, 11745, 11743, 11741, 11739, 11737, 11735, 11733, 11731, 11729, 11727, 11725, 11723, 11721, 11719, 11717, 11715, 11713, 11711, 11709, 11707, 11705, 11703, 11701, 11699, 11697, 11695, 11693, 11691, 11689, 11687, 11685, 11683, 11681, 11679, 11677, 11675, 11673, 11671, 11669, 11667, 11665, 11663, 11661, 11659, 11657, 11655, 11653, 11651, 11649, 11647, 11645, 11643, 11641, 11639, 11637, 11635, 11633, 11631, 11629, 11627, 11625, 11623, 11621, 11619, 11617, 11615, 11613, 11611, 11609]
+# train_accuracies = [0.9978863608106427, 0.9978449169049691, 0.9977620290936218, 0.9976791412822744, 0.9976376973766008, 0.9975962534709271, 0.9975548095652534, 0.9974719217539061, 0.9974304778482325, 0.9973890339425587, 0.9973475900368851, 0.9973061461312114, 0.9972647022255378, 0.997223258319864, 0.9971818144141904, 0.9971403705085167, 0.997098926602843, 0.9970574826971694, 0.9970160387914957, 0.9969331509801483, 0.9968917070744747, 0.996850263168801, 0.9968088192631274, 0.99672593145178, 0.9966430436404327, 0.996601599734759, 0.9965187119234117, 0.996477268017738, 0.9964358241120643, 0.9963114923950434, 0.9962700484893696, 0.996228604583696, 0.9961871606780223, 0.9961457167723486, 0.9961042728666749, 0.9960628289610013, 0.9959799411496539, 0.9958970533383066, 0.995855609432633, 0.9958141655269592, 0.9957727216212856, 0.9957312777156119, 0.9956898338099383, 0.9956483899042646, 0.9955655020929173, 0.9955240581872435, 0.9954826142815699, 0.9954411703758962, 0.9953997264702226, 0.9953582825645488, 0.9953168386588752, 0.9952753947532016, 0.9952339508475279, 0.9951925069418542, 0.9951510630361805, 0.9950681752248332, 0.9950267313191595, 0.9949852874134858, 0.9949438435078122, 0.9949023996021386, 0.9948609556964648, 0.9948195117907912, 0.9947780678851175, 0.9947366239794438, 0.9946951800737701, 0.9946537361680965, 0.9945708483567491, 0.9945294044510755, 0.9944879605454018, 0.9944465166397282, 0.9944050727340544, 0.9943636288283808, 0.9943221849227071, 0.9942807410170335, 0.9942392971113597, 0.9941978532056861, 0.9941564093000125, 0.9940735214886651, 0.9940320775829914, 0.9939906336773178, 0.993949189771644, 0.9939077458659704, 0.9938663019602967, 0.9937419702432757, 0.9936590824319284, 0.9936176385262547, 0.993576194620581, 0.9935347507149074, 0.9934933068092338, 0.99345186290356, 0.9934104189978864, 0.9933689750922127, 0.993327531186539, 0.9932860872808653, 0.9932446433751917, 0.993203199469518, 0.993078867752497, 0.9930374238468234, 0.9929959799411496, 0.992954536035476, 0.9929130921298023, 0.9928716482241287, 0.9928302043184549, 0.9927887604127813, 0.9927473165071077, 0.9926644286957603, 0.9926229847900866, 0.992581540884413, 0.9925400969787392, 0.9924986530730656, 0.9924572091673919, 0.9923743213560446, 0.9923328774503709, 0.9922914335446973, 0.9922499896390236, 0.9922085457333499, 0.9921671018276762, 0.9921256579220026, 0.9920842140163288, 0.9920427701106552, 0.9920013262049816, 0.9919598822993079, 0.9919184383936342, 0.9918769944879605, 0.9918355505822869, 0.9917941066766132, 0.9917526627709395, 0.9917112188652658, 0.9916697749595922, 0.9916283310539186, 0.9915868871482448, 0.9915454432425712, 0.9915039993368975, 0.9914625554312239, 0.9914211115255501, 0.9913796676198765, 0.9913382237142029, 0.9912967798085291, 0.9912553359028555, 0.9912138919971818, 0.9911724480915082, 0.9911310041858344, 0.9910895602801608, 0.9910481163744871, 0.9909652285631398, 0.9909237846574661, 0.9908823407517925, 0.9908408968461188, 0.9907994529404451, 0.9907580090347714, 0.9907165651290978, 0.990675121223424, 0.9906336773177504, 0.9905922334120768, 0.9905507895064031, 0.9905093456007295, 0.9903850138837084, 0.9903435699780347, 0.990302126072361, 0.9902606821666874, 0.9902192382610138, 0.99017779435534, 0.9901363504496664, 0.9900949065439927, 0.9900534626383191, 0.9900120187326453, 0.9899705748269717, 0.989929130921298, 0.9898876870156244, 0.9898462431099507]
+# test_accuracies = [0.8069721115537849, 0.8071049136786188, 0.8071713147410359, 0.8071049136786188, 0.8071049136786188, 0.8071049136786188, 0.8071713147410359, 0.8072377158034528, 0.8074369189907038, 0.8074369189907038, 0.8075033200531209, 0.8075033200531209, 0.8074369189907038, 0.8075033200531209, 0.8074369189907038, 0.8073705179282868, 0.8074369189907038, 0.8075033200531209, 0.8075697211155378, 0.8077025232403718, 0.8077025232403718, 0.8077025232403718, 0.8077025232403718, 0.8077025232403718, 0.8078353253652059, 0.8079017264276228, 0.8077689243027888, 0.8078353253652059, 0.8078353253652059, 0.8080345285524568, 0.8080345285524568, 0.8081673306772909, 0.8082337317397078, 0.8083001328021249, 0.8083001328021249, 0.8083001328021249, 0.8084329349269588, 0.8084329349269588, 0.8086985391766268, 0.8086985391766268, 0.8087649402390438, 0.8088977423638778, 0.8088977423638778, 0.8089641434262949, 0.8091633466135458, 0.8091633466135458, 0.8091633466135458, 0.8092961487383799, 0.8092961487383799, 0.8094289508632138, 0.8094289508632138, 0.8094289508632138, 0.8094289508632138, 0.8094289508632138, 0.8093625498007968, 0.8093625498007968, 0.8093625498007968, 0.8093625498007968, 0.8092961487383799, 0.8093625498007968, 0.8092961487383799, 0.8092961487383799, 0.8092961487383799, 0.8093625498007968, 0.8094289508632138, 0.8094953519256308, 0.8094953519256308, 0.8095617529880478, 0.8096281540504648, 0.8096281540504648, 0.8096945551128818, 0.8096281540504648, 0.8096281540504648, 0.8096281540504648, 0.8096281540504648, 0.8096945551128818, 0.8096945551128818, 0.8096945551128818, 0.8097609561752988, 0.8097609561752988, 0.8097609561752988, 0.8098273572377158, 0.8099601593625498, 0.8100265604249668, 0.8101593625498008, 0.8102921646746348, 0.8102921646746348, 0.8102921646746348, 0.8104249667994687, 0.8103585657370518, 0.8103585657370518, 0.8102921646746348, 0.8102257636122178, 0.8103585657370518, 0.8103585657370518, 0.8104913678618858, 0.8104913678618858, 0.8104249667994687, 0.8104249667994687, 0.8104249667994687, 0.8103585657370518, 0.8103585657370518, 0.8105577689243028, 0.8104913678618858, 0.8104913678618858, 0.8105577689243028, 0.8105577689243028, 0.8105577689243028, 0.8105577689243028, 0.8105577689243028, 0.8104913678618858, 0.8104913678618858, 0.8104913678618858, 0.8104913678618858, 0.8104249667994687, 0.8102921646746348, 0.8102921646746348, 0.8102921646746348, 0.8102921646746348, 0.8103585657370518, 0.8103585657370518, 0.8103585657370518, 0.8102921646746348, 0.8103585657370518, 0.8104249667994687, 0.8102921646746348, 0.8103585657370518, 0.8103585657370518, 0.8104249667994687, 0.8104249667994687, 0.8104249667994687, 0.8104913678618858, 0.8105577689243028, 0.8104913678618858, 0.8104913678618858, 0.8105577689243028, 0.8105577689243028, 0.8105577689243028, 0.8105577689243028, 0.8105577689243028, 0.8104913678618858, 0.8105577689243028, 0.8105577689243028, 0.8105577689243028, 0.8105577689243028, 0.8104913678618858, 0.8104913678618858, 0.8105577689243028, 0.8105577689243028, 0.8104913678618858, 0.8104913678618858, 0.8104913678618858, 0.8104249667994687, 0.8103585657370518, 0.8102921646746348, 0.8102921646746348, 0.8102257636122178, 0.8102257636122178, 0.8102257636122178, 0.8102921646746348, 0.8103585657370518, 0.8104249667994687, 0.8104913678618858, 0.8104913678618858, 0.8102921646746348, 0.8103585657370518, 0.8103585657370518, 0.8104249667994687, 0.8105577689243028, 0.8105577689243028]
+# validation_accuracies = [0.8047405934029505, 0.805237858445218, 0.8057351234874855, 0.8060666335156639, 0.8063981435438422, 0.8067296535720205, 0.8070611636001989, 0.8073926736283773, 0.8077241836565556, 0.808055693684734, 0.8083872037129123, 0.8087187137410907, 0.809050223769269, 0.8093817337974474, 0.8097132438256257, 0.810044753853804, 0.8103762638819825, 0.8107077739101608, 0.8110392839383391, 0.8113707939665175, 0.8117023039946958, 0.8120338140228742, 0.8123653240510526, 0.8126968340792309, 0.8130283441074092, 0.8133598541355876, 0.813691364163766, 0.8140228741919443, 0.8141886292060335, 0.8143543842201226, 0.8145201392342118, 0.814685894248301, 0.8148516492623902, 0.8150174042764794, 0.8151831592905685, 0.8153489143046577, 0.8155146693187469, 0.815680424332836, 0.8158461793469253, 0.8160119343610144, 0.8161776893751036, 0.8163434443891928, 0.8165091994032819, 0.8166749544173711, 0.8168407094314603, 0.8170064644455495, 0.8171722194596387, 0.8173379744737278, 0.817503729487817, 0.8176694845019061, 0.8178352395159953, 0.8180009945300846, 0.8181667495441737, 0.8183325045582629, 0.8184982595723521, 0.8186640145864412, 0.8188297696005304, 0.8189955246146196, 0.8191612796287088, 0.819327034642798, 0.8194927896568871, 0.8196585446709763, 0.8198242996850654, 0.8199900546991546, 0.8201558097132439, 0.820321564727333, 0.8204873197414222, 0.8206530747555113, 0.8208188297696005, 0.8209845847836897, 0.8211503397977788, 0.8213160948118681, 0.8214818498259573, 0.8216476048400464, 0.8218133598541356, 0.8219791148682247, 0.8221448698823139, 0.8223106248964032, 0.8224763799104923, 0.8226421349245815, 0.8228078899386706, 0.8229736449527598, 0.823139399966849, 0.8233051549809381, 0.8234709099950274, 0.8236366650091165, 0.8238024200232057, 0.8239681750372949, 0.824133930051384, 0.8242996850654732, 0.8244654400795625, 0.8246311950936516, 0.8247969501077408, 0.8249627051218299, 0.8251284601359191, 0.8252942151500083, 0.8254599701640974, 0.8256257251781867, 0.8257914801922758, 0.825957235206365, 0.8261229902204542, 0.8262887452345433, 0.8264545002486325, 0.8266202552627216, 0.8267860102768109, 0.8269517652909001, 0.8271175203049892, 0.8272832753190784, 0.8274490303331675, 0.8276147853472567, 0.827780540361346, 0.8279462953754351, 0.8281120503895243, 0.8282778054036135, 0.8284435604177026, 0.8286093154317918, 0.828775070445881, 0.8289408254599702, 0.8291065804740594, 0.8292723354881485, 0.8294380905022377, 0.8296038455163268, 0.829769600530416, 0.8299353555445053, 0.8301011105585944, 0.8302668655726836, 0.8304326205867727, 0.8305983756008619, 0.8307641306149511, 0.8309298856290402, 0.8310956406431295, 0.8312613956572187, 0.8314271506713078, 0.831592905685397, 0.8317586606994861, 0.8319244157135753, 0.8320901707276646, 0.8322559257417537, 0.8324216807558429, 0.832587435769932, 0.8327531907840212, 0.8329189457981104, 0.8330847008121995, 0.8332504558262888, 0.8334162108403779, 0.8335819658544671, 0.8337477208685563, 0.8339134758826454, 0.8340792308967346, 0.8342449859108239, 0.834410740924913, 0.8345764959390022, 0.8347422509530913, 0.8349080059671805, 0.8350737609812697, 0.8352395159953588, 0.8354052710094481, 0.8355710260235372, 0.8357367810376264, 0.8359025360517156, 0.8360682910658047, 0.8362340460798939, 0.836399801093983, 0.8365655561080723, 0.8367313111221615, 0.8368970661362506, 0.8370628211503398, 0.837228576164429, 0.8373943311785181, 0.8375600861926074]
+
+# sorted_indices = np.argsort(nodes)[::-1]  # reverse sort
+# sorted_nodes = np.array(nodes)[sorted_indices]
+# sorted_train_accuracies = np.array(train_accuracies)[sorted_indices]
+# sorted_test_accuracies = np.array(test_accuracies)[sorted_indices]
+# sorted_validation_accuracies = np.array(validation_accuracies)[sorted_indices]
+
+# plt.figure(figsize=(10, 10))
+# plt.plot(sorted_nodes, sorted_train_accuracies, label='Train Accuracy',  color='blue', marker='o')
+# plt.plot(sorted_nodes, sorted_test_accuracies, label='Test Accuracy',color='green', marker='x')
+# plt.plot(sorted_nodes, sorted_validation_accuracies, label='Validation Accuracy', color='red', marker='s')
+
+# plt.xlabel('Number of Nodes')
+# plt.ylabel('Accuracies')
+# plt.title('Accuracies vs Number of Nodes (Post Pruning) for Maximum Depth = 55')
+# plt.legend()
+
+# plt.grid(True)
+# plt.savefig('C_55.png')
+
+# Data
+ccp_alpha = [0.001, 0.01, 0.1, 0.2]
+train_accuracies = [0.8514235981598905, 0.8397364167599155, 0.7522483318827966, 0.7522483318827966]
+test_accuracies = [0.850066401062417, 0.8392430278884462, 0.7543160690571049, 0.7543160690571049]
+
+# Plot
+plt.figure(figsize=(8, 6))
+plt.plot(ccp_alpha, train_accuracies, marker='o', linestyle='-', color='blue', label='Train Accuracy')
+plt.plot(ccp_alpha, test_accuracies, marker='s', linestyle='--', color='green', label='Test Accuracy')
+
+# Labels and Title
+plt.xlabel("ccp_alpha (Post-Pruning Complexity Parameter)")
+plt.ylabel("Accuracies")
+plt.title("Train and Test Accuracies vs ccp_alpha (Using Sci-Kit Learn)")
+plt.legend()
+plt.grid(True)
+plt.ylim(0.70, 0.88)
+
+# Show plot
+plt.savefig('D_alpha.png')
+
+
+
+
+
+
+
+
+
+
+
+
+import numpy as np
+import math
+import os 
+import pandas as pd
+from PIL import Image 
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import precision_recall_fscore_support
+from sklearn.preprocessing import LabelEncoder
+from neural_network import NeuralNetwork
+
+def load_data_from_folders(root_path):
+    X_data = []
+    y_data = []
+    labels = sorted(os.listdir(root_path))  # '00000', '00001', ..., '00042'
+    
+    for label_str in labels:
+        label_path = os.path.join(root_path, label_str)
+        if not os.path.isdir(label_path):
+            continue
+        label_int = int(label_str)
+        
+        for filename in os.listdir(label_path):
+            if filename.endswith('.jpg'):
+                image_path = os.path.join(label_path, filename)
+                image = Image.open(image_path).resize((28, 28)).convert('RGB')  # ensures consistent shape
+                image_array = np.array(image).astype(np.float32) / 255.0  # normalize to [0, 1]
+                X_data.append(image_array.flatten())  # shape = (2352,)
+                y_data.append(label_int)
+
+    X = np.array(X_data)
+    y = np.array(y_data).reshape(-1, 1)
+
+    # One-hot encode y
+    encoder = OneHotEncoder(sparse_output=False, categories='auto')
+    y_encoded = encoder.fit_transform(y)
+
+    return X, y_encoded
+
+X, y = load_data_from_folders("/Users/aanyakhurana/Desktop/S8/academics/COL774/assignments/A3/Assignment3/data/Q2/train")
+print(X.shape)
+print(y.shape)
+
+# Path to your test folder and CSV
+test_folder = "/Users/aanyakhurana/Desktop/S8/academics/COL774/assignments/A3/Assignment3/data/Q2/test"
+test_csv_path = "/Users/aanyakhurana/Desktop/S8/academics/COL774/assignments/A3/Assignment3/data/Q2/test_labels.csv"
+
+# Image shape (assuming all images are same size)
+IMAGE_SIZE = (28,28)  # or (48, 48), etc. — use the correct shape for your model
+
+# Load test.csv
+df = pd.read_csv(test_csv_path)
+
+# Prepare X (images) and y (labels)
+X_test = []
+y_test = []
+
+for idx, row in df.iterrows():
+    img_path = os.path.join(test_folder, row['image'])
+    image = Image.open(img_path).convert('RGB').resize(IMAGE_SIZE)
+    image_array = np.array(image).flatten()  # flatten to 1D vector
+    X_test.append(image_array)
+    y_test.append(row['label'])
+
+X_test = np.array(X_test)
+y_test = np.array(y_test).reshape(-1,1)
+encoder = OneHotEncoder(sparse_output=False, categories='auto')
+y_test = encoder.fit_transform(y_test)
+# print(X_test.shape)
+# print(y_test.shape)
+
+print([512, 256, 128, 64])
+
+neuralnet = NeuralNetwork(
+    minibatch_size=32,
+    n_features=2352,
+    hidden_layers_list=[512, 256, 128, 64],
+    n_classes=43,
+    epsilon=0.001,
+    max_epochs=5000,
+    alpha=0.01
+)
+
+neuralnet.fit(X, y)
+
+y_predicted_train = neuralnet.predict(X)
+y_true_train = np.argmax(y, axis=1)
+
+precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(y_true_train, y_predicted_train, average=None, labels=np.arange(43))
+# print(precision_train)
+# print(recall_train)
+# print(f1_train)
+# print(np.mean(precision_train))
+# print(np.mean(recall_train))
+# print(np.mean(f1_train))
+
+y_predicted = neuralnet.predict(X_test)
+y_true = np.argmax(y_test, axis=1)
+
+precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(y_true, y_predicted, average=None, labels=np.arange(43))
+# print(precision_train)
+# print(recall_train)
+# print(f1_train)
+# print(np.mean(precision_train))
+# print(np.mean(recall_train))
+# print(np.mean(f1_train))
+
+hidden_layer_configurations = [
+    (512,),
+    (512, 256),
+    (512, 256, 128),
+    (512, 256, 128, 64)
+]
+
+results = {}
+
+for configuration in hidden_layer_configurations:
+    # Initialize MLPClassifier with the given parameters
+    mlp = MLPClassifier(
+        hidden_layer_sizes=configuration,
+        activation='relu',
+        solver='sgd',
+        alpha=0.0,
+        batch_size=32,
+        learning_rate='invscaling',
+        max_iter=30,           # 30 epochs
+        random_state=42
+    )
+    # Train the model
+    mlp.fit(X_train, y_train)
+    
+    # Predict on test set
+    y_pred = mlp.predict(X_test)
+    
+    # Compute per-class precision, recall, and F1
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        y_test, y_pred, average=None, labels=mlp.classes_
+    )
+    
+    # Store results
+    results[config] = {
+        'precision': precision,
+        'recall': recall,
+        'f1_score': f1
+    }
+
+# Example: print results for each configuration
+for configuration, metrics in results.items():
+    print(f"Architecture {configuration}:")
+    print(" Precision:", metrics['precision'])
+    print(" Recall   :", metrics['recall'])
+    print(" F1 Score :", metrics['f1_score'])
+
+
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>

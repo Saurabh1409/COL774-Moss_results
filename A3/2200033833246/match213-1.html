@@ -1,0 +1,2549 @@
+<HTML>
+<HEAD>
+<TITLE>./A3_processed_new_hash/combined_6DF52.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A3_processed_new_hash/combined_UHU23.py<p><PRE>
+
+
+#Part 1
+import numpy as np
+import math
+import sys
+import os
+import pandas as pd
+import matplotlib.pyplot as plotter
+import copy
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import accuracy_score
+from sklearn.tree import DecisionTreeClassifier
+
+class DT_Node:
+    def __init__(self,attr_,type_,children_,ht_,pred_,leaf_,attr_val_,median):
+        self.attr=attr_
+        self.type=type_
+        self.children=children_
+        self.ht=ht_
+        self.pred=pred_
+        self.Leaf=leaf_
+        self.attr_val=attr_val_
+        self.median=median
+        
+class Decision_Tree:
+    def __init__(self,filename,mx_ht=10):
+        self.mx_ht=mx_ht
+        self.cont_attr=set()
+        self.disc_attr=set()
+        self.cont_data=np.empty((1,1))
+        self.disc_data=np.empty((1,1))
+        self.full_data=np.empty((1,1))
+        self.output=np.empty((1,1))
+        self.Tree=None
+        self.compress_dict=None
+        self.process_data(filename)
+
+    def get_attr_to_split(self,full_data,data_cont,data_disc,output):
+        #returns index from 0(included) to 14(excluded)
+        best_attr=-1
+        mn_entropy=1e9
+        median_=None
+        type_=None
+        total_len=len(output)
+        i_disc=0
+        i_cont=0
+        # print("33:",full_data.shape)
+        for i in range(len(full_data[0])):
+            if(i in self.cont_attr):
+                lst=[]
+                for j in range(len(full_data)):
+                    lst.append(int(full_data[j][i]))
+                lst.sort()
+                if len(lst)&gt;1:
+                    median=lst[len(lst)//2-1] #&gt; median, and &lt;=median
+                else:
+                    median=lst[0]
+                data1=[]
+                data2=[]
+                for j in range(len(full_data)):
+                    if int(full_data[j][i])&gt;median:
+                        data1.append(output[j])
+                    else:
+                        data2.append(output[j])
+                n1=len(data1)
+                n2=len(data2)
+                
+                entropy1=self.get_entropy([],[],data1,"C")
+                entropy2=self.get_entropy([],[],data2,"C")
+                entropy=(n1*entropy1)/(n1+n2)+(n2*entropy2)/(n1+n2)
+                if entropy&lt;mn_entropy:
+                    best_attr=i
+                    mn_entropy=entropy
+                    median_=median
+                    type_="C"
+                i_cont+=1
+                continue
+            # lst=list(data_disc[:,i_disc])
+            # s=set(lst)
+            dict_={}
+            for j in range(len(data_disc)):
+                if(data_disc[j][i_disc] not in dict_):
+                    dict_[data_disc[j][i_disc]]=[output[j]]
+                else:
+                    dict_[data_disc[j][i_disc]].append(output[j])
+            entropy=0.0
+            for key in dict_:
+                temp1=self.get_entropy([],[],dict_[key],"D")
+                entropy+=(temp1)*(len(dict_[key])/total_len)
+            if entropy&lt;mn_entropy:
+                best_attr=i
+                mn_entropy=entropy
+                type_="D"
+            i_disc+=1
+        return (type_,best_attr,median_)
+
+    def get_entropy(self,data_cont,data_disc,output,type_):
+        total=len(output)
+        dict_={}
+        for x in output:
+            if(x in dict_):
+                dict_[x]+=1
+            else:
+                dict_[x]=1
+        entropy=0.0
+        # entropy=1.0
+        for x in dict_:
+            p=dict_[x]/total
+            entropy-=p*math.log(p,2)
+            # entropy-=p*p
+        return entropy
+        
+
+    def grow_tree(self,full_data_,data_cont,data_disc,output,curr_ht,attr_val_par):
+        cnt0 = sum(1 for x in output if x == 0)
+        cnt1 = len(output) - cnt0
+        my_prediction = 0 if cnt0 &gt;= cnt1 else 1
+
+        # print(data_cont.shape,data_cont.shape,output.shape,curr_ht)
+        if curr_ht==self.mx_ht or len(output)&lt;=1:
+            # print("Mini acc:",100*round(max(cnt0,cnt1)/(cnt0+cnt1),4))
+            return DT_Node(attr_=None,type_=None,children_=[], ht_=0,pred_=my_prediction,leaf_=True,attr_val_=attr_val_par,median=None)
+        # combined_data = np.hstack((data_cont, data_disc))
+        mx=0
+        mn=1
+        # print("82:",output.shape)
+        for i in range(len(output)):
+            mn=min(mn,output[i])
+            mx=max(mx,output[i])
+        if(mx&lt;=mn):
+            return DT_Node(attr_=None,type_=None,children_=[],ht_=curr_ht+1,pred_=my_prediction,leaf_=True,attr_val_=attr_val_par,median=None)
+        type_,attr,median=self.get_attr_to_split(full_data_,data_cont,data_disc,output)
+        # print("90:",type_,attr, end=' | ')
+        nj=DT_Node(attr_=attr, type_=type_,children_=[],ht_=curr_ht,pred_=my_prediction,leaf_=False,attr_val_=attr_val_par,median=median)
+        if type_=="D":
+            # print("93:", self.disc_data.shape)
+            s=set(list(full_data_[:,attr]))          
+            # print("95:",s)      
+            for vl in s:
+                data_cont1=[]
+                data_disc1=[]
+                full_data1=[]
+                output1=[]
+                for i in range(len(output)):
+                    if full_data_[i][attr]==vl:
+                        data_disc1.append(data_disc[i])
+                        data_cont1.append(data_cont[i])
+                        full_data1.append(full_data_[i])
+                        output1.append(output[i])
+                full_data1=np.array(full_data1)
+                output1=np.array(output1)
+                data_disc1=np.array(data_disc1)
+                data_cont1=np.array(data_cont1)
+                # print("109:",vl,data_disc1.shape,data_cont1.shape,output1.shape)
+                nj.children.append(self.grow_tree(full_data1,data_cont1,data_disc1,output1,curr_ht+1,vl))
+        else:
+            data_cont1=[]
+            data_disc1=[]
+            full_data1=[]
+            output1=[]
+            for i in range(len(output)):
+                if int(full_data_[i][attr])&gt;median:
+                    data_disc1.append(data_disc[i])
+                    data_cont1.append(data_cont[i])
+                    full_data1.append(full_data_[i])
+                    output1.append(output[i])
+            full_data1=np.array(full_data1)
+            output1=np.array(output1)
+            data_disc1=np.array(data_disc1)
+            data_cont1=np.array(data_cont1)
+            nj.children.append(self.grow_tree(full_data1,data_cont1,data_disc1,output1,curr_ht+1,1))
+
+            data_cont1=[]
+            data_disc1=[]
+            full_data1=[]
+            output1=[]
+            for i in range(len(output)):
+                if int(full_data_[i][attr])&lt;=median:
+                    data_disc1.append(data_disc[i])
+                    data_cont1.append(data_cont[i])
+                    full_data1.append(full_data_[i])
+                    output1.append(output[i])
+            full_data1=np.array(full_data1)
+            output1=np.array(output1)
+            data_disc1=np.array(data_disc1)
+            data_cont1=np.array(data_cont1)
+            nj.children.append(self.grow_tree(full_data1,data_cont1,data_disc1,output1,curr_ht+1,0))
+        return nj
+    
+    def process_data(self,filename):
+        try:
+            i=0
+            data_set=[]
+            headings=[]
+            Y=[]
+            complete_data=[]
+            with open(filename, 'r') as file:
+                for line in file:
+                    # print("i:",i)
+                    if (i==0):
+                        i+=1
+                        headings=line.split(",")
+                        headings=headings[0:len(headings)-1]
+                        
+                        for j in range (len(headings)):
+                            data_set.append(set())
+                        continue
+
+                    split_line=line.split(",")
+                    
+                    if "&lt;=50" in split_line[-1]:
+                        Y.append(0)
+                    else:
+                        Y.append(1)
+                    split_line=split_line[0:len(split_line)-1]
+                    # complete_data.append(np.array(split_line))
+                    for i in range((len(split_line))):
+                        data_set[i].add(split_line[i])
+                # self.full_data=np.array(complete_data)
+                for i in range(len(headings)):
+                    if(len(data_set[i])&gt;50):
+                        self.cont_attr.add(i)
+                    else:
+                        self.disc_attr.add(i)
+                dict_={}
+                
+                for i_ in range(len(headings)):                        
+                    if(i_ in self.cont_attr):
+                        continue
+                    j=0
+                    for x in data_set[i_]:
+                        dict_[(i_,x)]=j
+                        j+=1
+                self.compress_dict=dict_
+
+            self.output=np.array(Y)
+            i=0
+            a_=[]
+            b_=[]
+            c_=[]
+            with open(filename, 'r') as file:
+                for line in file:
+                    if i==0:
+                        i+=1
+                        continue
+                    split_line=line.split(",")
+                    split_line=split_line[0:len(split_line)-1]
+                    temp1=[]
+                    temp2=[]
+                    temp3=[]
+                    for i_ in range(len(split_line)):
+                        if i_ in self.cont_attr:
+                            temp1.append(int(split_line[i_]))
+                            temp3.append(int(split_line[i_]))
+                        else:
+                            temp2.append(dict_[(i_,split_line[i_])])
+                            temp3.append(dict_[(i_,split_line[i_])])
+
+                    a_.append(np.array(temp1))
+                    b_.append(np.array(temp2))
+                    c_.append(np.array(temp3))
+            self.cont_data=np.array(a_)
+            self.disc_data=np.array(b_)
+            self.full_data=np.array(c_)
+            print("Cont_attr:",self.cont_attr)
+            print("Disc_attr",self.disc_attr)
+            # print("cont_attr len: ",len(self.cont_attr))
+            # print("disc_attr len: ",len(self.disc_attr))
+            # print("self.cont_data shape:",self.cont_data.shape)
+            # print("self.disc_data shape:",self.disc_data.shape)
+            # print("self.output: ",self.output.shape)
+            # print(self.output[0:50])
+            
+        except FileNotFoundError:
+            print(f"The file {filename} was not found")
+
+    def fit(self):
+        # print("183:",self.output.shape)
+        self.Tree=self.grow_tree(self.full_data,self.cont_data,self.disc_data,self.output,0,-1)
+        
+    def predict(self,testfile,verify_acc):        
+        if (verify_acc==True):
+            data=[]
+            i_=0
+            answers=[]
+            with open(testfile, 'r') as file:
+                for line in file:
+                    if i_!=0:
+                        splitline=(line.split(","))
+                        if "&lt;=50" in splitline[-1]:
+                            answers.append(0)
+                        else:
+                            answers.append(1)
+                        splitline=splitline[0:len(splitline)-1]
+                        data.append(splitline)
+                    i_+=1
+            print("In predict, len of testfile",len(data))
+            predictions=[]
+            
+            # data=data[0:100]
+            # print("217: ",self.compress_dict)
+            # answers=answers[0:100]
+            # print("212:",len(data),len(data[0]))
+            # print(len(data),len(data[0]))
+            idx_=0
+            # print(self.cont_attr,self.disc_attr)
+            for data_rows in data:
+                encoded_row = []
+                for i_ in range(len(data_rows)):
+                    if i_ in self.cont_attr:
+                        encoded_row.append(int(data_rows[i_]))
+                    else:
+                        encoded_row.append(self.compress_dict.get((i_, data_rows[i_]), -1))
+                data_rows=encoded_row
+                idx_+=1
+                n=self.Tree
+                while(n.Leaf == False):
+                    attr_=n.attr
+                    check=False
+                    # print(attr_,n.Leaf,n.ht,n.type,len(n.children),n.pred,n.attr_val,n.median)
+                    if attr_ in self.cont_attr:
+                        # print("328:", data_rows[attr_],type(data_rows[attr_]), n.median)
+                        if int(data_rows[attr_])&gt;n.median:
+                            for x in n.children:
+                                if x.attr_val==1:
+                                    n=x
+                                    check=True
+                                    break
+                        else:
+                            for x in n.children:
+                                if x.attr_val==0:
+                                    n=x
+                                    check=True
+                                    break
+
+                    else:
+                        for x in n.children:
+                            # print("Child:",x.attr,x.Leaf,x.ht,x.type,len(x.children),x.pred,x.attr_val)
+                            # key=(attr_,data_rows[attr_])
+                            # print("247:",type(data_rows[attr_]),data_rows[attr_])
+                            # print(self.compress_dict[key])
+                            if x.attr_val == data_rows[attr_]:
+                                n=x
+                                check=True
+                                break
+                    if check==False:
+                        break
+                predictions.append(n.pred)
+            print("Len of predictions: ",len(predictions))
+            acc=0
+            cnt_=0.0
+            answers_=[]
+            for i in range(len(predictions)):
+                if answers[i]==predictions[i]:
+                    cnt_+=1.0
+                if predictions[i]==0:
+                    answers_.append(" &lt;=50K")
+                else:
+                    answers_.append(" &gt;50K")
+            acc=round((cnt_/len(predictions)),4)*100
+            print("Accuracy: ",acc)
+            return answers_
+        else:
+            data=[]
+            i_=0
+            with open(testfile, 'r') as file:
+                for line in file:
+                    if i_!=0:
+                        splitline=(line.split(","))
+                        data.append(splitline)
+                    i_+=1
+            print("In predict, len of testfile",len(data))
+            predictions=[]
+
+            idx_=0
+            for data_rows in data:
+                encoded_row = []
+                for i_ in range(len(data_rows)):
+                    if i_ in self.cont_attr:
+                        encoded_row.append(int(data_rows[i_]))
+                    else:
+                        encoded_row.append(self.compress_dict.get((i_, data_rows[i_]), -1))
+                data_rows=encoded_row
+                idx_+=1
+                n=self.Tree
+                while(n.Leaf == False):
+                    attr_=n.attr
+                    check=False
+                    if attr_ in self.cont_attr:
+                        if int(data_rows[attr_])&gt;n.median:
+                            for x in n.children:
+                                if x.attr_val==1:
+                                    n=x
+                                    check=True
+                                    break
+                        else:
+                            for x in n.children:
+                                if x.attr_val==0:
+                                    n=x
+                                    check=True
+                                    break
+                    else:
+                        for x in n.children:
+                            if x.attr_val == data_rows[attr_]:
+                                n=x
+                                check=True
+                                break
+                    if check==False:
+                        break
+                predictions.append(n.pred)
+
+            answers_=[]
+            for i in range(len(predictions)):
+                if predictions[i]==0:
+                    answers_.append(" &lt;=50K")
+                else:
+                    answers_.append(" &gt;50K")
+            return answers_
+
+class Decision_Tree_OneHot:
+    def __init__(self, filename, mx_ht=10):
+        self.mx_ht = mx_ht
+        # In the original code these sets held indices of continuous/discrete features.
+        # Here after one-hot, we maintain new indices.
+        self.cont_attr = set()     # original continuous column indices
+        self.disc_attr = set()     # original discrete column indices (before one-hot)
+        self.onehot_map = {}       # for each discrete column that is one-hot encoded, mapping from category to new column index
+        self.onehot_cols = []      # list of original indices that are one-hot encoded
+        # new_index_map: for each original column i, list of new column indices (one value for continuous and binary, many for one-hot)
+        self.new_index_map = {}
+        self.process_data(filename)
+        print("Cont attribute: ",self.cont_attr)
+        print("Disc attribute: ",self.disc_attr)
+
+    def process_data(self, filename):
+        # Read file and build a list of rows and record unique values per column.
+        with open(filename, 'r') as file:
+            lines = file.readlines()
+        header = lines[0].strip().split(',')
+        header = header[:-1]  # remove target column header
+        data = []
+        targets = []
+        unique_vals = {i: set() for i in range(len(header))}
+        for line in lines[1:]:
+            parts = line.strip().split(',')
+            # Target label: assign 0 if "&lt;=50" is in last field, else 1.
+            target_label = 0 if "&lt;=50" in parts[-1] else 1
+            targets.append(target_label)
+            row = parts[:-1]
+            data.append(row)
+            for i, val in enumerate(row):
+                unique_vals[i].add(val)
+        num_samples = len(data)
+        num_original = len(header)
+        # Decide which columns are continuous (we use &gt;50 unique values as before)
+        for i in range(num_original):
+            if len(unique_vals[i]) &gt; 50:
+                self.cont_attr.add(i)
+            else:
+                self.disc_attr.add(i)
+        # Build the new data array (with one-hot for discrete attributes with &gt;2 categories)
+        new_header = []
+        current_index = 0
+        for i in range(num_original):
+            if i in self.cont_attr:
+                self.new_index_map[i] = [current_index]
+                new_header.append(header[i])
+                current_index += 1
+            else:
+                # Discrete attribute
+                if len(unique_vals[i]) &gt; 2:
+                    # One-hot encode this column.
+                    self.onehot_cols.append(i)
+                    mapping = {}
+                    for val in sorted(unique_vals[i]):
+                        mapping[val] = current_index
+                        new_header.append(f"{header[i]}_{val}")
+                        current_index += 1
+                    self.onehot_map[i] = mapping
+                    self.new_index_map[i] = list(mapping.values())
+                else:
+                    # Binary (or single-value) discrete: leave as is.
+                    self.new_index_map[i] = [current_index]
+                    new_header.append(header[i])
+                    current_index += 1
+        num_new = current_index
+        new_data = np.empty((num_samples, num_new), dtype=int)
+        # Fill the new_data matrix row by row.
+        for r in range(num_samples):
+            orig_row = data[r]
+            new_row = [0] * num_new
+            for i in range(num_original):
+                if i in self.cont_attr:
+                    new_row[self.new_index_map[i][0]] = int(orig_row[i])
+                else:
+                    if i in self.onehot_map:
+                        # For one-hot, initialize all bits to 0, then set the bit corresponding to the category.
+                        for col_index in self.new_index_map[i]:
+                            new_row[col_index] = 0
+                        if orig_row[i] in self.onehot_map[i]:
+                            col_idx = self.onehot_map[i][orig_row[i]]
+                            new_row[col_idx] = 1
+                        else:
+                            # Unseen category: leave all zeros.
+                            pass
+                    else:
+                        # For binary discrete: create a simple mapping (sorted order).
+                        sorted_vals = sorted(list(unique_vals[i]))
+                        mapping = {sorted_vals[0]: 0}
+                        if len(sorted_vals) == 2:
+                            mapping[sorted_vals[1]] = 1
+                        new_row[self.new_index_map[i][0]] = mapping.get(orig_row[i], 0)
+            new_data[r, :] = new_row
+        self.full_data = new_data
+        self.output = np.array(targets)
+        # Create new sets for feature indices in the transformed dataset.
+        self.cont_attr_new = set()
+        self.disc_attr_new = set()
+        for i in range(num_original):
+            if i in self.cont_attr:
+                self.cont_attr_new.add(self.new_index_map[i][0])
+            else:
+                if i in self.onehot_map:
+                    for idx in self.new_index_map[i]:
+                        self.disc_attr_new.add(idx)
+                else:
+                    self.disc_attr_new.add(self.new_index_map[i][0])
+        # Also build cont_data and disc_data matrices (using the new feature indices)
+        cont_indices = sorted(list(self.cont_attr_new))
+        disc_indices = sorted(list(self.disc_attr_new))
+        self.cont_data = self.full_data[:, cont_indices]
+        self.disc_data = self.full_data[:, disc_indices]
+        self.new_header = new_header  # can be useful for debugging
+
+    def get_entropy(self, data_cont, data_disc, output, type_):
+        total = len(output)
+        counts = {}
+        for x in output:
+            counts[x] = counts.get(x, 0) + 1
+        entropy = 0.0
+        for x in counts:
+            p = counts[x] / total
+            if (counts[x] == total or counts[x] ==0):
+                return 0
+            entropy -= p * math.log(p, 2)
+        return entropy
+
+    def get_attr_to_split(self, full_data, data_cont, data_disc, output):
+        best_attr = -1
+        mn_entropy = 1e9
+        median_ = None
+        type_ = None
+        total_len = len(output)
+        # Iterate over every column (in the transformed data)
+        for i in range(full_data.shape[1]):
+            if i in self.cont_attr_new:
+                # Continuous attribute: try a two-way split using the median.
+                lst = [int(full_data[j][i]) for j in range(len(full_data))]
+                lst.sort()
+                if len(lst) &gt; 1:
+                    median = lst[len(lst)//2 - 1]
+                else:
+                    median = lst[0]
+                data1 = []
+                data2 = []
+                for j in range(len(full_data)):
+                    if int(full_data[j][i]) &gt; median:
+                        data1.append(output[j])
+                    else:
+                        data2.append(output[j])
+                n1 = len(data1)
+                n2 = len(data2)
+                entropy1 = self.get_entropy([], [], data1, "C")
+                entropy2 = self.get_entropy([], [], data2, "C")
+                entropy = (n1 * entropy1) / (n1 + n2) + (n2 * entropy2) / (n1 + n2)
+                if entropy &lt; mn_entropy:
+                    best_attr = i
+                    mn_entropy = entropy
+                    median_ = median
+                    type_ = "C"
+            else:
+                # Discrete attribute: perform a k-way split.
+                groups = {}
+                for j in range(len(full_data)):
+                    key = full_data[j][i]
+                    groups.setdefault(key, []).append(output[j])
+                entropy = 0.0
+                for key in groups:
+                    group_entropy = self.get_entropy([], [], groups[key], "D")
+                    entropy += group_entropy * (len(groups[key]) / total_len)
+                if entropy &lt; mn_entropy:
+                    best_attr = i
+                    mn_entropy = entropy
+                    type_ = "D"
+        return (type_, best_attr, median_)
+
+    def grow_tree(self, full_data, data_cont, data_disc, output, curr_ht, attr_val_par):
+        cnt0 = sum(1 for x in output if x == 0)
+        cnt1 = len(output) - cnt0
+        my_prediction = 0 if cnt0 &gt;= cnt1 else 1
+        if curr_ht == self.mx_ht or len(output)&lt;=1:
+            return DT_Node(attr_=None, type_=None, children_=[], ht_=0,
+                           pred_=my_prediction, leaf_=True, attr_val_=attr_val_par, median=None)
+        # If all outputs are the same, make a leaf.
+        if max(output) &lt;= min(output):
+            return DT_Node(attr_=None, type_=None, children_=[], ht_=curr_ht+1,
+                           pred_=my_prediction, leaf_=True, attr_val_=attr_val_par, median=None)
+        split_type, attr, median = self.get_attr_to_split(full_data, data_cont, data_disc, output)
+        node = DT_Node(attr_=attr, type_=split_type, children_=[], ht_=curr_ht,
+                       pred_=my_prediction, leaf_=False, attr_val_=attr_val_par, median=median)
+        if split_type == "D":
+            # For a discrete split, create one child per category value.
+            values = set(full_data[:, attr])
+            for val in values:
+                sub_full = []
+                sub_cont = []
+                sub_disc = []
+                sub_output = []
+                for i in range(len(output)):
+                    if full_data[i][attr] == val:
+                        sub_full.append(full_data[i])
+                        sub_cont.append(data_cont[i])
+                        sub_disc.append(data_disc[i])
+                        sub_output.append(output[i])
+                sub_full = np.array(sub_full)
+                sub_cont = np.array(sub_cont)
+                sub_disc = np.array(sub_disc)
+                sub_output = np.array(sub_output)
+                child = self.grow_tree(sub_full, sub_cont, sub_disc, sub_output, curr_ht+1, val)
+                node.children.append(child)
+        else:
+            # For a continuous split, split using the median threshold.
+            sub_full1 = []
+            sub_cont1 = []
+            sub_disc1 = []
+            sub_output1 = []
+            sub_full2 = []
+            sub_cont2 = []
+            sub_disc2 = []
+            sub_output2 = []
+            for i in range(len(output)):
+                if int(full_data[i][attr]) &gt; median:
+                    sub_full1.append(full_data[i])
+                    sub_cont1.append(data_cont[i])
+                    sub_disc1.append(data_disc[i])
+                    sub_output1.append(output[i])
+                else:
+                    sub_full2.append(full_data[i])
+                    sub_cont2.append(data_cont[i])
+                    sub_disc2.append(data_disc[i])
+                    sub_output2.append(output[i])
+            sub_full1 = np.array(sub_full1)
+            sub_cont1 = np.array(sub_cont1)
+            sub_disc1 = np.array(sub_disc1)
+            sub_output1 = np.array(sub_output1)
+            sub_full2 = np.array(sub_full2)
+            sub_cont2 = np.array(sub_cont2)
+            sub_disc2 = np.array(sub_disc2)
+            sub_output2 = np.array(sub_output2)
+            node.children.append(self.grow_tree(sub_full1, sub_cont1, sub_disc1, sub_output1, curr_ht+1, 1))
+            node.children.append(self.grow_tree(sub_full2, sub_cont2, sub_disc2, sub_output2, curr_ht+1, 0))
+        return node
+
+    def fit(self):
+        self.Tree = self.grow_tree(self.full_data, self.cont_data, self.disc_data, self.output, 0, -1)
+
+    def predict(self, testfile, verify_acc):
+        if verify_acc:
+            # Process the test file using the same one-hot encoding mappings.
+            with open(testfile, 'r') as file:
+                lines = file.readlines()
+            header = lines[0].strip().split(',')[:-1]
+            test_data_raw = []
+            targets = []
+            for line in lines[1:]:
+                parts = line.strip().split(',')
+                test_data_raw.append(parts[:-1])
+                target_label = 0 if "&lt;=50" in parts[-1] else 1
+                targets.append(target_label)
+            num_samples = len(test_data_raw)
+            num_cols_new = len(self.new_header)
+            new_data = np.empty((num_samples, num_cols_new), dtype=int)
+            for r in range(num_samples):
+                orig_row = test_data_raw[r]
+                new_row = [0] * num_cols_new
+                for i in range(len(header)):
+                    if i in self.cont_attr:
+                        new_row[self.new_index_map[i][0]] = int(orig_row[i])
+                    else:
+                        if i in self.onehot_map:
+                            # For one-hot, set the corresponding column if category seen in training.
+                            for col_index in self.new_index_map[i]:
+                                new_row[col_index] = 0
+                            if orig_row[i] in self.onehot_map[i]:
+                                col_idx = self.onehot_map[i][orig_row[i]]
+                                new_row[col_idx] = 1
+                        else:
+                            # For binary discrete, we use a simple mapping (as in training).
+                            sorted_vals = sorted(list({v for v in orig_row}))
+                            mapping = {}
+                            if len(sorted_vals) == 2:
+                                mapping[sorted_vals[0]] = 0
+                                mapping[sorted_vals[1]] = 1
+                            else:
+                                mapping[sorted_vals[0]] = 0
+                            new_row[self.new_index_map[i][0]] = mapping.get(orig_row[i], 0)
+                new_data[r, :] = new_row
+            predictions = []
+            for r in range(num_samples):
+                current_node = self.Tree
+                while not current_node.Leaf:
+                    attr = current_node.attr
+                    found = False
+                    if attr in self.cont_attr_new:
+                        if int(new_data[r][attr]) &gt; current_node.median:
+                            for child in current_node.children:
+                                if child.attr_val == 1:
+                                    current_node = child
+                                    found = True
+                                    break
+                        else:
+                            for child in current_node.children:
+                                if child.attr_val == 0:
+                                    current_node = child
+                                    found = True
+                                    break
+                    else:
+                        for child in current_node.children:
+                            if child.attr_val == new_data[r][attr]:
+                                current_node = child
+                                found = True
+                                break
+                    if not found:
+                        break
+                predictions.append(current_node.pred)
+            acc = sum(1 for i in range(num_samples) if predictions[i] == targets[i]) / num_samples * 100
+            print("Test Accuracy: {:.2f}%".format(acc))
+            answers_=[]
+            for i in range(len(predictions)):
+                if predictions[i]==0:
+                    answers_.append(" &lt;=50K")
+                else:
+                    answers_.append(" &gt;50K")
+            return answers_
+        else:
+            # Process the test file using the same one-hot encoding mappings.
+            with open(testfile, 'r') as file:
+                lines = file.readlines()
+            header = lines[0].strip().split(',')  # Do not remove the last column
+            test_data_raw = []
+            for line in lines[1:]:
+                parts = line.strip().split(',')
+                test_data_raw.append(parts)  # Include all columns
+            num_samples = len(test_data_raw)
+            num_cols_new = len(self.new_header)
+            new_data = np.empty((num_samples, num_cols_new), dtype=int)
+            for r in range(num_samples):
+                orig_row = test_data_raw[r]
+                new_row = [0] * num_cols_new
+                for i in range(len(header)):
+                    if i in self.cont_attr:
+                        new_row[self.new_index_map[i][0]] = int(orig_row[i])
+                    else:
+                        if i in self.onehot_map:
+                            # For one-hot, set the corresponding column if category seen in training.
+                            for col_index in self.new_index_map[i]:
+                                new_row[col_index] = 0
+                            if orig_row[i] in self.onehot_map[i]:
+                                col_idx = self.onehot_map[i][orig_row[i]]
+                                new_row[col_idx] = 1
+                        else:
+                            # For binary discrete, we use a simple mapping (as in training).
+                            sorted_vals = sorted(list({v for v in orig_row}))
+                            mapping = {}
+                            if len(sorted_vals) == 2:
+                                mapping[sorted_vals[0]] = 0
+                                mapping[sorted_vals[1]] = 1
+                            else:
+                                mapping[sorted_vals[0]] = 0
+                            new_row[self.new_index_map[i][0]] = mapping.get(orig_row[i], 0)
+                new_data[r, :] = new_row
+            predictions = []
+            for r in range(num_samples):
+                current_node = self.Tree
+                while not current_node.Leaf:
+                    attr = current_node.attr
+                    found = False
+                    if attr in self.cont_attr_new:
+                        if int(new_data[r][attr]) &gt; current_node.median:
+                            for child in current_node.children:
+                                if child.attr_val == 1:
+                                    current_node = child
+                                    found = True
+                                    break
+                        else:
+                            for child in current_node.children:
+                                if child.attr_val == 0:
+                                    current_node = child
+                                    found = True
+                                    break
+                    else:
+                        for child in current_node.children:
+                            if child.attr_val == new_data[r][attr]:
+                                current_node = child
+                                found = True
+                                break
+                    if not found:
+                        break
+                predictions.append(current_node.pred)
+            answers_ = []
+            for i in range(len(predictions)):
+                if predictions[i] == 0:
+                    answers_.append(" &lt;=50K")
+                else:
+                    answers_.append(" &gt;50K")
+            return answers_
+
+class Decision_Tree_Prune:
+    def __init__(self, filename, mx_ht=10):
+        self.mx_ht = mx_ht
+        # Original indices for continuous/discrete features (before one-hot)
+        self.cont_attr = set()     
+        self.disc_attr = set()     
+        self.onehot_map = {}       # for discrete columns with &gt;2 categories: mapping from category to new column index
+        self.onehot_cols = []      # list of original indices that are one-hot encoded
+        self.new_index_map = {}    # for each original column i, list of new column indices after transformation
+        self.process_data(filename)
+        print("Cont attribute: ", self.cont_attr)
+        print("Disc attribute: ", self.disc_attr)
+
+    def process_data(self, filename):
+        with open(filename, 'r') as file:
+            lines = file.readlines()
+        header = lines[0].strip().split(',')
+        header = header[:-1]  # remove target column header
+        data = []
+        targets = []
+        unique_vals = {i: set() for i in range(len(header))}
+        for line in lines[1:]:
+            parts = line.strip().split(',')
+            target_label = 0 if "&lt;=50" in parts[-1] else 1
+            targets.append(target_label)
+            row = parts[:-1]
+            data.append(row)
+            for i, val in enumerate(row):
+                unique_vals[i].add(val)
+        num_samples = len(data)
+        num_original = len(header)
+        # Determine continuous vs. discrete columns (using &gt;50 unique values as threshold)
+        for i in range(num_original):
+            if len(unique_vals[i]) &gt; 50:
+                self.cont_attr.add(i)
+            else:
+                self.disc_attr.add(i)
+        new_header = []
+        current_index = 0
+        for i in range(num_original):
+            if i in self.cont_attr:
+                self.new_index_map[i] = [current_index]
+                new_header.append(header[i])
+                current_index += 1
+            else:
+                # Discrete attribute
+                if len(unique_vals[i]) &gt; 2:
+                    # One-hot encode
+                    self.onehot_cols.append(i)
+                    mapping = {}
+                    for val in sorted(unique_vals[i]):
+                        mapping[val] = current_index
+                        new_header.append(f"{header[i]}_{val}")
+                        current_index += 1
+                    self.onehot_map[i] = mapping
+                    self.new_index_map[i] = list(mapping.values())
+                else:
+                    # Binary discrete: keep as one column
+                    self.new_index_map[i] = [current_index]
+                    new_header.append(header[i])
+                    current_index += 1
+        num_new = current_index
+        new_data = np.empty((num_samples, num_new), dtype=int)
+        for r in range(num_samples):
+            orig_row = data[r]
+            new_row = [0] * num_new
+            for i in range(num_original):
+                if i in self.cont_attr:
+                    new_row[self.new_index_map[i][0]] = int(orig_row[i])
+                else:
+                    if i in self.onehot_map:
+                        for col_index in self.new_index_map[i]:
+                            new_row[col_index] = 0
+                        if orig_row[i] in self.onehot_map[i]:
+                            col_idx = self.onehot_map[i][orig_row[i]]
+                            new_row[col_idx] = 1
+                    else:
+                        sorted_vals = sorted(list(unique_vals[i]))
+                        mapping = {sorted_vals[0]: 0}
+                        if len(sorted_vals) == 2:
+                            mapping[sorted_vals[1]] = 1
+                        new_row[self.new_index_map[i][0]] = mapping.get(orig_row[i], 0)
+            new_data[r, :] = new_row
+        self.full_data = new_data
+        self.output = np.array(targets)
+        # Build new sets for indices in the transformed data
+        self.cont_attr_new = set()
+        self.disc_attr_new = set()
+        for i in range(num_original):
+            if i in self.cont_attr:
+                self.cont_attr_new.add(self.new_index_map[i][0])
+            else:
+                if i in self.onehot_map:
+                    for idx in self.new_index_map[i]:
+                        self.disc_attr_new.add(idx)
+                else:
+                    self.disc_attr_new.add(self.new_index_map[i][0])
+        cont_indices = sorted(list(self.cont_attr_new))
+        disc_indices = sorted(list(self.disc_attr_new))
+        self.cont_data = self.full_data[:, cont_indices]
+        self.disc_data = self.full_data[:, disc_indices]
+        self.new_header = new_header
+
+    def get_entropy(self, data_cont, data_disc, output, type_):
+        total = len(output)
+        counts = {}
+        for x in output:
+            counts[x] = counts.get(x, 0) + 1
+        entropy = 0.0
+        for x in counts:
+            p = counts[x] / total
+            # If node is pure or empty, entropy is zero.
+            if counts[x] == total or counts[x] == 0:
+                return 0
+            entropy -= p * math.log(p, 2)
+        return entropy
+
+    def get_attr_to_split(self, full_data, data_cont, data_disc, output):
+        best_attr = -1
+        mn_entropy = 1e9
+        median_ = None
+        type_ = None
+        total_len = len(output)
+        for i in range(full_data.shape[1]):
+            if i in self.cont_attr_new:
+                lst = [int(full_data[j][i]) for j in range(len(full_data))]
+                lst.sort()
+                if len(lst) &gt; 1:
+                    median = lst[len(lst)//2 - 1]
+                else:
+                    median = lst[0]
+                data1 = []
+                data2 = []
+                for j in range(len(full_data)):
+                    if int(full_data[j][i]) &gt; median:
+                        data1.append(output[j])
+                    else:
+                        data2.append(output[j])
+                n1 = len(data1)
+                n2 = len(data2)
+                entropy1 = self.get_entropy([], [], data1, "C")
+                entropy2 = self.get_entropy([], [], data2, "C")
+                entropy = (n1 * entropy1) / (n1 + n2) + (n2 * entropy2) / (n1 + n2)
+                if entropy &lt; mn_entropy:
+                    best_attr = i
+                    mn_entropy = entropy
+                    median_ = median
+                    type_ = "C"
+            else:
+                groups = {}
+                for j in range(len(full_data)):
+                    key = full_data[j][i]
+                    groups.setdefault(key, []).append(output[j])
+                entropy = 0.0
+                for key in groups:
+                    group_entropy = self.get_entropy([], [], groups[key], "D")
+                    entropy += group_entropy * (len(groups[key]) / total_len)
+                if entropy &lt; mn_entropy:
+                    best_attr = i
+                    mn_entropy = entropy
+                    type_ = "D"
+        return (type_, best_attr, median_)
+
+    def grow_tree(self, full_data, data_cont, data_disc, output, curr_ht, attr_val_par):
+        cnt0 = sum(1 for x in output if x == 0)
+        cnt1 = len(output) - cnt0
+        my_prediction = 0 if cnt0 &gt;= cnt1 else 1
+        if curr_ht == self.mx_ht or len(output) &lt;= 1:
+            return DT_Node(attr_=None, type_=None, children_=[], ht_=0,
+                           pred_=my_prediction, leaf_=True, attr_val_=attr_val_par, median=None)
+        if max(output) &lt;= min(output):
+            return DT_Node(attr_=None, type_=None, children_=[], ht_=curr_ht+1,
+                           pred_=my_prediction, leaf_=True, attr_val_=attr_val_par, median=None)
+        split_type, attr, median = self.get_attr_to_split(full_data, data_cont, data_disc, output)
+        node = DT_Node(attr_=attr, type_=split_type, children_=[], ht_=curr_ht,
+                       pred_=my_prediction, leaf_=False, attr_val_=attr_val_par, median=median)
+        if split_type == "D":
+            values = set(full_data[:, attr])
+            for val in values:
+                sub_full = []
+                sub_cont = []
+                sub_disc = []
+                sub_output = []
+                for i in range(len(output)):
+                    if full_data[i][attr] == val:
+                        sub_full.append(full_data[i])
+                        sub_cont.append(data_cont[i])
+                        sub_disc.append(data_disc[i])
+                        sub_output.append(output[i])
+                sub_full = np.array(sub_full)
+                sub_cont = np.array(sub_cont)
+                sub_disc = np.array(sub_disc)
+                sub_output = np.array(sub_output)
+                child = self.grow_tree(sub_full, sub_cont, sub_disc, sub_output, curr_ht+1, val)
+                node.children.append(child)
+        else:
+            sub_full1, sub_cont1, sub_disc1, sub_output1 = [], [], [], []
+            sub_full2, sub_cont2, sub_disc2, sub_output2 = [], [], [], []
+            for i in range(len(output)):
+                if int(full_data[i][attr]) &gt; median:
+                    sub_full1.append(full_data[i])
+                    sub_cont1.append(data_cont[i])
+                    sub_disc1.append(data_disc[i])
+                    sub_output1.append(output[i])
+                else:
+                    sub_full2.append(full_data[i])
+                    sub_cont2.append(data_cont[i])
+                    sub_disc2.append(data_disc[i])
+                    sub_output2.append(output[i])
+            sub_full1 = np.array(sub_full1)
+            sub_cont1 = np.array(sub_cont1)
+            sub_disc1 = np.array(sub_disc1)
+            sub_output1 = np.array(sub_output1)
+            sub_full2 = np.array(sub_full2)
+            sub_cont2 = np.array(sub_cont2)
+            sub_disc2 = np.array(sub_disc2)
+            sub_output2 = np.array(sub_output2)
+            node.children.append(self.grow_tree(sub_full1, sub_cont1, sub_disc1, sub_output1, curr_ht+1, 1))
+            node.children.append(self.grow_tree(sub_full2, sub_cont2, sub_disc2, sub_output2, curr_ht+1, 0))
+        return node
+
+    def fit(self):
+        self.Tree = self.grow_tree(self.full_data, self.cont_data, self.disc_data, self.output, 0, -1)
+
+    def predict(self, testfile):
+        with open(testfile, 'r') as file:
+            lines = file.readlines()
+        header = lines[0].strip().split(',')[:-1]
+        test_data_raw = []
+        targets = []
+        for line in lines[1:]:
+            parts = line.strip().split(',')
+            test_data_raw.append(parts[:-1])
+            target_label = 0 if "&lt;=50" in parts[-1] else 1
+            targets.append(target_label)
+        num_samples = len(test_data_raw)
+        num_cols_new = len(self.new_header)
+        new_data = np.empty((num_samples, num_cols_new), dtype=int)
+        for r in range(num_samples):
+            orig_row = test_data_raw[r]
+            new_row = [0] * num_cols_new
+            for i in range(len(header)):
+                if i in self.cont_attr:
+                    new_row[self.new_index_map[i][0]] = int(orig_row[i])
+                else:
+                    if i in self.onehot_map:
+                        for col_index in self.new_index_map[i]:
+                            new_row[col_index] = 0
+                        if orig_row[i] in self.onehot_map[i]:
+                            col_idx = self.onehot_map[i][orig_row[i]]
+                            new_row[col_idx] = 1
+                    else:
+                        sorted_vals = sorted(list({v for v in orig_row}))
+                        mapping = {}
+                        if len(sorted_vals) == 2:
+                            mapping[sorted_vals[0]] = 0
+                            mapping[sorted_vals[1]] = 1
+                        else:
+                            mapping[sorted_vals[0]] = 0
+                        new_row[self.new_index_map[i][0]] = mapping.get(orig_row[i], 0)
+            new_data[r, :] = new_row
+        predictions = []
+        for r in range(num_samples):
+            current_node = self.Tree
+            while not current_node.Leaf:
+                attr = current_node.attr
+                found = False
+                if attr in self.cont_attr_new:
+                    if int(new_data[r][attr]) &gt; current_node.median:
+                        for child in current_node.children:
+                            if child.attr_val == 1:
+                                current_node = child
+                                found = True
+                                break
+                    else:
+                        for child in current_node.children:
+                            if child.attr_val == 0:
+                                current_node = child
+                                found = True
+                                break
+                else:
+                    for child in current_node.children:
+                        if child.attr_val == new_data[r][attr]:
+                            current_node = child
+                            found = True
+                            break
+                if not found:
+                    break
+            predictions.append(current_node.pred)
+        acc = sum(1 for i in range(num_samples) if predictions[i] == targets[i]) / num_samples * 100
+        print("Test Accuracy: {:.2f}%".format(acc))
+        answers_ = []
+        for i in range(len(predictions)):
+            if predictions[i] == 0:
+                answers_.append(" &lt;=50K")
+            else:
+                answers_.append(" &gt;50K")
+        return answers_        
+
+    def get_accuracy(self, tree, dataset_file):
+        # Similar to predict but returns accuracy without printing.
+        with open(dataset_file, 'r') as file:
+            lines = file.readlines()
+        header = lines[0].strip().split(',')[:-1]
+        data_raw = []
+        targets = []
+        for line in lines[1:]:
+            parts = line.strip().split(',')
+            data_raw.append(parts[:-1])
+            target_label = 0 if "&lt;=50" in parts[-1] else 1
+            targets.append(target_label)
+        num_samples = len(data_raw)
+        num_cols_new = len(self.new_header)
+        new_data = np.empty((num_samples, num_cols_new), dtype=int)
+        for r in range(num_samples):
+            orig_row = data_raw[r]
+            new_row = [0] * num_cols_new
+            for i in range(len(header)):
+                if i in self.cont_attr:
+                    new_row[self.new_index_map[i][0]] = int(orig_row[i])
+                else:
+                    if i in self.onehot_map:
+                        for col_index in self.new_index_map[i]:
+                            new_row[col_index] = 0
+                        if orig_row[i] in self.onehot_map[i]:
+                            col_idx = self.onehot_map[i][orig_row[i]]
+                            new_row[col_idx] = 1
+                    else:
+                        sorted_vals = sorted(list({v for v in orig_row}))
+                        mapping = {}
+                        if len(sorted_vals) == 2:
+                            mapping[sorted_vals[0]] = 0
+                            mapping[sorted_vals[1]] = 1
+                        else:
+                            mapping[sorted_vals[0]] = 0
+                        new_row[self.new_index_map[i][0]] = mapping.get(orig_row[i], 0)
+            new_data[r, :] = new_row
+        predictions = []
+        for r in range(num_samples):
+            current_node = tree
+            while not current_node.Leaf:
+                attr = current_node.attr
+                found = False
+                if attr in self.cont_attr_new:
+                    if int(new_data[r][attr]) &gt; current_node.median:
+                        for child in current_node.children:
+                            if child.attr_val == 1:
+                                current_node = child
+                                found = True
+                                break
+                    else:
+                        for child in current_node.children:
+                            if child.attr_val == 0:
+                                current_node = child
+                                found = True
+                                break
+                else:
+                    for child in current_node.children:
+                        if child.attr_val == new_data[r][attr]:
+                            current_node = child
+                            found = True
+                            break
+                if not found:
+                    break
+            predictions.append(current_node.pred)
+        acc = sum(1 for i in range(num_samples) if predictions[i] == targets[i]) / num_samples * 100
+        return acc
+
+    def count_nodes(self, node):
+        # Recursively count nodes in the tree.
+        if node.Leaf:
+            return 1
+        count = 1
+        for child in node.children:
+            count += self.count_nodes(child)
+        return count
+
+    def get_nonleaf_nodes(self, node, parent=None, child_index=None):
+        # Traverse tree and return a list of tuples: (node, parent, child_index)
+        nodes = []
+        if not node.Leaf:
+            nodes.append((node, parent, child_index))
+            for idx, child in enumerate(node.children):
+                nodes.extend(self.get_nonleaf_nodes(child, node, idx))
+        return nodes
+
+    def post_prune(self, train_file, valid_file, test_file):
+        # Record accuracies at each pruning step.
+        # train_acc_list = []
+        valid_acc_list = []
+        # test_acc_list = []
+        node_count_list = []
+        
+        current_tree = self.Tree
+        current_valid_acc = self.get_accuracy(current_tree, valid_file)
+        current_train_acc = self.get_accuracy(current_tree, train_file)
+        current_test_acc = self.get_accuracy(current_tree, test_file)
+        # train_acc_list.append(current_train_acc)
+        valid_acc_list.append(current_valid_acc)
+        # test_acc_list.append(current_test_acc)
+        node_count_list.append(self.count_nodes(current_tree))
+        print("Before pruning: Train={:.2f}%, Valid={:.2f}%, Test={:.2f}%, Nodes={}".format(
+            current_train_acc, current_valid_acc, current_test_acc, node_count_list[-1]))
+        
+        improved = True
+        while improved:
+            improved = False
+            candidates = self.get_nonleaf_nodes(current_tree)
+            print("candidates: ",len(candidates))
+            best_candidate = None
+            best_valid_acc = current_valid_acc
+            # Try pruning each candidate.
+            i1=0
+            for (node, parent, child_idx) in candidates:
+                i1+=1
+                # Create a deep copy of the current tree.
+                temp_tree = copy.deepcopy(current_tree)
+                # In the copied tree, find the corresponding candidate node.
+                candidate_path = self.get_node_path(current_tree, node)
+                if candidate_path is None:
+                    continue
+                # Prune the candidate: replace it with a leaf node with its stored majority prediction.
+                self.prune_node(temp_tree, candidate_path)
+                temp_valid_acc = self.get_accuracy(temp_tree, valid_file)
+                if i1%100==0:
+                    print(i1)
+                if temp_valid_acc &gt; best_valid_acc:
+                    best_valid_acc = temp_valid_acc
+                    best_candidate = candidate_path
+            # If a candidate produced improvement, update the tree.
+            if best_candidate is not None and best_valid_acc &gt; current_valid_acc:
+                current_tree = copy.deepcopy(current_tree)
+                self.prune_node(current_tree, best_candidate)
+                current_valid_acc = best_valid_acc
+                # current_train_acc = self.get_accuracy(current_tree, train_file)
+                # current_test_acc = self.get_accuracy(current_tree, test_file)
+                # train_acc_list.append(current_train_acc)
+                valid_acc_list.append(current_valid_acc)
+                # test_acc_list.append(current_test_acc)
+                node_count_list.append(self.count_nodes(current_tree))
+                print("Pruned: Nodes={}, Train={:.2f}%, Valid={:.2f}%, Test={:.2f}%".format(
+                    node_count_list[-1], current_train_acc, current_valid_acc, current_test_acc))
+                improved = True
+            else:
+                break
+        self.Tree = current_tree
+        # Plot accuracies vs. node count.
+        plotter.figure(figsize=(10,6))
+        # plotter.plot(node_count_list, train_acc_list, label="Train Accuracy", marker='o')
+        plotter.plot(node_count_list, valid_acc_list, label="Validation Accuracy", marker='o')
+        # plotter.plot(node_count_list, test_acc_list, label="Test Accuracy", marker='o')
+        plotter.xlabel("Number of Nodes in Tree")
+        plotter.ylabel("Accuracy (%)")
+        plotter.title("Post-Pruning: Accuracy vs. Tree Size")
+        plotter.legend()
+        plotter.gca().invert_xaxis()  # as pruning reduces node count
+        # plotter.show()
+        plotter.savefig("post_pruning_accuracy.png")
+        plotter.close()
+    
+    def get_node_path(self, root, target_node):
+        """
+        Returns the path to target_node in the tree as a list of (parent, child_index) tuples.
+        If target_node is root, returns empty list.
+        """
+        path = []
+        found = self._dfs_find(root, target_node, path)
+        return path if found else None
+
+    def _dfs_find(self, current, target, path):
+        if current is target:
+            return True
+        if current.Leaf:
+            return False
+        for idx, child in enumerate(current.children):
+            path.append((current, idx))
+            if self._dfs_find(child, target, path):
+                return True
+            path.pop()
+        return False
+
+    def prune_node(self, tree, path):
+        if not path:
+            # Prune root: replace entire tree with a leaf.
+            majority = tree.pred
+            tree.children = []
+            tree.Leaf = True
+            tree.attr = None
+            tree.type = None
+            tree.median = None
+            tree.attr_val = -1
+        else:
+            parent, child_idx = path[-1]
+            # In the copied tree, navigate to the candidate node.
+            candidate = self._get_node_by_path(tree, path)
+            # Replace candidate with a leaf node.
+            pruned_node = DT_Node(attr_=None, type_=None, children_=[], ht_=candidate.ht,
+                                  pred_=candidate.pred, leaf_=True, attr_val_=candidate.attr_val, median=None)
+            # Now update the parent's child pointer.
+            node_in_tree = self._get_node_by_path(tree, path[:-1])
+            node_in_tree.children[child_idx] = pruned_node
+
+    def _get_node_by_path(self, tree, path):
+        current = tree
+        for (parent, idx) in path:
+            current = current.children[idx]
+        return current
+
+
+
+def load_data_d(filename,verify_acc,DISC_ATTR, CONT_ATTR):
+    df = pd.read_csv(filename)
+    
+    # Process discrete attributes (convert to category codes)
+    for col in DISC_ATTR:
+        col_name = df.columns[col]
+        df[col_name] = df[col_name].astype('category').cat.codes
+    
+    # Ensure continuous features are numeric
+    for col in CONT_ATTR:
+        col_name = df.columns[col]
+        df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
+    
+    # Process target column (last column, index 14)
+    target_col = df.columns[14]
+    df[target_col] = df[target_col].apply(lambda x: 0 if "&lt;=50" in x else 1)
+
+    # Split features and target.
+    X = df.iloc[:, :14]
+    y = df.iloc[:, 14]
+    return X, y
+
+def load_data_d_test(filename,verify_acc,DISC_ATTR, CONT_ATTR):
+            df = pd.read_csv(filename)
+            
+            # Process discrete attributes (convert to category codes)
+            for col in DISC_ATTR:
+                col_name = df.columns[col]
+                df[col_name] = df[col_name].astype('category').cat.codes
+            
+            # Ensure continuous features are numeric
+            for col in CONT_ATTR:
+                col_name = df.columns[col]
+                df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
+            
+            #split into features and target, if verif y_acc is true, otherwise, all columns are features
+            # If verifying accuracy, convert target column to binary (0 or 1)
+            if verify_acc:
+                # Process target column (last column, index 14)
+                target_col = df.columns[14]
+                df[target_col] = df[target_col].apply(lambda x: 0 if "&lt;=50" in x else 1)
+
+                # Split features and target.
+                X = df.iloc[:, :14]
+                y = df.iloc[:, 14]
+            else:
+                # If not verifying accuracy, use all columns as features
+                X = df.iloc[:, :]
+                y = None
+            return X, y
+
+def main_mx_ht_d(train_file,valid_file,test_file,output_folder,CONT_ATTR,DISC_ATTR,verify_acc):
+    train_accs = []
+    test_accs = []
+    valid_accs = []
+    # Load data.
+    X_train, y_train = load_data_d(train_file,verify_acc, DISC_ATTR, CONT_ATTR)
+    X_valid, y_valid = load_data_d(valid_file,verify_acc, DISC_ATTR, CONT_ATTR)
+    X_test, y_test = load_data_d_test(test_file,verify_acc, DISC_ATTR, CONT_ATTR)
+    
+    max_depth_values = [2, 3, 5, 8, 10, 12, 15, 20, 25, 35, 45, 55]
+    # max_depth_values = [25, 35, 45, 55]
+    deb = False
+    test_acc = 0
+    # if verif acc is false, save prediction_d.csv, based on the model with highest validation accuracy
+    if verify_acc:
+        for depth in max_depth_values:
+            clf = DecisionTreeClassifier(criterion='entropy', max_depth=depth, random_state=42)
+            clf.fit(X_train, y_train)
+            train_pred = clf.predict(X_train)
+            test_pred = clf.predict(X_test)
+            train_acc = accuracy_score(y_train, train_pred) * 100
+            test_acc = accuracy_score(y_test, test_pred) * 100
+            print(f"Max Depth: {depth} =&gt; Train Acc: {train_acc:.2f}%, Test Acc: {test_acc:.2f}%")
+            train_accs.append(train_acc)
+            test_accs.append(test_acc)
+    else:
+        #loaded data already above, now what next
+        #  if verif acc is false, save prediction_d.csv, based on the model with highest validation accuracy
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match213-0.html#3" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        best_pred= None
+        for depth in max_depth_values:
+            clf = DecisionTreeClassifier(criterion='entropy', max_depth=depth, random_state=42)
+            clf.fit(X_train, y_train)
+            train_pred = clf.predict(X_train)
+</FONT>            test_pred = clf.predict(X_test)
+            train_acc = accuracy_score(y_train, train_pred) * 100
+            valid_acc = accuracy_score(y_valid, clf.predict(X_valid)) * 100
+            print(f"Max Depth: {depth} =&gt; Train Acc: {train_acc:.2f}%, Valid Acc: {valid_acc:.2f}%")
+            train_accs.append(train_acc)
+            if (len(valid_accs)==0 or valid_acc &gt;= max(valid_accs)):
+                best_pred = test_pred
+            valid_accs.append(valid_acc)
+        #write best prediction to csv      
+        with open(os.path.join(output_folder, "prediction_d.csv"), 'w') as f:
+            f.write("Prediction\n")
+            for i in range(len(best_pred)):
+                if best_pred[i] == 0:
+                    f.write(" &lt;=50K\n")
+                else:
+                    f.write(" &gt;50K\n")
+
+    if verify_acc:
+        plotter.figure(figsize=(8,6))
+        plotter.plot(max_depth_values, train_accs, marker='o', label='Train Accuracy')
+        plotter.plot(max_depth_values, test_accs, marker='o', label='Test Accuracy')
+        plotter.xlabel("Max Depth")
+        plotter.ylabel("Accuracy (%)")
+        plotter.legend()
+        plotter.title("Decision Tree (Entropy) - Varying Max Depth")
+        plotter.savefig(os.path.join(output_folder, "decision_tree_max_depth.png")) 
+
+def main_prune_d(train_file,valid_file,test_file,output_folder,CONT_ATTR,DISC_ATTR,verify_acc):
+    
+    ccp_alpha_values = [0, 0.0003, 0.001, 0.005, 0.01, 0.05, 0.1, 0.15, 0.2]
+    # ccp_alpha_values = [0.001, 0.01, 0.1, 0.2]
+    train_accs_alpha = []
+    test_accs_alpha = []
+    valid_accs_alpha = []
+    # Load data.
+    X_train, y_train = load_data_d(train_file,verify_acc, DISC_ATTR, CONT_ATTR)
+    X_valid, y_valid = load_data_d(valid_file,verify_acc, DISC_ATTR, CONT_ATTR)
+    X_test, y_test = load_data_d_test(test_file,verify_acc, DISC_ATTR, CONT_ATTR)
+
+    # if verif acc is false, save prediction_d.csv, based on the model with highest validation accuracy
+    if verify_acc:
+        for alpha in ccp_alpha_values:
+            clf = DecisionTreeClassifier(criterion='entropy', ccp_alpha=alpha, random_state=42)
+            clf.fit(X_train, y_train)
+            train_pred = clf.predict(X_train)
+            test_pred = clf.predict(X_test)
+            train_acc = accuracy_score(y_train, train_pred) * 100
+            test_acc = accuracy_score(y_test, test_pred) * 100
+            print(f"ccp_alpha: {alpha} =&gt; Train Acc: {train_acc:.2f}%, Test Acc: {test_acc:.2f}%")
+            train_accs_alpha.append(train_acc)
+            test_accs_alpha.append(test_acc)
+    else:
+        #loaded data already above, now what next
+        #  if verif acc is false, save prediction_d.csv, based on the model with highest validation accuracy
+        best_pred= None
+        test_acc = 0
+        for alpha in ccp_alpha_values:
+            clf = DecisionTreeClassifier(criterion='entropy', ccp_alpha=alpha, random_state=42)
+            clf.fit(X_train, y_train)
+            train_pred = clf.predict(X_train)
+            test_pred = clf.predict(X_test)
+            train_acc = accuracy_score(y_train, train_pred) * 100
+            valid_acc = accuracy_score(y_valid, clf.predict(X_valid)) * 100
+            print(f"ccp_alpha: {alpha} =&gt; Train Acc: {train_acc:.2f}%, Valid Acc: {valid_acc:.2f}%")
+            train_accs_alpha.append(train_acc)
+            if (len(valid_accs_alpha)==0 or valid_acc &gt; max(valid_accs_alpha)):
+                best_pred = test_pred
+                print("Best ccp alpha so far:", alpha)
+            valid_accs_alpha.append(valid_acc)
+        #write best prediction to csv       
+        with open(os.path.join(output_folder, "prediction_d.csv"), 'w') as f:
+            f.write("Prediction\n")
+            for i in range(len(best_pred)):
+                if best_pred[i] == 0:
+                    f.write(" &lt;=50K\n")
+                else:
+                    f.write(" &gt;50K\n")
+
+    deb = False
+    if verify_acc:
+        plotter.figure(figsize=(10,8))
+        plotter.plot(ccp_alpha_values, train_accs_alpha, marker='o', label='Train Accuracy')
+        plotter.plot(ccp_alpha_values, test_accs_alpha, marker='o', label='Test Accuracy')
+        plotter.xlabel("ccp_alpha")
+        plotter.ylabel("Accuracy (%)")
+        plotter.legend()
+        plotter.title("Decision Tree - Varying pruning parameter(ccp_alpha)")
+        plotter.savefig(os.path.join(output_folder, "decision_tree_ccp_alpha.png"))
+
+def random_forest(train_file,valid_file,test_file,output_folder,CONT_ATTR,DISC_ATTR,verify_acc):
+    param_grid = {
+        "n_estimators": [50, 150, 250, 350], 
+        "max_features": [0.1, 0.3, 0.5, 0.7, 1.0], 
+        "min_samples_split": [2, 4, 6, 8, 10]
+    }
+    X_train, y_train = load_data_d(train_file,verify_acc,DISC_ATTR, CONT_ATTR)
+    X_valid, y_valid = load_data_d(valid_file,verify_acc,DISC_ATTR, CONT_ATTR)
+    X_test, y_test = load_data_d_test(test_file,verify_acc,DISC_ATTR, CONT_ATTR)
+
+    rf = RandomForestClassifier(criterion="entropy", oob_score=True, random_state=42, bootstrap=True)
+
+    grid_search = GridSearchCV(rf, param_grid, cv=5, n_jobs=-1, verbose=1, scoring="accuracy")
+    grid_search.fit(X_train, y_train)
+    
+    print("Model fit")
+
+    best_rf = grid_search.best_estimator_
+
+    # Save the predictions(obv on test set) of the best model, decided as per acc on validation set
+    if not verify_acc:
+        train_acc = accuracy_score(y_train, best_rf.predict(X_train)) * 100
+        valid_acc = accuracy_score(y_valid, best_rf.predict(X_valid)) * 100
+        oob_acc = best_rf.oob_score_ * 100  # Out-of-bag accuracy
+
+        print(f"Best Parameters: {grid_search.best_params_}")
+        print(f"Train Accuracy: {train_acc:.2f}%")
+        print(f"OOB Accuracy: {oob_acc:.2f}%")
+        print(f"Validation Accuracy: {valid_acc:.2f}%")
+
+        predictions = best_rf.predict(X_test)
+        with open(os.path.join(output_folder, "prediction_e.csv"), 'w') as f:
+            f.write("Prediction\n")
+            for i in range(len(predictions)):
+                if predictions[i] == 0:
+                    f.write(" &lt;=50K\n")
+                else:
+                    f.write(" &gt;50K\n")
+        return
+
+    train_acc = accuracy_score(y_train, best_rf.predict(X_train)) * 100
+    valid_acc = accuracy_score(y_valid, best_rf.predict(X_valid)) * 100
+    test_acc = accuracy_score(y_test, best_rf.predict(X_test)) * 100
+    oob_acc = best_rf.oob_score_ * 100  # Out-of-bag accuracy
+
+    print(f"Best Parameters: {grid_search.best_params_}")
+    print(f"Train Accuracy: {train_acc:.2f}%")
+    print(f"OOB Accuracy: {oob_acc:.2f}%")
+    print(f"Validation Accuracy: {valid_acc:.2f}%")
+    print(f"Test Accuracy: {test_acc:.2f}%")
+
+    plotter.bar(["Train", "OOB", "Validation", "Test"], [train_acc, oob_acc, valid_acc, test_acc], color=["blue", "green", "orange", "red"])
+    plotter.ylabel("Accuracy (%)")
+    plotter.title("Random Forest Accuracy")
+    plotter.savefig("random_forest_accuracy.png")
+
+def get_accuracy(pred_csv_path,test_file):
+    test_data = pd.read_csv(test_file)
+    test_data = test_data.to_numpy()
+    test_data = test_data[:, :-1]
+    test_labels = pd.read_csv(test_file)
+    test_labels = test_labels.to_numpy()
+    test_labels = test_labels[:, -1]
+    pred_data = pd.read_csv(pred_csv_path)
+    pred_data = pred_data.to_numpy()
+    pred_data = pred_data[:, 1]
+    print("pred_data len",len(pred_data),", test_labels len",len(test_labels))
+    pred_labels = []
+    for i in range(len(pred_data)):
+        pred_labels.append(pred_data[i])
+    pred_labels = np.array(pred_labels)
+    pred_labels = pred_labels.reshape(-1, 1)  
+    #compare pred_labels with test_labels
+    cnt = 0 
+    for i in range(len(pred_labels)):
+        if pred_labels[i] == test_labels[i]:
+            cnt += 1
+    acc = cnt / len(pred_labels) * 100
+    print("|",pred_labels[0],"|",test_labels[0],"|")
+    return acc
+
+def main():
+    if len(sys.argv) != 6:
+        print("Usage: python decision_tree.py &lt;train_data_path&gt; &lt;validation_data_path&gt; &lt;test_data_path&gt; &lt;output_folder_path&gt; &lt;question_part&gt;")
+        return
+    train_file = sys.argv[1]
+    valid_file = sys.argv[2]
+    test_file = sys.argv[3]
+    output_folder = sys.argv[4]
+    question_part = sys.argv[5]
+
+    if not os.path.exists(train_file):
+        print(f"Train file {train_file} does not exist")
+        return
+    if not os.path.exists(valid_file):
+        print(f"Validation file {valid_file} does not exist")
+        return
+    if not os.path.exists(test_file):
+        print(f"Test file {test_file} does not exist")
+        return
+
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    
+    pred_csv_name = f"prediction_{question_part}.csv"
+    pred_csv_path = os.path.join(output_folder, pred_csv_name)
+    
+    if question_part == "a":
+        verify_acc = False
+        print("Doing part a")
+        dt = Decision_Tree(train_file, mx_ht=20)
+        dt.fit()
+        output = dt.predict(test_file, verify_acc=verify_acc)
+        with open(pred_csv_path, 'w') as f:
+            f.write("Prediction\n")
+            for i in range(len(output)):
+                f.write(f"{output[i]}\n")
+        # if not verify_acc:
+        #     test_file = test_file[:-5] + ".csv"
+        # print(get_accuracy(pred_csv_path, test_file))
+    
+    elif question_part == "b":
+        verify_acc = False
+        print("Doing part b")
+        dt = Decision_Tree_OneHot(train_file, mx_ht=20)
+        dt.fit()
+        output = dt.predict(test_file, verify_acc=verify_acc)
+        with open(pred_csv_path, 'w') as f:
+            f.write("Prediction\n")
+            for i in range(len(output)):
+                f.write(f"{output[i]}\n")
+        #to be removed:
+        # if not verify_acc:
+        #     test_file = test_file[:-5] + ".csv"
+        # print(get_accuracy(pred_csv_path, test_file))
+    
+    elif question_part == "c":
+        verify_acc = False
+        print("Doing part c")
+        dt = Decision_Tree_Prune(train_file, mx_ht=20)
+        dt.fit()
+        dt.post_prune(train_file, valid_file, test_file)
+        output = dt.predict(test_file)
+        with open(pred_csv_path, 'w') as f:
+            f.write("Prediction\n")
+            for i in range(len(output)):
+                f.write(f"{output[i]}\n")
+        # if not verify_acc:
+        #     test_file = test_file[:-5] + ".csv"
+        # print(get_accuracy(pred_csv_path, test_file))
+    
+    elif question_part == "d":
+        verify_acc = False
+        print("Doing part d")
+        
+        # Define which columns are continuous and which are discrete.
+        CONT_ATTR = {0, 2, 10, 11, 12}
+        DISC_ATTR = {1, 3, 4, 5, 6, 7, 8, 9, 13}
+
+        # Execute both parts of part d
+        
+        if verify_acc:
+            main_mx_ht_d(train_file,valid_file,test_file,output_folder,CONT_ATTR,DISC_ATTR,verify_acc)
+            main_prune_d(train_file,valid_file,test_file,output_folder,CONT_ATTR,DISC_ATTR,verify_acc)
+        else:
+            # tf = test_file[:-5] + ".csv"
+            main_mx_ht_d(train_file,valid_file,test_file,output_folder,CONT_ATTR,DISC_ATTR,verify_acc)
+            # print("depth: ",get_accuracy(pred_csv_path, tf))
+            main_prune_d(train_file,valid_file,test_file,output_folder,CONT_ATTR,DISC_ATTR,verify_acc)
+            # print("prune: ",get_accuracy(pred_csv_path, tf))
+
+
+    elif question_part == "e":
+        verify_acc = False
+        print("Doing part e")
+        CONT_ATTR = {0, 2, 10, 11, 12}
+        DISC_ATTR = {1, 3, 4, 5, 6, 7, 8, 9, 13}
+
+        random_forest(train_file, valid_file, test_file, output_folder, CONT_ATTR,DISC_ATTR,verify_acc)
+
+
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match213-0.html#0" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+if __name__=="__main__":
+    main()
+
+# python3 decision_tree_final.py /mnt/d/Onedrive/Desktop/COL774_A3/Part_A/train.csv /mnt/d/Onedrive/Desktop/COL774_A3/Part_A/valid.csv /mnt/d/Onedrive/Desktop/COL774_A3/Part_A/test.csv /mnt/d/Onedrive/Desktop/COL774_A3/Part_A/output1 a
+
+
+
+
+
+#Final code
+
+import sys
+import os
+import pandas as pd
+import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report, precision_recall_fscore_support
+from sklearn.neural_network import MLPClassifier
+</FONT>import csv
+
+debug=False
+
+# def sigmoid(z):
+#     """Compute the sigmoid activation."""
+#     return 1 / (1 + np.exp(-z))
+
+# def sigmoid_derivative(a):
+#     """Compute the derivative of the sigmoid function."""
+#     return a * (1 - a)
+
+# def relu(z):
+#     """Compute the ReLU activation: max(0, z)."""
+#     return np.maximum(0, z)
+
+# def relu_derivative(a):
+#     """Compute the derivative (subgradient) of ReLU.
+#        Returns 1 for positive activation, and 0 for non-positive values."""
+#     return (a &gt; 0).astype(np.float32)
+
+# def softmax(z):
+#     """Compute the softmax activation for each row in z."""
+#     expz = np.exp(z - np.max(z, axis=1, keepdims=True))  # numerical stability
+#     return expz / np.sum(expz, axis=1, keepdims=True)
+
+def one_hot_encode(labels, num_classes):
+    """One-hot encode the label vector."""
+
+    m = labels.shape[0]
+    one_hot = np.zeros((m, num_classes))
+    if debug:
+        one_hot[np.arange(m), labels] = 0    
+    one_hot[np.arange(m), labels] = 1
+    return one_hot
+
+class NeuralNetwork:
+    def __init__(self, input_dim, hidden_layers, output_dim, learning_rate=0.01, seed=42, activation_type="sigmoid"):
+        """
+        activation_type: choose "sigmoid" or "relu" for hidden layer activations.
+        """
+        np.random.seed(seed)
+        self.layers = [input_dim] + hidden_layers + [output_dim]
+        self.learning_rate = learning_rate
+        self.debug_weights = []
+        self.debug_biases = []
+        self.debug_activations  = []
+        self.debug_pre_activations = []
+        self.activation_type = activation_type
+        self.weights = []
+        self.biases = []
+        self.l1_rate= 0.0
+        self.debug_act_type1= "sigmoid"
+        
+        # He initialization for weights and zeros for biases
+        for i in range(len(self.layers) - 1):
+            # Initialize weights and biases for each layer
+            # Using He initialization for weights and zeros for biases
+            layer_input_dim = self.layers[i]
+            layer_output_dim = self.layers[i + 1]
+            if debug:
+                print(f"Layer {i}: input_dim={layer_input_dim}, output_dim={layer_output_dim}")
+                self.layers[i+1] = self.layers[i] 
+            # Initialize weights with random values scaled by sqrt(2 / input_dim)
+            weight = np.random.randn(layer_input_dim, layer_output_dim) * np.sqrt(2.0 / layer_input_dim)
+
+            # Initialize biases as zeros
+            bias = np.zeros((1, layer_output_dim))
+            self.weights.append(weight)
+            self.biases.append(bias)
+
+    def forward(self, X):
+        activations = [X]
+        self.debug_biases = []
+        pre_activations = []
+        self.debug_weights = []
+        
+        L = len(self.weights)
+        A = X
+        # Process each hidden layer using selected activation function.
+        for i in range(L - 1):
+            Z = A.dot(self.weights[i]) + self.biases[i]
+            if debug:
+                self.debug_pre_activations.append(Z)
+                print("Pre-activation shape:", Z.shape)
+            pre_activations.append(Z)
+            if self.activation_type == "relu":
+                A = np.maximum(0, Z)
+            else:
+                A = 1 / (1 + np.exp(-Z))
+            if debug:
+                print("Activation shape:", A.shape)
+                self.debug_activations.append(A)
+            activations.append(A)
+        # Final layer uses softmax (for multi-class classification)
+        temp_w=self.weights[-1]
+        temp_b=self.biases[-1]
+        Z = A.dot(temp_w) + temp_b
+        pre_activations.append(Z)
+        if debug:
+            self.debug_biases = [b.copy() for b in self.biases]  # Debugging: Store biases
+        expz = np.exp(Z - np.max(Z, axis=1, keepdims=True))  # numerical stability
+        A = expz / np.sum(expz, axis=1, keepdims=True)
+        if debug:
+            self.debug_weights = [w.copy() for w in self.weights]  # Debugging: Store weights
+            
+        activations.append(A)
+        return activations, pre_activations
+
+    def compute_loss(self, Y_hat, Y):
+        m = Y.shape[0]
+        if debug:
+            print("Y_hat shape:", Y_hat.shape)
+            print("Y shape:", Y.shape)
+            m = max(m, 100)
+        loss = -np.sum(Y * np.log(Y_hat + 1e-8)) / m        
+        return loss
+
+    def backward(self, activations, pre_activations, Y):
+        m = Y.shape[0]
+        grads_w =[]
+        grads_b=[]
+        for i in range(len(self.weights)):
+            grads_w.append(None)
+        self.debug_weights = []
+        for i in range(len(self.biases)):
+            grads_b.append(None)
+        self.debug_biases = []
+        L = len(self.weights)
+        # Gradient for output layer
+        A_final = activations[-1]
+        dZ = A_final - Y
+        if debug:
+            print("dZ shape:", dZ.shape)
+            L=1
+        last_w = activations[-2].T.dot(dZ) / m
+        last_b = np.sum(dZ, axis=0, keepdims=True) / m
+        grads_w[-1] = last_w
+        grads_b[-1] = last_b
+
+        dA_prev = dZ.dot(self.weights[-1].T)
+        # Backprop through hidden layers with chosen activation derivative.
+        for i in range(L - 2, -1, -1):
+            if self.activation_type == "relu":
+                dZ = dA_prev * ((activations[i+1] &gt; 0).astype(np.float32))
+            else:
+                dZ = dA_prev * (activations[i+1]*(1-activations[i+1]))
+            if debug:
+                print(dZ.shape)
+            temp_w = activations[i].T.dot(dZ)
+            grads_w[i] = temp_w / m
+            temp_b = np.sum(dZ, axis=0, keepdims=True)
+            grads_b[i] = temp_b / m
+            if debug:
+                grads_b[i]=[0]*len(grads_b[i])
+                grads_w[i]=[0]*len(grads_w[i])
+            if i != 0:
+                dA_prev = dZ.dot(self.weights[i].T)
+        return grads_w, grads_b
+
+    def update_parameters(self, grads_w, grads_b,deb_):
+        for i in range(len(self.weights)):
+            self.weights[i] -= self.learning_rate * grads_w[i]
+            self.biases[i] -= self.learning_rate * grads_b[i]
+            if debug and deb_:
+                self.debug_biases[i] -= self.learning_rate * grads_b[i]
+                self.weights[i] -= self.learning_rate * grads_w[i]
+
+    def train(self, X, Y, epochs, batch_size=32, verbose=True, adaptive_lr=False, eta0=0.01):
+        """
+        Train using mini-batch SGD.
+        Every 10 epochs, if the relative improvement in loss is less than 0.1% compared to the previous checkpoint, stop early.
+        """
+        m = X.shape[0]
+        prev_loss = None
+        shuffle_mode= True
+        for epoch in range(1, epochs+1):
+            if adaptive_lr:
+                self.learning_rate = eta0 / np.sqrt(epoch)
+            permutation = np.random.permutation(m)
+            X_shuffled = X
+            Y_shuffled = Y
+            if shuffle_mode:
+                X_shuffled = X[permutation]
+                Y_shuffled = Y[permutation]
+            for i in range(0, m, batch_size):
+                X_batch = X_shuffled[i:i+batch_size]
+                Y_batch = Y_shuffled[i:i+batch_size]
+                
+                activations, pre_activations = self.forward(X_batch)
+                grads_w, grads_b = self.backward(activations, pre_activations, Y_batch)
+                self.update_parameters(grads_w, grads_b,False)
+            # Check every 10 epochs for relative improvement
+            if epoch % 10 == 0:
+                act_full, _ = self.forward(X)
+                current_loss = self.compute_loss(act_full[-1], Y)
+                if verbose:
+                    print(f"Epoch {epoch}, Loss: {current_loss:.6f}, LR: {self.learning_rate:.5f}")
+                if prev_loss is not None:
+                    relative_improvement = (prev_loss - current_loss) / prev_loss
+                    if relative_improvement &lt; 0.001:
+                        if verbose:
+                            print(f"Early stopping at epoch {epoch} with relative improvement {relative_improvement*100:.3f}% (&lt; 0.1%).")
+                        break
+                prev_loss = current_loss
+        act_full, _ = self.forward(X)
+        final_loss = self.compute_loss(act_full[-1], Y)
+        if verbose:
+            print(f"Final Loss: {final_loss:.6f}")
+
+    def predict(self, X):
+        activations, _ = self.forward(X)
+        predictions = np.argmax(activations[-1], axis=1)
+        return predictions
+
+def load_train_data(train_folder):
+    """
+    Traverse subfolders of train_folder and load images.
+    Each subfolder name is assumed to be the class label.
+    """
+    X_train = []
+    y_train = []
+    x_=0
+    for label in sorted(os.listdir(train_folder)):
+        label_path = os.path.join(train_folder, label)
+        if os.path.isdir(label_path):
+            print("Loading images from:", label_path)
+            for image_file in sorted(os.listdir(label_path)):
+                x_=1
+                if image_file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    image_path = os.path.join(label_path, image_file)
+                    try:
+                        with Image.open(image_path) as img:
+                            img = img.resize((28, 28))
+                            img = img.convert("RGB")
+                            x_=1
+                            unnorm_arr = np.array(img).astype(np.float32)
+                            arr = unnorm_arr/255.0
+                            X_train.append(arr.flatten())
+                            x_=1
+                            y_train.append(int(label))
+                            if debug:
+                                print("Image path: ",image_path)
+                            if x_==0:
+                                arr=[]
+                    except Exception as e:
+                        print(f"Error processing image {image_path}: {e}")
+    return np.array(X_train), np.array(y_train)
+
+def load_test_data(test_folder):
+    """
+    If test_labels.csv is present in test_folder, use it for ordering; otherwise load all images.
+    """
+    test_labels_file = os.path.join(test_folder, "test_labels.csv")
+    X_test = []
+    image_names = []
+    x_=0
+    if os.path.isfile(test_labels_file):
+        df = pd.read_csv(test_labels_file)
+        for name in df.iloc[:, 0]:
+            found = False
+            x_=1
+            candidates = [os.path.join(test_folder, name),
+                          os.path.join(test_folder, name.replace('.jpg', '') + ".jpg"),
+                          os.path.join(test_folder, name.replace('.jpg', '') + ".jpeg"),
+                          os.path.join(test_folder, name.replace('.jpg', '') + ".png")]
+            for candidate in candidates:
+                x_=1
+                if os.path.isfile(candidate):
+                    try:
+                        with Image.open(candidate) as img:
+                            img = img.resize((28, 28))
+                            img = img.convert("RGB")
+                            x_=1
+                            unnorm_arr = np.array(img).astype(np.float32)
+                            arr=unnorm_arr / 255.0
+                            if (x_==0):
+                                arr=[]
+                            X_test.append(arr.flatten())
+                            image_names.append(os.path.basename(candidate))
+                            if debug:
+                                print("Image names: ", len(image_names))
+                            found = True
+                            break
+                    except Exception as e:
+                        print(f"Error processing image {candidate}: {e}")
+            if not found:
+                print(f"Image {name} not found in test folder!")
+        X_test = np.array(X_test)
+    else:
+        y_=0
+        for image_file in sorted(os.listdir(test_folder)):
+            y_=1
+            if image_file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                image_path = os.path.join(test_folder, image_file)
+                try:
+                    with Image.open(image_path) as img:
+                        img = img.resize((28, 28))
+                        img = img.convert("RGB")
+                        if debug:
+                            print(len(img))
+                        arr = np.array(img).astype(np.float32) / 255.0
+                        X_test.append(arr.flatten())
+                        image_names.append(image_file)
+                except Exception as e:
+                    print(f"Error processing image {image_file}: {e}")
+        X_test = np.array(X_test)
+    return X_test, image_names
+
+def compute_accuracy(predictions, test_labels_path):
+    """
+    Compute and print accuracy using test_labels.csv if available.
+    CSV is expected to have columns: image, label.
+    """
+    if os.path.isfile(test_labels_path):
+        df = pd.read_csv(test_labels_path)
+        correct_labels = df["label"].values.astype(int)
+        if len(predictions) != len(correct_labels):
+            print("Warning: Number of predictions does not match number of test labels.")
+        min_len = min(len(predictions), len(correct_labels))
+        accuracy = np.mean(predictions[:min_len] == correct_labels[:min_len])
+        print(f"Test Accuracy: {accuracy * 100:.2f}%")
+    else:
+        print("test_labels.csv not found at", test_labels_path, "; accuracy cannot be computed.")
+
+
+def experiment_single_hidden_layer(X_train, y_train, X_test, test_labels_path, output_folder):
+    
+    # Fixed hyperparameters (except hidden layer size)
+    learning_rate = 0.01
+    epochs = 100
+    batch_size = 32
+    input_dim = 2352
+    num_classes = 43
+
+    # One-hot encode training labels
+    Y_train = one_hot_encode(y_train, num_classes)
+
+    # Hidden layer sizes to experiment with:
+    hidden_layer_options = [1, 5, 10, 50, 100]
+    avg_f1_train_list = []
+    avg_f1_test_list = []
+
+    for units in hidden_layer_options:
+        print(f"\n=== Training with single hidden layer of size {units} ===")
+        nn = NeuralNetwork(input_dim, [units], num_classes, learning_rate)
+        nn.train(X_train, Y_train, epochs=epochs, batch_size=batch_size)
+        
+        # Predict on training and test data
+        train_preds = nn.predict(X_train)
+        test_preds = nn.predict(X_test)
+
+        print("\n--- Training Set Classification Report ---")
+        report_train = classification_report(y_train, train_preds, digits=3, zero_division=0)
+        print(report_train)
+
+        print("\n--- Test Set Classification Report ---")
+        if os.path.isfile(test_labels_path):
+            df_test = pd.read_csv(test_labels_path)
+            true_test_labels = df_test["label"].values.astype(int)
+            min_len = min(len(test_preds), len(true_test_labels))
+            report_test = classification_report(true_test_labels[:min_len], test_preds[:min_len], digits=3, zero_division=0)
+            print(report_test)
+            _, _, f1_test, _ = precision_recall_fscore_support(true_test_labels[:min_len], test_preds[:min_len], average='macro', zero_division=0)
+        else:
+            print("No test labels available; skipping test report.")
+            f1_test = 0.0
+
+        _, _, f1_train, _ = precision_recall_fscore_support(y_train, train_preds, average='macro', zero_division=0)
+        print(f"Average Macro F1 (Train): {f1_train:.3f}")
+        if os.path.isfile(test_labels_path):
+            print(f"Average Macro F1 (Test): {f1_test:.3f}")
+        else:
+            print("Average Macro F1 (Test): N/A")
+
+        avg_f1_train_list.append(f1_train)
+        avg_f1_test_list.append(f1_test)
+
+        if units == 100:
+            # Save test predictions to predictions_b.csv
+            predictions_file = os.path.join(output_folder, "predictions_b.csv")
+            with open(predictions_file, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(["Prediction"])  # Write the header
+                writer.writerows([[pred] for pred in test_preds])  # Write predictions row by row
+
+            print(f"Test predictions saved to {predictions_file}")
+
+
+    # Plot average F1 vs number of hidden units
+    plt.figure(figsize=(8,6))
+    plt.plot(hidden_layer_options, avg_f1_train_list, marker="o", label="Train Macro F1")
+    plt.plot(hidden_layer_options, avg_f1_test_list, marker="o", label="Test Macro F1")
+    plt.xlabel("Number of Hidden Units")
+    plt.ylabel("Average (Macro) F1 Score")
+    plt.title("Effect of Hidden Layer Size on F1 Score")
+    plt.legend()
+    x_=0
+    plt.grid(True)
+    plot_file = os.path.join(output_folder, "f1_vs_hidden_units.png")
+    plt.savefig(plot_file)
+    if debug:
+        print("Plotted")
+    plt.show()
+    print(f"Saved plot to {plot_file}")
+
+def experiment_network_depth(X_train, y_train, X_test, test_labels_path, output_folder):
+    learning_rate = 0.01
+    epochs = 100
+    batch_size = 32
+    input_dim = 2352
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match213-0.html#4" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    num_classes = 43
+
+    # One-hot encode training labels
+    Y_train = one_hot_encode(y_train, num_classes)
+
+    # Hidden layer configurations to experiment with:
+    hidden_configs = [
+        [512],
+        [512, 256],
+        [512, 256, 128],
+        [512, 256, 128, 64]
+</FONT>    ]
+    depth_labels = ["1-layer", "2-layer", "3-layer", "4-layer"]
+    avg_f1_train_list = []
+    avg_f1_test_list = []
+
+    for config, label in zip(hidden_configs, depth_labels):
+        print(f"\n=== Training with network configuration {config} ({label}) ===")
+        nn = NeuralNetwork(input_dim, config, num_classes, learning_rate)
+        nn.train(X_train, Y_train, epochs=epochs, batch_size=batch_size)
+        
+        # Predictions on training and test data
+        train_preds = nn.predict(X_train)
+        test_preds = nn.predict(X_test)
+        
+        print("\n--- Training Set Classification Report ---")
+        report_train = classification_report(y_train, train_preds, digits=3, zero_division=0)
+        print(report_train)
+        
+        print("\n--- Test Set Classification Report ---")
+        if os.path.isfile(test_labels_path):
+            df_test = pd.read_csv(test_labels_path)
+            true_test_labels = df_test["label"].values.astype(int)
+            min_len = min(len(test_preds), len(true_test_labels))
+            report_test = classification_report(true_test_labels[:min_len], test_preds[:min_len], digits=3, zero_division=0)
+            print(report_test)
+            _, _, f1_test, _ = precision_recall_fscore_support(true_test_labels[:min_len], test_preds[:min_len], average='macro', zero_division=0)
+        else:
+            print("No test labels available; skipping test report.")
+            f1_test = 0.0
+
+        _, _, f1_train, _ = precision_recall_fscore_support(y_train, train_preds, average='macro', zero_division=0)
+        print(f"Average Macro F1 (Train) for configuration {config}: {f1_train:.3f}")
+        if os.path.isfile(test_labels_path):
+            print(f"Average Macro F1 (Test) for configuration {config}: {f1_test:.3f}")
+        else:
+            print("Average Macro F1 (Test): N/A")
+
+        avg_f1_train_list.append(f1_train)
+        avg_f1_test_list.append(f1_test)
+
+        if config == [512, 256, 128, 64]:
+            # Save test predictions to predictions_c.csv
+            predictions_file = os.path.join(output_folder, "predictions_c.csv")
+            with open(predictions_file, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(["Prediction"])
+                writer.writerows([[pred] for pred in test_preds])
+            print(f"Test predictions saved to {predictions_file}")
+
+    # Plotting the average macro F1 scores vs network depth
+    plt.figure(figsize=(8,6))
+    x = np.arange(len(depth_labels))
+    plt.plot(x, avg_f1_train_list, marker="o", label="Train Macro F1")
+    plt.plot(x, avg_f1_test_list, marker="o", label="Test Macro F1")
+    plt.xticks(x, depth_labels)
+    plt.xlabel("Network Depth (Number of Hidden Layers)")
+    plt.ylabel("Average (Macro) F1 Score")
+    x_=0
+    plt.title("Effect of Network Depth on Macro F1 Score")
+    plt.legend()
+    plt.grid(True)
+    if debug:
+        print("Plotted")
+        x_=1
+    plot_file = os.path.join(output_folder, "f1_vs_network_depth.png")
+    plt.savefig(plot_file)
+    plt.show()
+    print(f"Saved plot to {plot_file}")
+
+def experiment_network_depth_adaptive_lr(X_train, y_train, X_test, test_labels_path, output_folder):
+    """
+    Part d
+    Repeat part (c) with adaptive learning rate ηₑ = η₀ / sqrt(e), η₀ = 0.01.
+    Reports precision, recall, F1, and average F1 score vs depth.
+    """
+    eta0 = 0.1
+    epochs = 100
+    #eta0 = 0.1
+    #epochs = 1000
+    batch_size = 32
+    input_dim = 2352
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match213-0.html#5" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    num_classes = 43
+    Y_train = one_hot_encode(y_train, num_classes)
+
+    hidden_configs = [
+        [512],
+        [512, 256],
+        [512, 256, 128],
+        [512, 256, 128, 64]
+</FONT>    ]
+    depth_labels = ["1-layer", "2-layer", "3-layer", "4-layer"]
+    avg_f1_train_list = []
+    avg_f1_test_list = []
+
+    for config, label in zip(hidden_configs, depth_labels):
+        print(f"\n=== Adaptive LR Training with {label} ===")
+        nn = NeuralNetwork(input_dim, config, num_classes, learning_rate=eta0, activation_type="sigmoid")
+        nn.train(X_train, Y_train, epochs=epochs, batch_size=batch_size, adaptive_lr=True, eta0=eta0)
+
+        train_preds = nn.predict(X_train)
+        test_preds = nn.predict(X_test)
+
+        print("\n--- Train Classification Report ---")
+        print(classification_report(y_train, train_preds, digits=3, zero_division=0))
+        f1_train = precision_recall_fscore_support(y_train, train_preds, average='macro', zero_division=0)[2]
+
+        if os.path.isfile(test_labels_path):
+            df_test = pd.read_csv(test_labels_path)
+            true_test_labels = df_test["label"].values.astype(int)
+            min_len = min(len(test_preds), len(true_test_labels))
+            print("\n--- Test Classification Report ---")
+            print(classification_report(true_test_labels[:min_len], test_preds[:min_len], digits=3, zero_division=0))
+            f1_test = precision_recall_fscore_support(true_test_labels[:min_len], test_preds[:min_len], average='macro', zero_division=0)[2]
+        else:
+            print("Test labels not found. Skipping test F1.")
+            f1_test = 0.0
+
+        print(f"Avg Macro F1 (Train): {f1_train:.3f}")
+        print(f"Avg Macro F1 (Test) : {f1_test:.3f}")
+        avg_f1_train_list.append(f1_train)
+        avg_f1_test_list.append(f1_test)
+
+        if config == [512, 256, 128, 64]:
+            # Save test predictions to predictions_d.csv
+            predictions_file = os.path.join(output_folder, "predictions_d.csv")
+            with open(predictions_file, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(["Prediction"])
+                writer.writerows([[pred] for pred in test_preds])
+            print(f"Test predictions saved to {predictions_file}")
+
+    # Plotting
+    plt.figure(figsize=(8,6))
+    x = np.arange(len(depth_labels))
+    plt.plot(x, avg_f1_train_list, marker='o', label='Train Macro F1')
+    plt.plot(x, avg_f1_test_list, marker='o', label='Test Macro F1')
+    plt.xticks(x, depth_labels)
+    plt.xlabel("Network Depth (Hidden Layer Config)")
+    plt.ylabel("Macro F1 Score")
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match213-0.html#1" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    plt.title("Adaptive LR: Macro F1 vs Network Depth")
+    plt.legend()
+    plt.grid(True)
+    plot_path = os.path.join(output_folder, "f1_vs_depth_adaptive_lr.png")
+    plt.savefig(plot_path)
+    plt.show()
+    print(f"Saved plot to {plot_path}")
+</FONT>
+
+def experiment_network_depth_relu_adaptive_lr(X_train, y_train, X_test, test_labels_path, output_folder):    
+    """
+    Part (e): Experiment with network depth using ReLU activation in hidden layers and fixed LR.
+    """
+    learning_rate = 0.01
+    epochs = 200
+    # learning_rate = 0.1
+    # epochs = 500
+    batch_size = 32
+    input_dim = 2352
+    num_classes = 43
+
+    # One-hot encode the training labels
+    Y_train = one_hot_encode(y_train, num_classes)
+    eta0=0.1
+    # Define hidden layer configurations to experiment with:
+    hidden_configs = [
+        [512],
+        [512, 256],
+        [512, 256, 128],
+        [512, 256, 128, 64]
+    ]
+    depth_labels = ["1-layer", "2-layer", "3-layer", "4-layer"]
+    avg_f1_train_list = []
+    avg_f1_test_list = []
+
+    for config, label in zip(hidden_configs, depth_labels):
+        print(f"\n=== Training with network configuration {config} ({label}) ===")
+        # Instantiate network with ReLU activation in hidden layers (constant LR)
+        nn = NeuralNetwork(input_dim, config, num_classes, learning_rate, activation_type="relu")
+        nn.train(X_train, Y_train, epochs=epochs, batch_size=batch_size,adaptive_lr=True, eta0=eta0)
+        
+        train_preds = nn.predict(X_train)
+        test_preds = nn.predict(X_test)
+        
+        print("\n--- Training Classification Report ---")
+        print(classification_report(y_train, train_preds, digits=3, zero_division=0))
+        f1_train = precision_recall_fscore_support(y_train, train_preds, average='macro', zero_division=0)[2]
+        
+        if os.path.isfile(test_labels_path):
+            df_test = pd.read_csv(test_labels_path)
+            true_test_labels = df_test["label"].values.astype(int)
+            min_len = min(len(test_preds), len(true_test_labels))
+            print("\n--- Test Classification Report ---")
+            print(classification_report(true_test_labels[:min_len], test_preds[:min_len], digits=3, zero_division=0))
+            f1_test = precision_recall_fscore_support(true_test_labels[:min_len], test_preds[:min_len], average='macro', zero_division=0)[2]
+        else:
+            print("Test labels not available; skipping test evaluation.")
+            f1_test = 0.0
+
+        print(f"Average Macro F1 (Train) for configuration {config}: {f1_train:.3f}")
+        print(f"Average Macro F1 (Test) for configuration {config}: {f1_test:.3f}")
+        avg_f1_train_list.append(f1_train)
+        avg_f1_test_list.append(f1_test)
+
+        if config == [512, 256, 128, 64]:
+            # Save test predictions to predictions_e.csv
+            predictions_file = os.path.join(output_folder, "predictions_e.csv")
+            with open(predictions_file, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(["Prediction"])
+                writer.writerows([[pred] for pred in test_preds])
+            print(f"Test predictions saved to {predictions_file}")
+
+    # Plot average macro F1 vs network depth
+    plt.figure(figsize=(8,6))
+    x = np.arange(len(depth_labels))
+    plt.plot(x, avg_f1_train_list, marker='o', label="Train Macro F1")
+    plt.plot(x, avg_f1_test_list, marker='o', label="Test Macro F1")
+    plt.xticks(x, depth_labels)
+    plt.xlabel("Network Depth (Hidden Layer Configuration)")
+    plt.ylabel("Macro F1 Score")
+    x_=0
+    plt.title("ReLU with Fixed LR: Macro F1 vs Network Depth")
+    plt.legend()
+    plt.grid(True)
+    if debug:
+        print("Plotted")
+    plot_file = os.path.join(output_folder, "f1_vs_depth_relu_fixed_lr.png")
+    plt.savefig(plot_file)
+    plt.show()
+    print(f"Saved plot to {plot_file}")
+
+
+def experiment_network_depth_mlp(X_train, y_train, X_test, test_labels_path, output_folder):
+    input_dim = 2352
+    num_classes = 43
+
+    hidden_configs = [
+        (512,),
+        (512, 256),
+        (512, 256, 128),
+        (512, 256, 128, 64)
+    ]
+    depth_labels = ["1-layer", "2-layer", "3-layer", "4-layer"]
+    avg_f1_train_list = []
+    avg_f1_test_list = []
+
+    for config, label in zip(hidden_configs, depth_labels):
+        print(f"\n=== MLPClassifier with hidden_layer_sizes={config} ({label}) ===")
+        clf = MLPClassifier(
+            hidden_layer_sizes=config,
+            activation='relu',
+            solver='sgd',
+            alpha=0,
+            batch_size=32,
+            learning_rate='invscaling',
+            learning_rate_init=0.01,
+            max_iter=200,
+            early_stopping=True,
+            n_iter_no_change=10,
+            tol=1e-4,
+            random_state=42
+        )
+        clf.fit(X_train, y_train)
+        train_preds = clf.predict(X_train)
+        test_preds = clf.predict(X_test)
+
+        print("\n--- Training Set Classification Report ---")
+        print(classification_report(y_train, train_preds, digits=3, zero_division=0))
+        f1_train = precision_recall_fscore_support(y_train, train_preds, average='macro', zero_division=0)[2]
+
+        if os.path.isfile(test_labels_path):
+            df_test = pd.read_csv(test_labels_path)
+            true_test_labels = df_test["label"].values.astype(int)
+            min_len = min(len(test_preds), len(true_test_labels))
+            print("\n--- Test Set Classification Report ---")
+            print(classification_report(true_test_labels[:min_len], test_preds[:min_len], digits=3, zero_division=0))
+            f1_test = precision_recall_fscore_support(true_test_labels[:min_len], test_preds[:min_len], average='macro', zero_division=0)[2]
+        else:
+            print("Test labels not available; skipping test evaluation.")
+            f1_test = 0.0
+
+        print(f"Average Macro F1 (Train) for configuration {config}: {f1_train:.3f}")
+        print(f"Average Macro F1 (Test) for configuration {config}: {f1_test:.3f}")
+        avg_f1_train_list.append(f1_train)
+        avg_f1_test_list.append(f1_test)
+
+        if config == (512, 256, 128, 64):
+            # Save test predictions to predictions_f.csv
+            predictions_file = os.path.join(output_folder, "predictions_f.csv")
+            with open(predictions_file, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(["Prediction"])
+                writer.writerows([[pred] for pred in test_preds])
+            print(f"Test predictions saved to {predictions_file}")
+
+    # Plotting
+    plt.figure(figsize=(8,6))
+    x = np.arange(len(depth_labels))
+    plt.plot(x, avg_f1_train_list, marker='o', label='Train Macro F1')
+    plt.plot(x, avg_f1_test_list, marker='o', label='Test Macro F1')
+    plt.xticks(x, depth_labels)
+    plt.xlabel("Network Depth (Hidden Layer Configuration)")
+    plt.ylabel("Macro F1 Score")
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match213-0.html#2" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    plt.title("MLPClassifier (invscaling LR, ReLU) vs Network Depth")
+    plt.legend()
+    plt.grid(True)
+    plot_file = os.path.join(output_folder, "f1_vs_depth_mlp.png")
+    plt.savefig(plot_file)
+    plt.show()
+    print(f"Saved plot to {plot_file}")
+</FONT>
+def main():
+    # Print the script path or note running in Notebook
+    if len(sys.argv) != 5:
+        print("Incorrect usage!")
+        sys.exit()
+    else:
+        print("Correct usage")
+    args = sys.argv[1:]
+    train_data_path = args[0]
+    test_data_path = args[1]
+    output_folder_path = args[2]
+    question_part = args[3].lower() 
+
+    # Compute test_labels_path by removing the last subfolder from test_data_path and adding "/test_labels.csv"
+    test_labels_path = test_data_path.rsplit('/', 1)[0] + "/test_labels.csv"
+    
+    print("Train data path:", train_data_path)
+    print("Test data path:", test_data_path)
+    print("Output folder path:", output_folder_path)
+    print("Question part:", question_part)
+    print("Test Labels path:", test_labels_path)
+
+    # Verify accessibility of directories
+    if not os.path.isdir(train_data_path):
+        print("Training folder not found or inaccessible!")
+        sys.exit()
+    if not os.path.isdir(test_data_path):
+        print("Test folder not found or inaccessible!")
+        sys.exit()
+    if not os.path.isdir(output_folder_path):
+        print("Output folder not found; creating it.")
+        os.makedirs(output_folder_path)
+
+    # Load training data
+    print("Loading training data from folder...")
+    X_train, y_train = load_train_data(train_data_path)
+    if X_train.size == 0:
+        print("No training images found!")
+        sys.exit()
+    print(f"Loaded {X_train.shape[0]} training examples.")
+
+    if question_part == "a":
+        print("Running Part (a)...")
+        print("Nothing to do for Part (a).")
+    elif question_part == "b":
+        # Part (b): Experiment with different hidden layer sizes
+        print("Running Part (b)...")
+        X_test, test_image_names = load_test_data(test_data_path)
+        if X_test.size == 0:
+            print("No test images found!")
+            sys.exit()
+        print(f"Loaded {X_test.shape[0]} test examples.")
+        experiment_single_hidden_layer(X_train, y_train, X_test, test_labels_path, output_folder_path)
+    elif question_part == "c":
+        # Part (c): Experiment with network depth.
+        print("Running Part (c)...")
+        X_test, test_image_names = load_test_data(test_data_path)
+        if X_test.size == 0:
+            print("No test images found!")
+            sys.exit()
+        print(f"Loaded {X_test.shape[0]} test examples.")
+        experiment_network_depth(X_train, y_train, X_test, test_labels_path, output_folder_path)
+    elif question_part == "d":
+        print("Running Part (d) with Adaptive Learning Rate...")
+        X_test, test_image_names = load_test_data(test_data_path)
+        if X_test.size == 0:
+            print("No test images found!")
+            sys.exit()
+        print(f"Loaded {X_test.shape[0]} test examples.")
+        experiment_network_depth_adaptive_lr(X_train, y_train, X_test, test_labels_path, output_folder_path)
+    elif question_part == "e":
+        print("Running Part (e): Network depth experiments with fixed LR and ReLU activation...")
+        X_test, test_image_names = load_test_data(test_data_path)
+        if X_test.size == 0:
+            print("No test images found!")
+            sys.exit()
+        experiment_network_depth_relu_adaptive_lr(X_train, y_train, X_test, test_labels_path, output_folder_path)
+    elif question_part == "f":
+        print("Running Part (f): MLPClassifier experiments...")
+        X_test, test_image_names = load_test_data(test_data_path)
+        if X_test.size == 0:
+            print("No test images found!")
+            sys.exit()
+        print(f"Loaded {X_test.shape[0]} test examples.")
+        experiment_network_depth_mlp(X_train, y_train, X_test, test_labels_path, output_folder_path)
+    else:
+        print(f"Unsupported question part: {question_part}. Please use 'a', 'b', 'c', 'd', 'e' or 'f'.")
+
+if __name__ == "__main__":
+    main()
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
