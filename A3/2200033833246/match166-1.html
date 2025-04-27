@@ -1,0 +1,1339 @@
+<HTML>
+<HEAD>
+<TITLE>./A3_processed_new_hash/combined_G8GO6.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A3_processed_new_hash/combined_PCDAL.py<p><PRE>
+
+
+import pandas as pd
+import numpy as np
+import time
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import os
+#import argparser
+import argparse
+try:
+    df_test=pd.read_csv('A3COL774/test.csv')
+    df_train=pd.read_csv('A3COL774/train.csv')
+    df_valid=pd.read_csv('A3COL774/valid.csv')
+    headers=df_train.columns
+    df_train['income']=df_train['income'].str.strip().map({'&lt;=50K':0, '&gt;50K':1})
+    df_test['income']=df_test['income'].str.strip().map({'&lt;=50K':0, '&gt;50K':1})
+    df_valid['income']=df_valid['income'].str.strip().map({'&lt;=50K':0, '&gt;50K':1})  
+except:
+    print("Dataset not found in default location. Dataset will be loaded from the user input.")
+
+#Caclulate the mutual information for a given feature
+def get_mutual_information(x:pd.Series,y:np.array, is_discrete,tol=1e-10):
+    '''
+    Expects features x, y as pandas dataframe
+    '''
+    if is_discrete:
+        counts=[np.sum(y), len(y)-np.sum(y)]
+        p=np.array(counts)/len(y)
+        # print(p)
+        H_y=-np.sum(p*np.log2(p+tol))
+        # print(H_y)
+        H_y_x=0
+        # print(pd.unique(x[feature]))
+        for j in pd.unique(x):
+            y_j=y[x==j]
+            # print(y_j)
+            counts=[np.sum(y_j), len(y_j)-np.sum(y_j)]
+            p=np.array(counts)/len(y_j)
+            H_y_j=-np.sum(p*np.log2(p+tol))
+            H_y_x+=H_y_j*len(y_j)/len(x)
+        I=H_y-H_y_x
+        # print(I)
+        # print(np.array(I))
+        return np.array(I)
+    else:
+        counts=[np.sum(y), len(y)-np.sum(y)]
+        p=np.array(counts)/len(y)
+        # print(p)
+        H_y=-np.sum(p*np.log2(p+tol))
+        H_y_x=0
+        median=np.median(x)
+        # x_1=
+        # print(f"x_1{x_1}")
+        y_1=y[x&gt;=median]
+
+        # print(f'y_1: {y_1}')
+        if len(y_1)==0:
+            H_y_1=0
+        else:
+            p=np.sum(y_1)/len(y_1)
+            # print(f"P: {p}")
+            H_y_1=-p*np.log2(p+tol)-(1-p)*np.log2(1-p+tol)
+        x_0=x&lt;median
+        y_0=y[x_0]
+        if len(y_0)==0:
+            H_y_0=0
+        else:
+            p=np.sum(y_0)/len(y_0)
+            H_y_0=-p*np.log2(p+tol)-(1-p)*np.log2(1-p+tol)
+        # print(H_y_0)
+
+        I=H_y-H_y_1*len(y_1)/len(y)-H_y_0*len(y_0)/len(y)
+        I=np.array(I).squeeze()
+        # print(np.array(I))
+        return np.array(I)
+# get_mutual_information(df_train[['workclass']], df_train[['income']], True,'workclass', 'income')
+# get_mutual_information(df_train[['fnlwgt']], df_train[['income']], False,'fnlwgt', 'income')
+
+#Define Node class
+
+is_not_discrete=['fnlwgt', 'age', 'education.num', 'capital.gain', 'capital.loss', 'hours.per.week']
+class Node():
+    def __init__(self, feature=None, threshold=None, is_leaf=False,is_discrete=None, node_depth=None, node_class= None,children=None, n_samples=None):
+        '''
+        '''
+        self.feature = feature
+        self.threshold = threshold
+        self.is_discrete = is_discrete
+        self.node_depth = node_depth
+        self.is_leaf = is_leaf
+        self.node_class= node_class
+        self.n_samples= n_samples
+        self.val_index= None # Used only in pruning
+        self.val_acc = None # Used only in pruning
+        self.num_child_nodes=0 # Used only in pruning
+        self.acc_before=0
+        self.children = {} if children is None else children
+
+# root=Node()
+def expand_tree(X:pd.DataFrame,y:np.array, parition_indices:np.array,max_depth=5, init_depth=0, target='income', current_features=None):
+    root=Node()
+    # X=X.iloc[parition_indices]
+    Y_part=y[parition_indices]
+    # root.node_depth=init_depth
+    n = len(Y_part)
+    if n == 0:
+        majority_class= 0 # Default for empty
+        root.is_leaf=True
+        return root
+    sum_ones = np.sum(Y_part)
+    # If sum_ones &gt; n/2, majority is 1. Otherwise (&lt;= n/2), majority is 0.
+    majority_class=1 if sum_ones &gt; n / 2 else 0
+    # print(init_depth, max_depth)
+    if init_depth&gt;=max_depth:
+        # Use a trick to find the majority class fast
+        
+        root.is_leaf=True
+        root.node_class=majority_class
+        root.n_samples=n
+        root.node_depth=init_depth
+
+        # 
+        # return Node(is_leaf=True, node_class=[0 if decision_var[0]&gt;decision_var[1] else 1], node_depth=init_depth)
+        return root
+    if sum_ones==0:
+        # return Node(is_leaf=True, node_class=0, node_depth=init_depth)
+        root.is_leaf=True
+        root.node_class=0
+        root.n_samples=n
+        root.node_depth=init_depth
+        return root
+
+    if sum_ones==n:
+        root.is_leaf=True
+        root.node_class=1
+        root.n_samples=n
+        root.node_depth=init_depth
+        return root
+    
+    # print(f"AT DEPTH {init_depth}")
+    # node_class=0 if y[target].value_counts()[0]&gt;y[target].value_counts()[1] else 1
+    depth=init_depth+1
+    # mutual_information=[]
+    best_mi=-1
+    feature_to_split=None
+    # print(X.columns)
+    for i in current_features:
+        if i in is_not_discrete:
+            is_discrete=False
+        else:
+            is_discrete=True
+        X_part_feature=X[i].iloc[parition_indices]
+        I=get_mutual_information(X_part_feature, Y_part, is_discrete)
+        # print(f"Feature: {i}, MI: {I}")
+        if I&gt;best_mi:
+            best_mi=I
+            feature_to_split=i
+    if feature_to_split is None:
+        root.is_leaf = True
+        root.node_class = majority_class
+        return root
+    # print(mutual_information)
+    # feature_to_split=X.columns[np.argmax(mutual_information)]
+    # print(feature_to_split)
+    root.feature=feature_to_split
+    root.node_class=majority_class
+    root.node_depth=init_depth
+    root.is_discrete=not (feature_to_split in is_not_discrete)
+    root.threshold=np.median(X[feature_to_split].iloc[parition_indices]) if feature_to_split in is_not_discrete else None
+    root.n_samples=len(parition_indices)
+    root.children={}
+    
+        # X.drop(feature_to_split, axis=1, inplace=True)
+    if feature_to_split in is_not_discrete:
+        # print("BUILDING CHILDREN")
+        
+        child_partition_indices_g=parition_indices[X[feature_to_split].iloc[parition_indices]&gt;=root.threshold]
+        root.children['g']=expand_tree(X,y,child_partition_indices_g, max_depth, depth, target, current_features)
+        child_partition_indices_l=parition_indices[X[feature_to_split].iloc[parition_indices]&lt;root.threshold]
+        root.children['l']=expand_tree(X, y,child_partition_indices_l, max_depth, depth, target, current_features)
+    else:
+        # print("BUILDING CHILDREN")
+        for i in pd.unique(X[feature_to_split]):
+            child_partition_indices_i=parition_indices[X[feature_to_split].iloc[parition_indices]==i]
+            child_features = [f for f in current_features if f != feature_to_split]
+            root.children[i]=expand_tree(X, y, child_partition_indices_i,max_depth, depth, target, child_features)
+    return root
+def predict(X, tree):
+    '''
+    Predict the class of a given sample using the decision tree.
+    '''
+    # Traverse the tree and make predictions
+    # print(tree.is_leaf)
+    if tree.is_leaf:
+        return tree.node_class
+    else:
+        if tree.is_discrete:
+            if X[tree.feature] not in tree.children:## ? tree.children.keys()
+                return tree.node_class
+            else:
+                return predict(X, tree.children[X[tree.feature]])
+        else:
+            feature_value = X[tree.feature]
+            if feature_value &gt;= tree.threshold:
+                return predict(X, tree.children['g'])
+            else:
+                return predict(X, tree.children['l'])
+def count_node(node):
+    if node.is_leaf:
+        return 1
+    else:
+        count=0
+        for child in node.children.values():
+            count+=count_node(child)
+        return count+1
+def evaluate_accuracy(tree, X,y):
+    y_true = y
+    y_pred = [predict(x, tree) for _,x in X.iterrows()]
+    return np.mean(np.array(y_pred) == y_true)
+def collect(X, node, tree,y,tree_accuracy,node_count=[], accuracy=[]):
+    tree_accuracy=tree_accuracy
+    def post_order_traversal(X, node, tree,y):
+        nonlocal tree_accuracy
+        if node.is_leaf:
+            partion_indices=tree.val_index
+            node.acc_before=np.sum(y[partion_indices]==tree.node_class).astype(int)/len(y[partion_indices])
+            return
+        for child in node.children.values():
+            post_order_traversal(X, child, tree, y)
+        # are_all_children_leaf=[i.is_leaf for i in node.children.values()]
+        # are_all_children_leaf=True
+        # print(all_children_leaf)
+        if not node.is_leaf:
+
+            if len(node.val_index)==0:
+                accuracy_before=0
+            else:
+                accuracy_before=np.sum([len(i.val_index)*i.val_acc for i in node.children.values()])/len(node.val_index)
+                # accuracy_before=np.sum([len(i.val_index)*i.acc_before for i in node.children.values()])/len(node.val_index)
+
+            
+            accuracy_after=node.val_acc
+            # print(f"Node: {node.feature}, Accuracy before: {accuracy_before}, Accuracy after: {accuracy_after}, Num samples: {len(node.val_index)}")
+            # time.sleep(1)
+            if accuracy_after&gt;accuracy_before:
+                node.is_leaf=True
+                # node.children={}
+                # val_accuracy_of_tree=evaluate_accuracy(tree, X, y)
+                # test_accuracy_of_tree=evaluate_accuracy(tree, x_test, y_test)
+                # train_accuracy_of_tree=evaluate_accuracy(tree, x_train, y_train)
+                # accuracy.append((val_accuracy_of_tree, test_accuracy_of_tree, train_accuracy_of_tree))
+                # accuracy.append(node.n_samples*(accuracy_after-accuracy_before)/len(X)+tree_accuracy)
+                # tree_accuracy=node.n_samples*(accuracy_after-accuracy_before)/len(X)+tree_accuracy
+                # node.val_acc=accuracy_after
+                node_counter=count_node(tree)
+                node_count.append(node_counter)
+    post_order_traversal(X, node, tree,y)
+    return node_count, accuracy
+# def predict_batch(X,y,tree, partion_indices):    
+#     predictions = []
+#     for sample in X_all:
+#         pred = predict(sample, tree)
+#         predictions.append(pred)
+
+#     # Calculate accuracy
+#     correct_predictions = 0
+#     for i in range(len(y_true)):
+#         # Ensure comparison handles different data types (e.g., int vs string) appropriately
+#         # This simple equality check might need adjustment depending on label types
+#         if str(predictions[i]) == str(y_true[i]):  # Using str() for robust comparison
+#             correct_predictions += 1
+
+#     accuracy = correct_predictions / len(y_true)
+
+    return accuracy, predictions
+# def collect_greedy(X, node, tree,y, node_count=[], accuracy=[],tree_accuracy=50):
+#     tree_accuracy=tree_accuracy
+#     def greedy_pruning(X, node, y):
+#         nonlocal tree_accuracy
+#         if node.is_leaf:
+#             return
+#         else:
+#             for child in node.children.values():
+#                 new_accuracy=child.val_acc
+#                 acc_before=child.acc_before
+#                 if new_accuracy&gt;=acc_before:
+#                     child.is_leaf=True
+#                     node_count.append(count_node(tree))
+#                     accuracy.append(len(child.val_index)*(new_accuracy-acc_before)/len(X)+tree_accuracy)
+#                 if new_accuracy&lt;acc_before:
+#                     child.is_leaf=False
+#                     greedy_pruning(X, child, y)
+                
+#     greedy_pruning(X, node, y)
+#     return node_count, accuracy
+        
+
+# def prune(node,  X, y):
+#     if node.is_leaf:
+#         return
+#     # print(node.feature)
+#     for child in node.children.values():
+#         child.is_leaf=True
+
+
+    
+#     accuracy_after=node.val_acc
+#     # print(f"Node: {node.feature}, Accuracy before: {accuracy_before}, Accuracy after: {accuracy_after}, Num samples: {len(node.val_index)}")
+#     # time.sleep(1)
+#     if accuracy_after&gt;accuracy_before:
+#         node.is_leaf=True
+#         # node.children={}
+
+def expand_tree_to_prune(X, y, tree, partion_indices, total_nodes=0):
+    tree.val_index=partion_indices
+    if len(partion_indices)==0:
+        tree.val_acc=0.0
+    else:
+        tree.val_acc=np.sum(y[partion_indices]==tree.node_class).astype(int)/len(y[partion_indices])
+    # total_nodes+=1
+    if tree.is_leaf:
+        return 
+    else:
+        if tree.is_discrete:
+            # if X[tree.feature] not in tree.children:## ? tree.children.keys()
+            for i in tree.children:
+                child_partition_indices_i=partion_indices[X[tree.feature].iloc[partion_indices]==i]
+                expand_tree_to_prune(X,y, tree.children[i], child_partition_indices_i)
+        else:
+            child_partition_indices_g=partion_indices[X[tree.feature].iloc[partion_indices]&gt;=tree.threshold]
+            child_partition_indices_l=partion_indices[X[tree.feature].iloc[partion_indices]&lt;tree.threshold]
+            expand_tree_to_prune(X,y, tree.children['l'], child_partition_indices_l)
+            expand_tree_to_prune(X,y, tree.children['g'], child_partition_indices_g)
+    # print(f"Total nodes: {total_nodes}")
+
+# expand_tree_to_prune(df_train.drop('income',axis=1), np.array(df_train['income']), tree, np.array(range(len(df_train))))
+# post_order_traversal(df_train.drop('income',axis=1), tree)
+    
+    
+
+
+node_num=[]
+train_acc=[]
+valid_acc=[]
+def a(df_train,df_valid,df_test,output):
+    map_={0:'&lt;=50K', 1:'&gt;50K', None:'&lt;=50K'}
+    train_accuracy_list=[]
+    test_accuracy_list=[]
+    for depth in [5,10,15,20]:
+        tree=expand_tree(df_train.drop('income',axis=1), np.array(df_train['income']), np.array(range(len(df_train))),depth, 0, 'income',df_train.drop('income',axis=1).columns.tolist())
+        miss_count=0
+        preds=[]
+        for idx, row in df_test.iterrows():
+            model_output=predict(row.drop('income'), tree)
+            # print(model_output)
+            if row['income']!=model_output:
+                miss_count+=1
+            preds.append(map_[model_output])
+        # print(1-miss_count/len(df_valid))
+        tree_val_acc=1-miss_count/len(df_test)
+        test_accuracy_list.append(tree_val_acc)
+        print(f"Test Accuracy before pruning: {tree_val_acc}")
+        path=os.path.join(output, 'prediction_a.csv')
+        pd.DataFrame({'prediction':preds}).to_csv(path)
+        miss_count=0
+        preds=[]
+        for idx, row in df_train.iterrows():
+            model_output=predict(row.drop('income'), tree)
+            if row['income']!=model_output:
+                miss_count+=1
+            preds.append(map_[model_output])
+        tree_train_acc=1-miss_count/len(df_train)
+        train_accuracy_list.append(tree_train_acc)
+        print(f"Train Accuracy before pruning: {tree_train_acc}")
+    plt.plot([5,10,15,20], train_accuracy_list, label="Train Accuracy")
+    plt.plot([5,10,15,20], test_accuracy_list, label="Test Accuracy")
+    plt.legend()
+    
+    plt.savefig(f'DTree_a.png')
+
+def b(df_train,df_valid,df_test,output):
+    map_={0:'&lt;=50K', 1:'&gt;50K', None:'&lt;=50K'}
+    cat_cols=[i for i in df_train.columns[:-1] if i not in is_not_discrete]
+    df_train=pd.get_dummies(df_train, columns=[i for i in df_train.columns[:-1] if i not in is_not_discrete])
+    df_valid=pd.get_dummies(df_valid, columns=[i for i in df_valid.columns[:-1] if i not in is_not_discrete])
+    df_valid=df_valid.reindex(columns=df_train.columns, fill_value=0)
+    df_test=pd.get_dummies(df_test, columns=[i for i in df_test.columns[:-1] if i not in is_not_discrete])
+    df_test=df_test.reindex(columns=df_train.columns, fill_value=0)
+    train_accuracy_list=[]
+    test_accuracy_list=[]
+    for depth in [25,35,45,55]:
+        tree=expand_tree(df_train.drop('income',axis=1), np.array(df_train['income']), np.array(range(len(df_train))),depth, 0, 'income',df_train.drop('income',axis=1).columns.tolist())
+        miss_count=0
+        preds=[]
+        for idx, row in df_test.iterrows():
+            model_output=predict(row.drop('income'), tree)
+            if row['income']!=model_output:
+                miss_count+=1
+            preds.append(map_[model_output])
+        # print(1-miss_count/len(df_valid))
+        tree_val_acc=1-miss_count/len(df_test)
+        test_accuracy_list.append(tree_val_acc)
+        print(f"Test Accuracy before pruning: {tree_val_acc}")
+        path=os.path.join(output, 'prediction_b.csv')
+        pd.DataFrame({'prediction':preds}).to_csv(path)
+        miss_count=0
+        preds=[]
+        for idx, row in df_train.iterrows():
+            model_output=predict(row.drop('income'), tree)
+            if row['income']!=model_output:
+                miss_count+=1
+            preds.append(map_[model_output])
+        tree_train_acc=1-miss_count/len(df_train)
+        train_accuracy_list.append(tree_train_acc)
+        print(f"Train Accuracy before pruning: {tree_train_acc}")
+    plt.plot([25,35,45,55], train_accuracy_list, label="Train Accuracy")
+    plt.plot([25,35,45,55], test_accuracy_list, label="Test Accuracy")
+    plt.legend()
+    plt.savefig('DTree_b.png')
+    
+
+def c(df_train, df_valid, df_test, output, train, val, test):
+    map_={0:'&lt;=50K', 1:'&gt;50K'}
+    cat_cols=[i for i in df_train.columns[:-1] if i not in is_not_discrete]
+    df_train=pd.get_dummies(df_train, columns=[i for i in df_train.columns[:-1] if i not in is_not_discrete])
+    df_valid=pd.get_dummies(df_valid, columns=[i for i in df_valid.columns[:-1] if i not in is_not_discrete])
+    df_valid=df_valid.reindex(columns=df_train.columns, fill_value=0)
+    df_test=pd.get_dummies(df_test, columns=[i for i in df_test.columns[:-1] if i not in is_not_discrete])
+    df_test=df_test.reindex(columns=df_train.columns, fill_value=0)
+    for depth in [25,35,45,55]:
+        start=time.time()
+        tree=expand_tree(df_train.drop('income',axis=1), np.array(df_train['income']), np.array(range(len(df_train))),depth, 0, 'income',df_train.drop('income',axis=1).columns.tolist())
+        end=time.time()
+        miss_count=0
+        preds=[]
+        for idx, row in df_valid.iterrows():
+            model_output=predict(row.drop('income'), tree)
+            if row['income']!=model_output:
+                miss_count+=1
+            preds.append(map_[model_output])
+        # print(1-miss_count/len(df_valid))
+        tree_val_acc=1-miss_count/len(df_valid)
+        print(f"Val Accuracy before pruning: {tree_val_acc}")
+        miss_count=0
+        preds=[]
+        for idx, row in df_train.iterrows():
+            model_output=predict(row.drop('income'), tree)
+            if row['income']!=model_output:
+                miss_count+=1
+            preds.append(map_[model_output])
+        tree_train_acc=1-miss_count/len(df_train)
+        print(f"Train Accuracy before pruning: {tree_train_acc}")
+        expand_tree_to_prune(df_valid.drop('income',axis=1), np.array(df_valid['income']), tree, np.array(range(len(df_valid))))
+        
+        collect(df_valid.drop('income',axis=1), tree,tree,df_valid['income'],tree_accuracy=tree_val_acc)
+        # node_count, acc=collect_greedy(df_valid.drop('income',axis=1),tree,tree,df_valid['income'],tree_accuracy=tree_val_acc)
+        # node_num.append(node_count)
+        # print(node_count)
+        # print(node_count[-1], " ", acc[-1])
+        # print(node_count[0], " ", acc[0])
+        # print([i for i in zip(node_count, acc)])
+
+        miss_count=0
+        preds=[]
+        for idx, row in df_valid.iterrows():
+            model_output=predict(row.drop('income'), tree)
+            if row['income']!=model_output:
+                miss_count+=1
+            preds.append(map_[model_output])
+        post_val=1-miss_count/len(df_valid)
+        print(f'post pruning val: {post_val}')
+        miss_count=0
+        preds=[]
+        for idx, row in df_train.iterrows():
+            model_output=predict(row.drop('income'), tree)
+            if row['income']!=model_output:
+                miss_count+=1
+            preds.append(map_[model_output])
+        train_post=1-miss_count/len(df_train)
+        print(f"post pruning train:{train_post}")
+        preds=[]
+        for idx, row in df_test.iterrows():
+            model_output=predict(row.drop('income'), tree)
+            if row['income']!=model_output:
+                miss_count+=1
+            preds.append(map_[model_output])
+        path=os.path.join(output, 'prediction_b.csv')
+        pd.DataFrame({'prediction':preds}).to_csv(path)
+        # predict(df_valid.drop('income',axis=1), tree)
+        print(end-start)    
+    # traverse_tree(tree) 
+
+
+
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import GridSearchCV
+def run_d(df_train, df_valid, df_test, output):
+    depths=[25,35,45,55]
+    ccp_alpha=[0.001,0.01,0.1,0.2]
+    depth_vs_acc_test, depth_vs_acc_train, depth_vs_acc_valid=[],[],[]
+    ccp_vs_acc_test, ccp_vs_acc_train, ccp_vs_acc_valid=[],[],[]
+    cat_cols=[i for i in df_train.columns[:-1] if i not in is_not_discrete]
+    df_train=pd.get_dummies(df_train, columns=[i for i in df_train.columns[:-1] if i not in is_not_discrete])
+    df_valid=pd.get_dummies(df_valid, columns=[i for i in df_valid.columns[:-1] if i not in is_not_discrete])
+    df_valid=df_valid.reindex(columns=df_train.columns, fill_value=0)
+    df_test=pd.get_dummies(df_test, columns=[i for i in df_test.columns[:-1] if i not in is_not_discrete])
+    df_test=df_test.reindex(columns=df_train.columns, fill_value=0)
+    for i in depths:
+        clf = DecisionTreeClassifier(max_depth=i)
+        clf.fit(df_train.drop('income', axis=1), df_train['income'])
+        print(f"Validation Accuracy for depth {i} is :{accuracy_score(df_valid['income'], clf.predict(df_valid.drop('income', axis=1)))}")
+        print(f"Train Accuracy for depth {i} is :{accuracy_score(df_train['income'], clf.predict(df_train.drop('income', axis=1)))}")
+        print(f"Test Accuracy for depth {i} is :{accuracy_score(df_test['income'], clf.predict(df_test.drop('income', axis=1)))}")
+        depth_vs_acc_valid.append([accuracy_score(df_valid['income'], clf.predict(df_valid.drop('income', axis=1)))])
+        depth_vs_acc_train.append([accuracy_score(df_train['income'], clf.predict(df_train.drop('income', axis=1)))])
+        depth_vs_acc_test.append([accuracy_score(df_test['income'], clf.predict(df_test.drop('income', axis=1)))])
+    fig, ax= plt.subplots()
+    ax.plot(depths, depth_vs_acc_valid, label='Validation Accuracy')
+    ax.plot(depths, depth_vs_acc_train, label='Train Accuracy')
+    ax.plot(depths, depth_vs_acc_test, label='Test Accuracy')
+    plt.savefig(f"depth_vs_acc_{i}.png")
+    for i in ccp_alpha:
+        clf = DecisionTreeClassifier(max_depth=50, ccp_alpha=i)
+        clf.fit(df_train.drop('income', axis=1), df_train['income'])
+        print(f"Validation Accuracy for ccp_alpha {i} is :{accuracy_score(df_valid['income'], clf.predict(df_valid.drop('income', axis=1)))}")
+        print(f"Train Accuracy for ccp_alpha {i} is :{accuracy_score(df_train['income'], clf.predict(df_train.drop('income', axis=1)))}")
+        print(f"Test Accuracy for ccp_alpha {i} is :{accuracy_score(df_test['income'], clf.predict(df_test.drop('income', axis=1)))}")
+        ccp_vs_acc_valid.append([accuracy_score(df_valid['income'], clf.predict(df_valid.drop('income', axis=1)))])
+        ccp_vs_acc_train.append([accuracy_score(df_train['income'], clf.predict(df_train.drop('income', axis=1)))])
+        ccp_vs_acc_test.append([accuracy_score(df_test['income'], clf.predict(df_test.drop('income', axis=1)))])
+
+    fig, ax= plt.subplots() 
+    ax.plot(ccp_alpha, ccp_vs_acc_valid, label='Validation Accuracy')
+    ax.plot(ccp_alpha, ccp_vs_acc_train, label='Train Accuracy')
+    ax.plot(ccp_alpha, ccp_vs_acc_test, label='Test Accuracy')
+    ax.legend()
+    plt.savefig(f"ccp_vs_acc_{i}.png")
+    best_model=DecisionTreeClassifier(max_depth=25, ccp_alpha=0.001)
+    best_model.fit(df_train.drop('income', axis=1), df_train['income'])
+    preds=best_model.predict(df_test.drop('income', axis=1))
+    print(f"Validation Accuracy for Best Model is :{accuracy_score(df_valid['income'], best_model.predict(df_valid.drop('income', axis=1)))}")
+    print(f"Train Accuracy for Best Model is :{accuracy_score(df_train['income'], best_model.predict(df_train.drop('income', axis=1)))}")
+    print(f"Test Accuracy for Best Model is :{accuracy_score(df_test['income'], best_model.predict(df_test.drop('income', axis=1)))}")
+    preds=['&lt;=50K' if i==0 else '&gt;50K' for i in preds]
+    path=os.path.join(output, 'prediction_d.csv')
+    pd.DataFrame({'predictions': preds}).to_csv(path)
+
+
+from sklearn.ensemble import RandomForestClassifier
+def run_e(df_train, df_valid, df_test, output):
+    n_estimators=[50,150, 250, 350]
+    max_features=[0.1,0.3,0.5,0.7,0.9]
+    min_samples_split=[2,4,6,8,10]
+    param_grid = [{'n_estimators': n_estimators,
+                   'max_features': max_features,
+                   'min_samples_split': min_samples_split}]
+    #Convert data to one hot using pd.get_dummies
+    cat_cols=[i for i in df_train.columns[:-1] if i not in is_not_discrete]
+    df_train=pd.get_dummies(df_train, columns=[i for i in df_train.columns[:-1] if i not in is_not_discrete])
+    df_valid=pd.get_dummies(df_valid, columns=[i for i in df_valid.columns[:-1] if i not in is_not_discrete])
+    df_valid=df_valid.reindex(columns=df_train.columns, fill_value=0)
+    df_test=pd.get_dummies(df_test, columns=[i for i in df_test.columns[:-1] if i not in is_not_discrete])
+    df_test=df_test.reindex(columns=df_train.columns, fill_value=0)
+    # accuracy_matrix={}
+    # for i in n_estimators:
+    #     for j in max_features:
+    #         for k in min_samples_split:
+    #             clf = RandomForestClassifier(n_estimators=i,max_features=j,min_samples_split=k, criterion='entropy',oob_score=True)
+    #             clf.fit(df_train.drop('income', axis=1), df_train['income'])
+    #             accuracy_matrix[f'{i}{j}{k}']=clf.oob_score_
+    #             train=clf.score(df_train.drop('income', axis=1), df_train['income'])
+    #             val=clf.score(df_valid.drop('income', axis=1), df_valid['income'])
+    #             test=clf.score(df_test.drop('income', axis=1), df_test['income'])
+    #             print(f"OOB  Accuracy for n_estimators {i}, max_features {j}, min_samples_split {k} is :{clf.oob_score_}")
+    #             print(f"Training acc: {train}, Validation acc: {val}, Test acc: {test}")
+    # # acc_matrix=run_e(df_train, df_valid, df_test)
+    # n_estimators=[50,150, 250, 350]
+    # max_features=[0.1,0.3,0.5,0.7,0.9]
+    # min_samples_split=[2,4,6,8,10]
+    # with open('accuracy_matrix.txt', 'w') as f:
+        # for i in n_estimators:
+        #     for j in max_features:
+        #         for k in min_samples_split:
+        #             f.write(f"{i}{j}{k}: {acc_matrix[f'{i}{j}{k}']} ")
+    clf = RandomForestClassifier(n_estimators=350,max_features=0.3,min_samples_split=10, criterion='entropy',oob_score=True)
+    clf.fit(df_train.drop('income', axis=1), df_train['income'])
+    preds=clf.predict(df_test.drop('income', axis=1))
+    print(f"Validation Accuracy for Best Model is :{accuracy_score(df_valid['income'], clf.predict(df_valid.drop('income', axis=1)))}")
+    print(f"Train Accuracy for Best Model is :{accuracy_score(df_train['income'], clf.predict(df_train.drop('income', axis=1)))}")
+    print(f"Test Accuracy for Best Model is :{accuracy_score(df_test['income'], clf.predict(df_test.drop('income', axis=1)))}")
+    preds=['&lt;=50K' if i==0 else '&gt;50K' for i in preds]
+    path=os.path.join(output, 'prediction_e.csv')
+    pd.DataFrame({'predictions': preds}).to_csv(path)
+
+def main():
+    #rewrite with tabs
+    """
+    Main function to parse arguments and execute the specified part.
+    """
+    # 1. Create the parser
+    parser = argparse.ArgumentParser(
+        description="Script to run different parts based on command-line argument."
+    )
+    parser.add_argument('--tarining_data', type=str, help='Path to the training data file.', default='A3COL774/train.csv')
+    parser.add_argument('--val_data',type=str, help='Path to the test data file.' ,default='A3COL774/valid.csv')
+    parser.add_argument('--test_data', type=str, help='Path to the test data file.',default='A3COL774/test.csv')
+    parser.add_argument('--output_dir', type=str, help='Directory to save the output files.',default='output/')
+
+    parser.add_argument(
+        '--part', # This makes it a positional argument (e.g., python script.py b)
+        type=str,
+        choices=['a','b', 'c', 'd', 'e', 'f'],
+        help="Specify the part of the script to run (choose from 'b', 'c', 'd', 'e')."
+    )
+    args = parser.parse_args()
+    df_test=pd.read_csv(args.test_data)
+    df_train=pd.read_csv(args.tarining_data)
+    df_valid=pd.read_csv(args.val_data)
+    headers=df_train.columns
+    df_train['income']=df_train['income'].str.strip().map({'&lt;=50K':0, '&gt;50K':1})
+    df_test['income']=df_test['income'].str.strip().map({'&lt;=50K':0, '&gt;50K':1})
+    df_valid['income']=df_valid['income'].str.strip().map({'&lt;=50K':0, '&gt;50K':1})  
+    selected_part = args.part
+
+    print(f"Argument provided: part = '{selected_part}'")
+    output=args.output_dir
+    if selected_part ==  'a':
+        a(df_train,df_valid,df_test,output)
+    if selected_part == 'b':
+       
+        b(df_train,df_valid,df_test,output)
+    elif selected_part =='c':
+        c(df_train,df_valid,df_test,output)
+    elif selected_part == 'd':
+        run_d(df_train, df_valid, df_test,output)
+    elif selected_part == 'e':
+        run_e(df_train, df_valid, df_test,output)
+    
+# Standard Python entry point check:
+# Ensures that main() is called only when the script is executed directly
+# (not when it's imported as a module).
+if __name__ == "__main__":
+    main()
+
+
+
+import numpy as np
+from PIL import Image
+from sklearn.metrics import precision_score, recall_score, f1_score
+import glob
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import sys
+import argparse
+import pandas as pd
+import os
+def softmax(x):
+    e_x = np.exp(x - np.max(x, axis=1, keepdims=True))
+    sftmax=np.divide(e_x, e_x.sum(axis=1, keepdims=True)+1e-10)
+    return sftmax
+def ReLU(x):
+    return np.maximum(0, x)
+def sigmoid(x):
+    x = np.clip(x, -500, 500)
+    return 1 / (1 + np.exp(-x))
+class NeuralNetwork():
+    def __init__(self, num_hidden_layers, input_dim, hidden_dim, output_dim, activation,lr=0.01):
+        self.num_hidden_layers = num_hidden_layers
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.output_dim = output_dim
+        self.lr=lr
+        self.layer_list={}
+        # self.cache=[]
+        self.layer_list['h0']=Layer(input_dim, hidden_dim[0], activation)
+        if num_hidden_layers&gt;1:
+            for i in range(num_hidden_layers-1):
+                self.layer_list[f'h{i+1}']=Layer(hidden_dim[i], hidden_dim[i+1], activation)
+        self.layer_list[f'h{num_hidden_layers}']=Layer(hidden_dim[-1], output_dim, activation='linear')
+    def forward(self, x):
+        # self.cache.append(x)
+        for i in range(self.num_hidden_layers+1):
+            x = self.layer_list[f'h{i}'].forward(x)
+            # self.cache.append(x)
+        return x
+    def backward(self, y_true, p):
+        dA =  p-y_true
+        # print(type(i) for i in self.cache)
+        for i in range(self.num_hidden_layers+1):
+            # print(i)
+            # print(dA.shape)
+            # out= self.cache[-i-1]
+            # print(out.shape)
+            # print(dA.shape)
+            # x= self.cache[-i-2]
+            # print(x.shape)
+            dw, db, dA = self.layer_list[f'h{self.num_hidden_layers-i}'].backward(dA)
+            # print(db)
+            # print(dw.shape)
+            self.layer_list[f'h{self.num_hidden_layers-i}'].update(dw, db,self.lr)
+
+
+class Layer():
+    def __init__(self, input_dim, output_dim, activation):
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.activation = activation
+        if self.activation not in ['relu', 'sigmoid', 'linear']:
+            raise ValueError("Activation function must be 'relu', 'sigmoid', 'linear'")
+        if activation=='sigmoid_':
+            self.weights = np.random.uniform(-np.sqrt(6/(input_dim+output_dim)), np.sqrt(6/(input_dim+output_dim)),(input_dim, output_dim))
+        else:
+            self.weights = np.random.randn(input_dim, output_dim) * np.sqrt(2.0 / input_dim)
+        self.bias = np.zeros(output_dim)
+        self.z= None
+        self.x= None
+        self.a= None
+    def forward(self, x):
+        out= x @ self.weights + self.bias
+        self.z=out
+        self.x=x
+        if self.activation == 'relu':
+            self.a= ReLU(out)
+            return ReLU(out)
+        elif self.activation == 'sigmoid':
+            self.a= sigmoid(out)
+            return sigmoid(out)
+        elif self.activation== 'linear':
+            self.a= out
+            return out
+    def backward(self, dA):
+        if self.activation== 'sigmoid':
+            dz= dA*(self.a)*(1-self.a)
+        elif self.activation== 'linear':
+            dz= dA
+        else:
+            dz= dA*(self.a&gt;0)
+        dw= self.x.T @ dz / self.x.shape[0]
+        db= np.sum(dz, axis=0) / self.x.shape[0]
+        dx= dz @ self.weights.T
+        return dw, db, dx
+    def update(self, dw, db,learning_rate=0.01):
+        self.weights = self.weights-learning_rate * dw
+        self.bias =self.bias-  learning_rate *db
+
+        
+# if __name__=='main':
+#     #Iterate through folder inside train and read all images
+def b(train, test ,output):
+    images = []
+    labels = []
+    file_names = []
+    batch_size=32
+    train=os.path.join(train, '*/*.jpg') if train is not None else 'train/*/*.jpg'
+    # train='train/*/*.jpg'
+    for filename in glob.glob(train):
+        # print(filename)
+        im = Image.open(filename)
+        #resize to 28x28
+        im = im.resize((28, 28))
+        file_names.append(filename)
+        im = np.array(im).flatten()/255.0
+        images.append(im)
+        labels.append(int(filename.split('/')[-2]))
+    # print(len(images))
+    # print(images[0])
+    # print(labels[0])
+    # print(file_names[0])
+    y_true = np.zeros((len(labels), 43), dtype=int)
+    y_true[np.arange(len(labels)), np.array(labels, dtype=int)] = 1
+    images = np.array(images)
+    test_file_names = []
+    test_images = []
+    # test_labels = []
+    # try:
+    #     test_csv=pd.read_csv('test_labels.csv')
+    # except:
+    #     print("test_labels.csv not found, please add the file to current directory, plotting and other functions will not work")
+    test=os.path.join(test, '*.jpg') if test is not None else 'test/*.jpg'
+    for filename in glob.glob('test/*.jpg'):
+        im = Image.open(filename)
+        #resize to 28x28
+        im = im.resize((28, 28))
+        test_file_names.append(filename)
+        im = np.array(im).flatten()/255.0
+        test_images.append(im)
+        # y_i=test_csv[test_csv['image']==filename.split('/')[-1]]['label']
+        # test_labels.append(int(y_i))
+    # y_true_test = np.zeros((len(test_labels), 43), dtype=int)
+    # y_true_test[np.arange(len(test_labels)), np.array(test_labels, dtype=int)] = 1
+    test_images = np.array(test_images)
+    nn=NeuralNetwork(3, 28*28*3, [128, 64, 32], 43, 'relu')
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match166-0.html#4" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    num_epochs=100
+    precision_list=[]
+    recall_list=[]
+    F1_list=[]
+
+    test_precision_list=[]
+    test_recall_list=[]
+    test_F1_list=[]
+</FONT>
+    for k in [1,5,10,50,100]:
+        nn=NeuralNetwork(1, 28*28*3, [k], 43, 'sigmoid')
+        permutation = np.random.permutation(len(images))
+        images_shuffled = images[permutation]
+        y = y_true[permutation]
+        prev_epoch_loss=-1
+        for j in tqdm(range(num_epochs)):
+            loss_list=[]
+            epoch_loss=0
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match166-0.html#2" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            for i in range(0,len(images), batch_size):
+                batch=images_shuffled[i:i+batch_size]
+                y_batch = y[i:i+batch_size]
+</FONT>                h=softmax(nn.forward(batch))
+                # print(y.shape)
+                loss=-np.sum(y_batch*np.log(h+1e-10))
+                epoch_loss+=loss
+                nn.backward(y_batch,h)
+                loss_list.append(loss)
+            print(epoch_loss/len(images), prev_epoch_loss)
+            if np.max(np.abs((epoch_loss/len(images)-prev_epoch_loss)))&lt;0.001:
+                print("Exited Early")
+                break
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match166-0.html#0" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            prev_epoch_loss=epoch_loss/len(images)
+        h= nn.forward(images)
+        y_pred = np.argmax(h, axis=1)
+        precision = precision_score(labels, y_pred, average='micro')
+        precision_list.append(precision)
+</FONT>        recall = recall_score(labels, y_pred, average='micro')
+        recall_list.append(recall)
+        f1 = f1_score(labels, y_pred, average='micro')
+        F1_list.append(f1)
+        print(f"Parameter: {k}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+        h= nn.forward(test_images)
+        y_pred = np.argmax(h, axis=1)
+        # precision = precision_score(test_labels, y_pred, average='micro')
+        # test_precision_list.append(precision)
+        # recall = recall_score(test_labels, y_pred, average='micro')
+        # test_recall_list.append(recall)
+        # f1 = f1_score(test_labels, y_pred, average='micro')
+        # test_F1_list.append(f1)
+        # print(f"Parameter: {k}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+    path=os.path.join(output, 'predictions_b.csv')
+    pd.DataFrame({'predicition': y_pred}).to_csv(path, index=False)
+    # fig, ax = plt.subplots()
+    # ax.plot([1,5,10,50,100], precision_list, label='Precision')
+    # ax.plot([1,5,10,50,100], recall_list, label='Recall')
+    # ax.plot([1,5,10,50,100], F1_list, label='F1 Score')
+    # ax.plot([1,5,10,50,100], test_precision_list, label='Test Precision')
+    # ax.plot([1,5,10,50,100], test_recall_list, label='Test Recall')
+    # ax.plot([1,5,10,50,100], test_F1_list, label='Test F1 Score')
+    # ax.legend()
+    # ax.set_xlabel('Number of Hidden Units')
+    # ax.set_ylabel('Score')
+    # plt.savefig('part_b.png')
+def run_b(train,test, output):
+    images = []
+    labels = []
+    file_names = []
+    batch_size=32
+    train=os.path.join(train, '*/*.jpg') if train is not None else 'train/*/*.jpg'
+    # train='train/*/*.jpg'
+    for filename in glob.glob(train):
+        # print(filename)
+        im = Image.open(filename)
+        #resize to 28x28
+        im = im.resize((28, 28))
+        file_names.append(filename)
+        im = np.array(im).flatten()/255.0
+        images.append(im)
+        labels.append(int(filename.split('/')[-2]))
+    # print(len(images))
+    # print(images[0])
+    # print(labels[0])
+    # print(file_names[0])
+    y_true = np.zeros((len(labels), 43), dtype=int)
+    y_true[np.arange(len(labels)), np.array(labels, dtype=int)] = 1
+    images = np.array(images)
+    test_file_names = []
+    test_images = []
+    test_labels = []
+    try:
+        test_csv=pd.read_csv('test_labels.csv')
+    except:
+        print("test_labels.csv not found, please add the file to current directory, plotting and other functions will not work")
+    test=os.path.join(test, '*.jpg') if test is not None else 'test/*.jpg'
+    for filename in glob.glob('test/*.jpg'):
+        im = Image.open(filename)
+        #resize to 28x28
+        im = im.resize((28, 28))
+        test_file_names.append(filename)
+        im = np.array(im).flatten()/255.0
+        test_images.append(im)
+        y_i=test_csv[test_csv['image']==filename.split('/')[-1]]['label']
+        test_labels.append(int(y_i))
+    y_true_test = np.zeros((len(test_labels), 43), dtype=int)
+    y_true_test[np.arange(len(test_labels)), np.array(test_labels, dtype=int)] = 1
+    test_images = np.array(test_images)
+    nn=NeuralNetwork(3, 28*28*3, [128, 64, 32], 43, 'relu')
+    num_epochs=100
+    precision_list=[]
+    recall_list=[]
+    F1_list=[]
+
+    test_precision_list=[]
+    test_recall_list=[]
+    test_F1_list=[]
+
+    for k in [1,5,10,50,100]:
+        nn=NeuralNetwork(1, 28*28*3, [k], 43, 'sigmoid')
+        permutation = np.random.permutation(len(images))
+        images_shuffled = images[permutation]
+        y = y_true[permutation]
+        prev_epoch_loss=-1
+        for j in tqdm(range(num_epochs)):
+            loss_list=[]
+            epoch_loss=0
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match166-0.html#3" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            for i in range(0,len(images), batch_size):
+                batch=images_shuffled[i:i+batch_size]
+                y_batch = y[i:i+batch_size]
+</FONT>                h=softmax(nn.forward(batch))
+                # print(y.shape)
+                loss=-np.sum(y_batch*np.log(h+1e-10))
+                epoch_loss+=loss
+                nn.backward(y_batch,h)
+                loss_list.append(loss)
+            print(epoch_loss/len(images), prev_epoch_loss)
+            if np.max(np.abs((epoch_loss/len(images)-prev_epoch_loss)))&lt;0.001:
+                print("Exited Early")
+                break
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match166-0.html#1" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            prev_epoch_loss=epoch_loss/len(images)
+        h= nn.forward(images)
+        y_pred = np.argmax(h, axis=1)
+        precision = precision_score(labels, y_pred, average='micro')
+        precision_list.append(precision)
+</FONT>        recall = recall_score(labels, y_pred, average='micro')
+        recall_list.append(recall)
+        f1 = f1_score(labels, y_pred, average='micro')
+        F1_list.append(f1)
+        print(f"Parameter: {k}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+        h= nn.forward(test_images)
+        y_pred = np.argmax(h, axis=1)
+        precision = precision_score(test_labels, y_pred, average='micro')
+        test_precision_list.append(precision)
+        recall = recall_score(test_labels, y_pred, average='micro')
+        test_recall_list.append(recall)
+        f1 = f1_score(test_labels, y_pred, average='micro')
+        test_F1_list.append(f1)
+        print(f"Parameter: {k}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+    path=os.path.join(output, 'predictions_b.csv')
+    pd.DataFrame({'predicition': y_pred}).to_csv(path, index=False)
+    fig, ax = plt.subplots()
+    ax.plot([1,5,10,50,100], precision_list, label='Precision')
+    ax.plot([1,5,10,50,100], recall_list, label='Recall')
+    ax.plot([1,5,10,50,100], F1_list, label='F1 Score')
+    ax.plot([1,5,10,50,100], test_precision_list, label='Test Precision')
+    ax.plot([1,5,10,50,100], test_recall_list, label='Test Recall')
+    ax.plot([1,5,10,50,100], test_F1_list, label='Test F1 Score')
+    ax.legend()
+    ax.set_xlabel('Number of Hidden Units')
+    ax.set_ylabel('Score')
+    plt.savefig('part_b.png')
+
+def e(part, output_path, train, test):
+    images = []
+    labels = []
+    file_names = []
+    batch_size=32
+    train=os.path.join(train, '*/*.jpg') if train is not None else 'train/*/*.jpg'
+    for filename in glob.glob(train):
+        # print(filename)
+        im = Image.open(filename)
+        #resize to 28x28
+        im = im.resize((28, 28))
+        file_names.append(filename)
+        im = np.array(im).flatten()/255.0
+        images.append(im)
+        labels.append(int(filename.split('/')[-2]))
+    # print(len(images))
+    # print(images[0])
+    # print(labels[0])
+    # print(file_names[0])
+    y_true = np.zeros((len(labels), 43), dtype=int)
+    y_true[np.arange(len(labels)), np.array(labels, dtype=int)] = 1
+    images = np.array(images)
+    test_file_names = []
+    test_images = []
+    # test_labels = []
+    # test_csv=pd.read_csv('test_labels.csv')
+    test=os.path.join(test, '*.jpg') if test is not None else 'test/*.jpg'
+    for filename in glob.glob('test/*.jpg'):
+        im = Image.open(filename)
+        #resize to 28x28
+        im = im.resize((28, 28))
+        test_file_names.append(filename)
+        im = np.array(im).flatten()/255.0
+        test_images.append(im)
+        # y_i=test_csv[test_csv['image']==filename.split('/')[-1]]['label']
+        # test_labels.append(y_i.iloc[0])
+    # y_true_test = np.zeros((len(test_labels), 43), dtype=int)
+    # y_true_test[np.arange(len(test_labels)), np.array(test_labels, dtype=int)] = 1
+    test_images = np.array(test_images)
+    # nn=NeuralNetwork(3, 28*28*3, [128, 64, 32], 43, 'relu')
+    num_epochs=100
+    precision_list=[]
+    recall_list=[]
+    F1_list=[]
+    # test_precision_list=[]
+    # test_recall_list=[]
+    # test_F1_list=[]
+    params_list=[[512], [512,256], [512,256,128],[512,256,128,64]]
+    num_hidden_layers_list=[1,2,3,4]
+    for params,num_hidden in zip(params_list, num_hidden_layers_list):
+        nn=NeuralNetwork(num_hidden, 28*28*3, params, 43, 'sigmoid' if part=='d'or part=='c' else 'relu')
+        permutation = np.random.permutation(len(images))
+        images_shuffled = images[permutation]
+        y = y_true[permutation]
+        n_0=nn.lr
+        prev_epoch_loss=-1
+        for j in tqdm(range(num_epochs)):
+            loss_list=[]
+            epoch_loss=0
+            if part!='c':
+                nn.lr=n_0/np.sqrt(1+j)
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match166-0.html#5" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            for i in range(0,len(images), batch_size):
+                batch=images_shuffled[i:i+batch_size]
+                y_batch = y[i:i+batch_size]
+</FONT>                h=softmax(nn.forward(batch))
+                # print(y.shape)
+                loss=-np.sum(y_batch*np.log(h+1e-10))
+                epoch_loss+=loss
+                nn.backward(y_batch,h)
+                loss_list.append(loss)
+            print(epoch_loss)
+            if np.max(np.abs((epoch_loss/len(images)-prev_epoch_loss/len(images))))&lt;1e-4:
+                break
+<A NAME="6"></A><FONT color = #00FF00><A HREF="match166-0.html#6" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            prev_epoch_loss=epoch_loss/len(images)
+        h= nn.forward(images)
+        y_pred = np.argmax(h, axis=1)
+        precision = precision_score(labels, y_pred, average='weighted')
+        precision_list.append(precision)
+</FONT>        recall = recall_score(labels, y_pred, average='weighted')
+        print(recall_score(labels, y_pred, average=None))
+        recall_list.append(recall)
+        f1 = f1_score(labels, y_pred, average='weighted')
+        print(f1_score(labels, y_pred, average=None))
+        F1_list.append(f1)
+        print(f"Parameter: {num_hidden}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+        print("Precision per class:", precision_score(labels, y_pred, average=None))
+        print("Recall per class:", recall_score(labels, y_pred, average=None))
+        print("F1 Score per class:", f1_score(labels, y_pred, average=None))
+        h= nn.forward(test_images)
+        y_pred = np.argmax(h, axis=1)
+        path=os.path.join(output_path, f'predictions_{part}.csv')
+        pd.DataFrame({'prediction':y_pred}).to_csv(path, index=False)
+        # precision = precision_score(test_labels, y_pred, average='weighted')
+        # # print(precision_score(test_labels, y_pred, average=None))
+        # test_precision_list.append(precision)
+        # recall = recall_score(test_labels, y_pred, average='weighted')
+        # test_recall_list.append(recall)
+        # f1 = f1_score(test_labels, y_pred, average='weighted')
+        # test_F1_list.append(f1)
+        # print("Precision (class-wise):", precision_score(test_labels, y_pred, average=None))
+        # print("Recall (class-wise):", recall_score(test_labels, y_pred, average=None))
+        # print("F1 Score (class-wise):", f1_score(test_labels, y_pred, average=None))
+        # print(f"Parameter: {num_hidden}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+
+    # fig, ax = plt.subplots()
+    # ax.plot(range(1,5), precision_list, label='Precision')
+    # ax.plot(range(1,5), recall_list, label='Recall')
+    # ax.plot(range(1,5), F1_list, label='F1 Score')
+    # ax.plot(range(1,5), test_precision_list, label='Test Precision')
+    # ax.plot(range(1,5), test_recall_list, label='Test Recall')
+    # ax.plot(range(1,5), test_F1_list, label='Test F1 Score')
+    # ax.legend()
+    # ax.set_xlabel('Number of Hidden Layers')
+    # ax.set_ylabel('Score')
+    # plt.savefig(f'part_{part}.png')
+def d_e(part,output_path):
+    images = []
+    labels = []
+    file_names = []
+    batch_size=32
+    for filename in glob.glob('train/*/*.jpg'):
+        # print(filename)
+        im = Image.open(filename)
+        #resize to 28x28
+        im = im.resize((28, 28))
+        file_names.append(filename)
+        im = np.array(im).flatten()/255.0
+        images.append(im)
+        labels.append(int(filename.split('/')[-2]))
+    # print(len(images))
+    # print(images[0])
+    # print(labels[0])
+    # print(file_names[0])
+    y_true = np.zeros((len(labels), 43), dtype=int)
+    y_true[np.arange(len(labels)), np.array(labels, dtype=int)] = 1
+    images = np.array(images)
+    test_file_names = []
+    test_images = []
+    test_labels = []
+    test_csv=pd.read_csv('test_labels.csv')
+    for filename in glob.glob('test/*.jpg'):
+        im = Image.open(filename)
+        #resize to 28x28
+        im = im.resize((28, 28))
+        test_file_names.append(filename)
+        im = np.array(im).flatten()/255.0
+        test_images.append(im)
+        y_i=test_csv[test_csv['image']==filename.split('/')[-1]]['label']
+        test_labels.append(y_i.iloc[0])
+    y_true_test = np.zeros((len(test_labels), 43), dtype=int)
+    y_true_test[np.arange(len(test_labels)), np.array(test_labels, dtype=int)] = 1
+    test_images = np.array(test_images)
+    # nn=NeuralNetwork(3, 28*28*3, [128, 64, 32], 43, 'relu')
+    num_epochs=150
+    precision_list=[]
+    recall_list=[]
+    F1_list=[]
+    test_precision_list=[]
+    test_recall_list=[]
+    test_F1_list=[]
+    params_list=[[512], [512,256], [512,256,128],[512,256,128,64]]
+    num_hidden_layers_list=[1,2,3,4]
+    for params,num_hidden in zip(params_list, num_hidden_layers_list):
+        nn=NeuralNetwork(num_hidden, 28*28*3, params, 43, 'sigmoid' if part=='d'or part=='c' else 'relu')
+        permutation = np.random.permutation(len(images))
+        images_shuffled = images[permutation]
+        y = y_true[permutation]
+        n_0=nn.lr
+        prev_epoch_loss=-1
+        for j in tqdm(range(num_epochs)):
+            loss_list=[]
+            epoch_loss=0
+            if part!='c':
+                nn.lr=n_0/np.sqrt(1+j)
+            for i in range(0,len(images), batch_size):
+                batch=images_shuffled[i:i+batch_size]
+                y_batch = y[i:i+batch_size]
+                h=softmax(nn.forward(batch))
+                # print(y.shape)
+                loss=-np.sum(y_batch*np.log(h+1e-10))
+                epoch_loss+=loss
+                nn.backward(y_batch,h)
+                loss_list.append(loss)
+            print(epoch_loss)
+            if np.max(np.abs((epoch_loss/len(images)-prev_epoch_loss/len(images))))&lt;1e-4:
+                break
+            prev_epoch_loss=epoch_loss/len(images)
+        h= nn.forward(images)
+        y_pred = np.argmax(h, axis=1)
+        precision = precision_score(labels, y_pred, average='weighted')
+        precision_list.append(precision)
+        recall = recall_score(labels, y_pred, average='weighted')
+        print(recall_score(labels, y_pred, average=None))
+        recall_list.append(recall)
+        f1 = f1_score(labels, y_pred, average='weighted')
+        print(f1_score(labels, y_pred, average=None))
+        F1_list.append(f1)
+        print(f"Parameter: {num_hidden}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+        print("Precision per class:", precision_score(labels, y_pred, average=None))
+        print("Recall per class:", recall_score(labels, y_pred, average=None))
+        print("F1 Score per class:", f1_score(labels, y_pred, average=None))
+        h= nn.forward(test_images)
+        y_pred = np.argmax(h, axis=1)
+        pd.DataFrame({'prediction':y_pred}).to_csv(output_path+f'prediction_{part}.csv')
+        precision = precision_score(test_labels, y_pred, average='weighted')
+        # print(precision_score(test_labels, y_pred, average=None))
+        test_precision_list.append(precision)
+        recall = recall_score(test_labels, y_pred, average='weighted')
+        test_recall_list.append(recall)
+        f1 = f1_score(test_labels, y_pred, average='weighted')
+        test_F1_list.append(f1)
+        print("Precision (class-wise):", precision_score(test_labels, y_pred, average=None))
+        print("Recall (class-wise):", recall_score(test_labels, y_pred, average=None))
+        print("F1 Score (class-wise):", f1_score(test_labels, y_pred, average=None))
+        print(f"Parameter: {num_hidden}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+
+    fig, ax = plt.subplots()
+    ax.plot(range(1,5), precision_list, label='Precision')
+    ax.plot(range(1,5), recall_list, label='Recall')
+    ax.plot(range(1,5), F1_list, label='F1 Score')
+    ax.plot(range(1,5), test_precision_list, label='Test Precision')
+    ax.plot(range(1,5), test_recall_list, label='Test Recall')
+    ax.plot(range(1,5), test_F1_list, label='Test F1 Score')
+    ax.legend()
+    ax.set_xlabel('Number of Hidden Layers')
+    ax.set_ylabel('Score')
+    plt.savefig(f'part_{part}.png')
+from sklearn.neural_network import MLPClassifier
+def run_f(output_path, train, test):
+    images = []
+    labels = []
+    file_names = []
+    batch_size=32
+    for filename in glob.glob('train/*/*.jpg'):
+        # print(filename)
+        im = Image.open(filename)
+        #resize to 28x28
+        im = im.resize((28, 28))
+        file_names.append(filename)
+        im = np.array(im).flatten()/255.0
+        images.append(im)
+        labels.append(int(filename.split('/')[-2]))
+    # print(len(images))
+    # print(images[0])
+    # print(labels[0])
+    # print(file_names[0])
+    y_true = np.zeros((len(labels), 43), dtype=int)
+    y_true[np.arange(len(labels)), np.array(labels, dtype=int)] = 1
+    images = np.array(images)
+    test_file_names = []
+    test_images = []
+    test_labels = []
+    test_csv=pd.read_csv('test_labels.csv')
+    for filename in glob.glob('test/*.jpg'):
+        im = Image.open(filename)
+        #resize to 28x28
+        im = im.resize((28, 28))
+        test_file_names.append(filename)
+        im = np.array(im).flatten()/255.0
+        test_images.append(im)
+        y_i=test_csv[test_csv['image']==filename.split('/')[-1]]['label']
+        test_labels.append(y_i.iloc[0])
+    y_true_test = np.zeros((len(test_labels), 43), dtype=int)
+    y_true_test[np.arange(len(test_labels)), np.array(test_labels, dtype=int)] = 1
+    test_images = np.array(test_images)
+    precision_list=[]
+    recall_list=[]
+    F1_list=[]
+    test_precision_list=[]
+    test_recall_list=[]
+    test_F1_list=[]
+    params_list=[[512], [512,256], [512,256,128],[512,256,128,64]]
+    num_hidden_layers_list=[1,2,3,4]
+    for params in params_list:   
+        clf = MLPClassifier(random_state=1, hidden_layer_sizes=params, activation='relu', solver='sgd', alpha=0, batch_size=32, learning_rate='invscaling')
+        clf.fit(images, labels)
+        y_pred=clf.predict(test_images)
+        y_pred_train=clf.predict(images)
+        #Calculate precision, recall and f1 score for train and test predictions
+        precision = precision_score(labels, y_pred_train, average='micro')
+        precision_list.append(precision)
+        recall = recall_score(labels, y_pred_train, average='micro')
+        recall_list.append(recall)
+        f1 = f1_score(labels, y_pred_train, average='micro')
+        F1_list.append(f1)
+        print(f"Parameter: {params}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+        precision = precision_score(test_labels, y_pred, average='micro')
+        test_precision_list.append(precision)
+        recall = recall_score(test_labels, y_pred, average='micro')
+        test_recall_list.append(recall)
+        f1 = f1_score(test_labels, y_pred, average='micro')
+        test_F1_list.append(f1)
+        print(f"Parameter: {params}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+        #print class wise precision, recall and f1 score
+        precision = precision_score(test_labels, y_pred, average=None)
+        recall = recall_score(test_labels, y_pred, average=None)
+        f1 = f1_score(test_labels, y_pred, average=None)
+        print(f"Class wise Precision: {precision}")
+        print(f"Class wise Recall: {recall}")
+        print(f"Class wise F1 Score: {f1}")
+    fig, ax = plt.subplots()
+    ax.plot(range(1,5), precision_list, label='Precision')
+    ax.plot(range(1,5), recall_list, label='Recall')
+    ax.plot(range(1,5), F1_list, label='F1 Score')
+    ax.plot(range(1,5), test_precision_list, label='Test Precision')
+    ax.plot(range(1,5), test_recall_list, label='Test Recall')
+    ax.plot(range(1,5), test_F1_list, label='Test F1 Score')
+    ax.legend()
+    ax.set_xlabel('Number of Hidden Layers')
+    ax.set_ylabel('Score')
+    plt.savefig(f'{output_path}/part_f_{params}.png')
+def main():
+  """
+  Main function to parse arguments and execute the specified part.
+  """
+  # 1. Create the parser
+  parser = argparse.ArgumentParser(
+      description="Script to run different parts based on command-line argument."
+  )
+  parser.add_argument('training_data', type=str, help='Path to the training data file.')
+  parser.add_argument('test_data', type=str, help='Path to the test data file.')
+  parser.add_argument('output_dir', type=str, help='Directory to save the output files.')
+
+  parser.add_argument(
+      'part', # This makes it a positional argument (e.g., python script.py b)
+      type=str,
+      choices=['b', 'c', 'd', 'e', 'f'],
+      help="Specify the part of the script to run (choose from 'b', 'c', 'd', 'e', 'f)."
+  )
+  args = parser.parse_args()
+
+  selected_part = args.part
+
+  print(f"Argument provided: part = '{selected_part}'")
+
+
+  if selected_part == 'b':
+      b(args.training_data,args.test_data,args.output_dir)
+  elif selected_part in ['c', 'd', 'e']:
+      e(selected_part, args.output_dir, args.training_data, args.test_data)
+  elif selected_part == 'f':
+      run_f(args.output_dir)
+
+# Standard Python entry point check:
+# Ensures that main() is called only when the script is executed directly
+# (not when it's imported as a module).
+if __name__ == "__main__":
+  main()
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
