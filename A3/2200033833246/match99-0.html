@@ -1,0 +1,837 @@
+<HTML>
+<HEAD>
+<TITLE>./A3_processed_new_hash/combined_BCX8W.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A3_processed_new_hash/combined_BCX8W.py<p><PRE>
+
+
+import numpy as np
+import copy
+import matplotlib.pyplot as plt
+class node:
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match99-1.html#3" TARGET="1"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    def __init__(self, var_split = None, split_thresh = None, freq_label = None, *, node_value = None):
+        self.var_split = var_split  # feature index to split on
+        self.children = {}    # children nodes
+        self.node_value = node_value  # value of the node (if leaf node)  
+        self.split_thresh = split_thresh  # threshold value for splitting
+        self.freq_label = freq_label       
+</FONT>
+    def is_leaf_node(self):
+        return self.node_value is not None  # Check if the node is a leaf node
+
+class DTC:
+
+    def __init__(self, max_depth = None):
+        self.max_depth = max_depth
+        self.root = None
+    
+    def fit(self, X, Y):
+        self.root = self.grow_tree(X, Y)
+    
+    def grow_tree(self, X, Y, depth = 0):
+        # Check if all labels are the same or if max depth is reached
+        if len(set(Y)) == 1 or (self.max_depth is not None and depth &gt;= self.max_depth):
+            # print(Y, depth)  # Debugging statement
+            return node(node_value= self.frequent_label(Y))  # Return a leaf node with the most frequent label
+        # Check if there are no more features to split on   
+        split_feat, split_threshold = self.split(X, Y)
+
+        if split_feat is None:
+            return node(node_value= self.frequent_label(Y))  # Return a leaf node with the most frequent label
+        
+        # print(split_threshold, type(split_threshold), split_feat, depth)  # Debugging statement
+        if isinstance(split_threshold, np.ndarray):  # Categorical feature
+            n = node(split_feat,split_threshold)
+            n.freq_label = self.frequent_label(Y)
+            for item in split_threshold:
+                indices = X[:, split_feat] == item
+                X_child = X[indices]
+                Y_child = Y[indices]
+                # X_ch = np.delete(X_child, split_feat, axis=1)
+                n.children[item] = self.grow_tree(X_child, Y_child, depth + 1)
+               
+        else:  # Continuous feature
+            left_indices = X[:, split_feat] &lt;= split_threshold 
+            right_indices = X[:, split_feat] &gt; split_threshold
+            # print(right_indices)  # Debugging statement
+            left_X = X[left_indices]
+            left_Y = Y[left_indices]    
+            right_X = X[right_indices]
+            right_Y = Y[right_indices]
+            n = node(split_feat, split_threshold)  # Create a new node with the split feature and threshold
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match99-1.html#0" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            if len(left_Y) &gt; 0:
+                n.children['left'] = self.grow_tree(left_X, left_Y, depth + 1)
+            if len(right_Y) &gt; 0:
+                n.children['right'] = self.grow_tree(right_X, right_Y, depth + 1)
+            n.freq_label = self.frequent_label(Y)
+</FONT>            
+        return n  # Return the node
+    
+    def frequent_label(self, Y):
+        return max(set(Y), key=list(Y).count)
+    
+    def split(self, X, Y):
+        max_gain = -1
+        best_feat = None 
+        best_thresh = None   
+        n_feat = X.shape[1]
+        for feature in range(n_feat):
+            if type(X[:,feature][0]) == int:
+                (gain, Thresh) = self.InfGain_Binary(X[:, feature], Y)
+            else:
+                (gain, Thresh) = self.InfGain_MW(X[:, feature], Y)
+            if gain &gt; max_gain:
+                max_gain = gain
+                best_feat = feature     
+                best_thresh = Thresh
+        return (best_feat, best_thresh)
+
+    
+    def entropy(self, Y):
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match99-1.html#2" TARGET="1"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        cls, freq = np.unique(Y, return_counts=True)
+        prob = freq /len(Y)
+        return -np.sum(prob * np.log2(prob + 1e-10))
+    
+    def InfGain_MW(self, X_col, Y):
+        vals = np.unique(X_col)
+</FONT>        parent_entropy = self.entropy(Y)
+        wt_entropy = 0
+        for val in vals:
+            subset_Y = Y[X_col == val]
+            wt_entropy += (len(subset_Y) / len(Y)) * self.entropy(subset_Y)
+        InfoGain = parent_entropy - wt_entropy
+        return (InfoGain, vals) # Return the information gain and threshold (None for categorical features)
+    
+    def InfGain_Binary(self, X_col, Y):
+        median_val = np.median(X_col)
+        left_indices = X_col &lt;= median_val
+        right_indices = X_col &gt; median_val
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match99-1.html#4" TARGET="1"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        left_entropy = self.entropy(Y[left_indices])
+        right_entropy = self.entropy(Y[right_indices])
+        parent_entropy = self.entropy(Y)
+        wt_entropy = (len(Y[left_indices]) / len(Y)) * left_entropy + (len(Y[right_indices]) / len(Y)) * right_entropy
+</FONT>        InfoGain = parent_entropy - wt_entropy
+        return (InfoGain, median_val)   # Return the information gain and threshold (median for binary features)     
+    
+    def predict(self, X):
+        return np.array([self.traverse_and_predict(x) for x in X])
+
+    def traverse_and_predict(self, x):  
+        node = self.root
+        while not node.is_leaf_node():
+            # print(node.var_split, node.split_thresh, x[node.var_split], node.node_value, node.children)  # Debugging statement
+            if isinstance(node.split_thresh, np.ndarray):
+                # print(node.var_split, x[node.var_split])
+                if x[node.var_split] in node.children:
+                    node = node.children[x[node.var_split]]
+                else:
+                    return node.freq_label  # Return the most frequent label if the value is not found in the children 
+            else:
+                # print(x[node.var_split], node.var_split, node.split_thresh)
+                if x[node.var_split] &lt;= node.split_thresh:
+                    node = node.children['left']
+                else:
+                    node = node.children['right']               
+
+        return node.node_value  # Return the predicted label for the leaf node  
+    
+def accuracy(Ytr, Ypr):
+    acc = np.mean(Ytr == Ypr)
+    return acc
+
+def count_nodes (node):
+    if node is None or node.is_leaf_node():
+        return 1
+    return 1 + sum(count_nodes(branch) for branch in node.children.values())
+
+def node_prune(node):
+    node.children = None
+    node.split_thresh = None
+    node.var_split = None
+    node.node_value = node.freq_label
+
+def all_prunable_node(node):
+    list_prunable_nodes = []
+    count = 0
+    def dfs(current_node, count):
+        count += 1
+        # print(count)
+        if current_node is None:
+            print('current Node is None')
+            return
+        if current_node.is_leaf_node():
+            # print('leaf node')
+            return
+        children = current_node.children.values()
+        if all(branch.is_leaf_node() for branch in children):
+            list_prunable_nodes.append(current_node)
+
+        for branch in children:
+            dfs(branch, count)
+    
+    dfs(node, count)
+    return(list_prunable_nodes)
+    
+def post_prune(tree, X_tr, Y_tr, X_val, Y_val, X_te, Y_te):
+    pruned_tree = copy.deepcopy(tree)
+    accuracies_nodecount = []
+    def evaluate():
+        acc_tr = accuracy(Y_tr, pruned_tree.predict(X_tr))
+        # print(acc_tr)
+        acc_val = accuracy(Y_val, pruned_tree.predict(X_val))
+        # print(acc_val)
+        acc_te = accuracy(Y_te, pruned_tree.predict(X_te))
+        # print(acc_te)
+        # print(acc_tr, acc_val, acc_te)
+        return acc_tr, acc_val, acc_te
+    
+    acc_tr, acc_val, acc_te = evaluate()
+    accuracies_nodecount.append((count_nodes(pruned_tree.root), acc_tr, acc_val, acc_te))
+    print(count_nodes(pruned_tree.root), acc_tr, acc_val, acc_te)
+    count = 0
+    while True:
+        best_val_acc = acc_val
+        best_node = None
+        acc_node = {}
+        list_prunable_nodes = all_prunable_node(pruned_tree.root)
+        # print(list_prunable_nodes)
+        # print(len(list_prunable_nodes))
+        for node in list_prunable_nodes:
+            backup = copy.deepcopy(node)
+            node_prune(node)
+            new_acc_val = accuracy(Y_val, pruned_tree.predict(X_val))
+            if new_acc_val &gt;= best_val_acc:
+                best_val_acc = new_acc_val
+                best_node = node
+                best_backup = backup
+            node.children = backup.children
+            node.split_thresh = backup.split_thresh
+            node.var_split = backup.var_split
+            node.node_value = backup.node_value
+
+        if best_node is None:
+            break
+        node_prune(best_node)
+        acc_tr, acc_val, acc_te = evaluate()
+        # print(acc_tr, acc_val, acc_te)
+        accuracies_nodecount.append((count_nodes(pruned_tree.root), acc_tr, acc_val, acc_te))
+        count = count + 1
+        if count%50 == 0:
+            print(count_nodes(pruned_tree.root), acc_tr, acc_val, acc_te)
+        if count &gt; 500:
+            break
+    
+    return pruned_tree, accuracies_nodecount
+
+def prune_node_vs_accuracy(pruning_stats):
+    n_nodes, acc_tr, acc_val, acc_te = zip(*pruning_stats)
+    plt.figure()
+    plt.plot(n_nodes, acc_tr, label='Training Accuracy')
+    plt.plot(n_nodes, acc_val, label='Validation Accuracy')
+    plt.plot(n_nodes, acc_te, label='Test Accuracy')
+    plt.xlabel ('Number of Nodes')
+    plt.ylabel('Accuracy')
+    plt.title("Comparison of nodes vs accuracy")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+
+
+
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
+
+
+get_ipython().run_line_magic('reset', '-f')
+
+from sklearn.metrics import accuracy_score
+import pandas as pd
+import numpy as np
+import sys
+import os
+
+def main():
+    if len(sys.argv) !=6:
+        print('Check all the required arguments')
+        sys.exit(1)
+
+path_train = sys.argv[1]
+path_val = sys.argv[2]
+path_test = sys.argv[3]
+output_folder = sys.argv[4]
+que_part = sys.argv[5].lower()
+
+
+get_ipython().run_line_magic('run', 'DecTree.py')
+
+df_train = pd.read_csv('train.csv').to_numpy()
+df_valid = pd.read_csv('valid.csv').to_numpy()
+df_test = pd.read_csv('test.csv').to_numpy()
+df_train = np.delete(df_train, 4, axis=1) # Remove the 4th column as 3rd and 4th columns are same   
+df_valid = np.delete(df_valid, 4, axis=1) # Remove the 4th column as 3rd and 4th columns are same
+df_test = np.delete(df_test, 4, axis=1) # Remove the 4th column as 3rd and 4th columns are same
+Inp_train = df_train[:, :-1] # Features
+Out_train = df_train[:, -1] # Labels
+Inp_valid = df_valid[:, :-1] # Features
+Out_valid = df_valid[:, -1] # Labels
+Inp_test = df_test[:, :-1] # Features
+Out_test = df_test[:, -1] # Labels
+A = {}
+depth_list = list(range(5,56,5)) # List of depths to test
+for depth in depth_list:
+    A[depth] = {}
+    A[depth]['cls'] = DTC(max_depth = depth) # Create a new instance of DTC for each depth
+    A[depth]['cls'].fit(Inp_train, Out_train) # Fit the model on training data
+    A[depth]['pred_valid'] = A[depth]['cls'].predict(Inp_valid) # Predict on validation data
+    A[depth]['acc_valid'] = accuracy_score(Out_valid, A[depth]['pred_valid']) # Calculate accuracy
+    A[depth]['pred_train'] = A[depth]['cls'].predict(Inp_train) # Predict on training data
+    A[depth]['acc_train'] = accuracy_score(Out_train, A[depth]['pred_train']) # Calculate accuracy
+    A[depth]['pred_test'] = A[depth]['cls'].predict(Inp_test) # Predict on test data
+    A[depth]['acc_test'] = accuracy_score(Out_test, A[depth]['pred_test']) # Calculate accuracy
+    print(f'depth {depth} completed')
+
+import matplotlib.pyplot as plt
+plt.plot(depth_list, [A[depth]['acc_train'] for depth in depth_list], label='Train Accuracy')
+plt.plot(depth_list, [A[depth]['acc_valid'] for depth in depth_list], label='Validation Accuracy')
+plt.plot(depth_list, [A[depth]['acc_test'] for depth in depth_list], label='Test Accuracy')
+plt.xlabel('Tree Depth')    
+plt.ylabel('Accuracy')
+plt.title('Decision Tree Classifier Accuracy vs Tree Depth')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+from tabulate import tabulate
+data = [["{:.4f}".format(A[depth][acc]) for depth in depth_list] for acc in ['acc_train', 'acc_valid', 'acc_test']]
+headers = list(range(5,56,5))
+print(tabulate(data, headers=headers, tablefmt='grid'))
+
+
+# In[2]:
+
+
+import pandas as pd
+import numpy as np
+from sklearn.metrics import accuracy_score
+get_ipython().run_line_magic('run', 'DecTree.py')
+df_train = pd.read_csv('train.csv')
+df_train.drop(columns= 'education.num', inplace=True) # Remove the first column if it is an index column
+Out_train = df_train['income'].to_numpy() # Labels
+df_train.drop(columns= ['income'], inplace=True) # Features
+train_encoded = pd.get_dummies(df_train, columns= ['workclass', 'education','marital.status','occupation','relationship','race','sex','native.country']) # One-hot encoding for categorical features
+Inp_train = train_encoded.to_numpy() # Features
+
+df_valid = pd.read_csv('valid.csv')
+df_valid.drop(columns= 'education.num', inplace=True) # Remove the first column if it is an index column
+Out_valid = df_valid['income'].to_numpy() # Labels
+df_valid.drop(columns= ['income'], inplace=True) # Features
+valid_encoded = pd.get_dummies(df_valid, columns= ['workclass', 'education','marital.status','occupation','relationship','race','sex','native.country'])
+valid_encoded.insert(36, 'occupation_ Armed-Forces', False) 
+valid_encoded.insert(76, 'native.country_ Holand-Netherlands', False) 
+valid_encoded.insert(98, 'native.country_ Thailand', False) 
+Inp_valid = valid_encoded.to_numpy() # Features
+
+df_test = pd.read_csv('test.csv')
+df_test.drop(columns= 'education.num', inplace=True) # Remove the first column if it is an index column
+Out_test = df_test['income'].to_numpy() # Labels
+df_test.drop(columns= ['income'], inplace=True) # Features
+test_encoded = pd.get_dummies(df_test, columns= ['workclass', 'education','marital.status','occupation','relationship','race','sex','native.country'])
+test_encoded.insert(76, 'native.country_ Holand-Netherlands', False)
+Inp_test = test_encoded.to_numpy() # Features
+
+
+ 
+
+
+# In[24]:
+
+
+B = {}
+depth_list = list(range(5,56,5)) # List of depths to test
+for depth in depth_list:
+    B[depth] = {}
+    B[depth]['cls'] = DTC(max_depth = depth) # Create a new instance of DTC for each depth
+    B[depth]['cls'].fit(Inp_train, Out_train) # Fit the model on training data
+    B[depth]['pred_valid'] = B[depth]['cls'].predict(Inp_valid) # Predict on validation data
+    B[depth]['acc_valid'] = accuracy_score(Out_valid, B[depth]['pred_valid']) # Calculate accuracy
+    B[depth]['pred_train'] = B[depth]['cls'].predict(Inp_train) # Predict on training data
+    B[depth]['acc_train'] = accuracy_score(Out_train, B[depth]['pred_train']) # Calculate accuracy
+    B[depth]['pred_test'] = B[depth]['cls'].predict(Inp_test) # Predict on test data
+    B[depth]['acc_test'] = accuracy_score(Out_test, B[depth]['pred_test']) # Calculate accuracy
+    print(f'depth {depth} completed')
+
+import matplotlib.pyplot as plt
+plt.plot(depth_list, [B[depth]['acc_train'] for depth in depth_list], label='Train Accuracy')   
+plt.plot(depth_list, [B[depth]['acc_valid'] for depth in depth_list], label='Validation Accuracy')
+plt.plot(depth_list, [B[depth]['acc_test'] for depth in depth_list], label='Test Accuracy')
+plt.xlabel('Tree Depth')    
+plt.ylabel('Accuracy')
+plt.title('Decision Tree Classifier Accuracy vs Tree Depth')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+from tabulate import tabulate
+data = [["{:.4f}".format(B[depth][acc]) for depth in depth_list] for acc in ['acc_train', 'acc_valid', 'acc_test']]
+headers = list(range(5,56,5))
+print(tabulate(data, headers=headers, tablefmt='grid'))
+
+
+# In[47]:
+
+
+
+get_ipython().run_line_magic('run', 'DecTree.py')
+from multiprocessing import Pool
+def prune_and_plot(tree_depth):
+    dt = B[tree_depth]['cls']
+    pruned_dt, accuracies = post_prune(dt, Inp_train, Out_train, Inp_valid, Out_valid, Inp_test, Out_test)
+    prune_node_vs_accuracy(accuracies)
+    return (accuracies)
+
+with Pool (processes = 4) as pool:
+        data = [25,35, 45, 55]
+        results = pool.map(prune_and_plot,data)
+
+from tabulate import tabulate
+data = [["{:.4f}".format(B[depth][acc]) for depth in depth_list] for acc in ['acc_train', 'acc_valid', 'acc_test']]
+headers = list(range(5,56,5))
+print(tabulate(data, headers=headers, tablefmt='grid'))
+
+
+# In[ ]:
+
+
+from sklearn.tree import DecisionTreeClassifier
+tree_depth = [25,35,45,55]
+acc_tr, acc_val, acc_te = [], [], []
+C= {}
+for depth in tree_depth:
+    C[depth] = {}
+    C[depth]['clf'] = DecisionTreeClassifier(criterion='entropy', max_depth=depth, random_state= 42)
+    C[depth]['clf'].fit(Inp_train, Out_train)
+    C[depth]['acc_train'] = accuracy_score(Out_train, C[depth]['clf'].predict(Inp_train))
+    C[depth]['acc_valid'] = accuracy_score(Out_valid, C[depth]['clf'].predict(Inp_valid))
+    C[depth]['acc_test'] = accuracy_score(Out_test, C[depth]['clf'].predict(Inp_test))
+
+    # acc_tr.append(train_acc)
+    # acc_val.append(val_acc)
+    # acc_te.append(test_acc)
+    print(f'depth {depth} completed')
+
+plt.plot(tree_depth, [C[depth]['acc_train'] for depth in tree_depth], label='Train Accuracy')   
+plt.plot(tree_depth, [C[depth]['acc_valid'] for depth in tree_depth], label='Validation Accuracy')
+plt.plot(tree_depth, [C[depth]['acc_test'] for depth in tree_depth], label='Test Accuracy')
+plt.xlabel('Tree Depth')    
+plt.ylabel('Accuracy')
+plt.title('Decision Tree Classifier Accuracy vs Tree Depth')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+from tabulate import tabulate
+data = [["{:.4f}".format(C[depth][acc]) for depth in tree_depth] for acc in ['acc_train', 'acc_valid', 'acc_test']]
+headers = [25, 35, 45, 55]
+print(tabulate(data, headers=headers, tablefmt='grid'))
+
+
+# In[35]:
+
+
+from sklearn.tree import DecisionTreeClassifier
+cost_complexity_pruning = [0.0001, 0.001, 0.01, 0.1, 0.2]
+acc_tr, acc_val, acc_te = [], [], []
+D= {}
+for ccp in cost_complexity_pruning:
+    D[ccp] = {}
+    D[ccp]['clf'] = DecisionTreeClassifier(criterion='entropy', ccp_alpha=ccp, random_state= 42)
+    D[ccp]['clf'].fit(Inp_train, Out_train)
+    D[ccp]['acc_train'] = accuracy_score(Out_train, D[ccp]['clf'].predict(Inp_train))
+    D[ccp]['acc_valid'] = accuracy_score(Out_valid, D[ccp]['clf'].predict(Inp_valid))
+    D[ccp]['acc_test'] = accuracy_score(Out_test, D[ccp]['clf'].predict(Inp_test))
+
+    # acc_tr.append(train_acc)
+    # acc_val.append(val_acc)
+    # acc_te.append(test_acc)
+    print(f'ccp {ccp} completed')
+
+plt.plot(cost_complexity_pruning, [D[ccp]['acc_train'] for ccp in cost_complexity_pruning], label='Train Accuracy')   
+plt.plot(cost_complexity_pruning, [D[ccp]['acc_valid'] for ccp in cost_complexity_pruning], label='Validation Accuracy')
+plt.plot(cost_complexity_pruning, [D[ccp]['acc_test'] for ccp in cost_complexity_pruning], label='Test Accuracy')
+plt.xlabel('Cost Complexity Pruning Alpha')
+plt.xscale('log')    
+plt.ylabel('Accuracy')
+plt.title('Decision Tree Classifier Accuracy vs CCP alpha')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+from tabulate import tabulate
+data = [["{:.4f}".format(D[ccp][acc]) for ccp in cost_complexity_pruning] for acc in ['acc_train', 'acc_valid', 'acc_test']]
+# headers = [25, 35, 45, 55]
+print(tabulate(data, headers=cost_complexity_pruning, tablefmt='grid'))
+
+
+# In[46]:
+
+
+from sklearn.ensemble import RandomForestClassifier
+from itertools import product
+
+grid_para = {}
+grid_para['n_est'] = list(range(50,351,100))
+grid_para['feat_max'] = np.arange(0.1,1.1, 0.2)
+grid_para['min_split_samp'] = list(range(2,11,2))
+
+acc_final = []
+
+for num_est, maxnum_feat, minnum_split in product(grid_para['n_est'], grid_para['feat_max'], grid_para['min_split_samp']):
+    RFC = RandomForestClassifier(criterion= 'entropy', n_estimators= num_est, max_features= maxnum_feat, min_samples_split= minnum_split, oob_score= True, bootstrap= True, random_state= 42, n_jobs= -1)
+    RFC.fit(Inp_train, Out_train)
+    acc_tr = RFC.score(Inp_train, Out_train)
+    acc_oob = RFC.oob_score_
+    acc_val = RFC.score(Inp_valid, Out_valid)
+    acc_te = RFC.score(Inp_test, Out_test)
+
+    acc_final.append({'n_estimator': num_est, 'max_features': maxnum_feat, 'min_samples_split' : minnum_split, 'training_accuracy' : acc_tr, 'oob_accuracy' : acc_oob, 'validation_accuracy' : acc_val, 'test_accuracy' : acc_te })
+
+best_model = max(acc_final, key=lambda x: x['oob_accuracy'])
+for key,val in best_model.items():
+    print(f'{key} : {val}')
+
+
+
+
+
+import numpy as np
+from tqdm import trange
+
+class NeuNet:
+    def __init__(self, n_feat, hid_layers, n_class, learn_rate=0.01, mini_batch_size=64, seed= 42):
+        np.random.seed(seed)
+        self.n_feat = n_feat
+        self.hid_layers = hid_layers    # hidden layers would be a list of integers indicating the number of neurons in each layer
+        self.n_class = n_class
+        self.learn_rate = learn_rate
+        self.mini_batch_size = mini_batch_size
+        self.weights = []
+        self.biases = []
+        self.init_params() # Initialize the weights and biases of the network
+    
+    def init_params(self):
+        dim_layers = [self.n_feat] + self.hid_layers + [self.n_class]
+        for i in range(1, len(dim_layers)):
+            weight = np.random.randn(dim_layers[i], dim_layers[i-1]) * np.sqrt(1./dim_layers[i-1]) # Random initialization around zero to break the symmetry for each perceptor, otherwise each perceptron will learn the same thing
+            bias = np.zeros((dim_layers[i], 1)) # Bias is initialized to zero
+            self.weights.append(weight)
+            self.biases.append(bias)
+
+
+    def sigm(self, Z):
+        return 1 / (1 + np.exp(-Z))
+
+    def der_sigm(self, x):
+        return x * (1 - x)
+    
+    def soft_max(self, A):
+        """ A is a matrix, we are applying softmax to each column """
+        A_numstable = A - np.max(A, axis=0, keepdims=True) # for numerical stability
+        exp_A = np.exp(A_numstable)
+        sm_scores = exp_A / np.sum(exp_A, axis=0, keepdims=True)
+        return sm_scores
+     
+
+    def forward_pass(self, input_data):
+        """Function for 1 forward pass
+        Input data is a matrix of shape (n_feat, n_samples)
+        """
+        post_active = [input_data]
+        pre_active = []
+        ID = input_data # Intermediate Output
+
+        # Forward pass trough the hidden layers
+
+        for i in range(len(self.hid_layers)):
+            # print(i)
+            # print(len(self.weights))
+            Z = np.dot(self.weights[i], ID) + self.biases[i]
+            pre_active.append(Z)
+            ID = self.sigm(Z)
+            post_active.append(ID)
+
+        # Forward pass trough the output layer
+
+        ZL = np.dot(self.weights[-1], ID) + self.biases[-1] 
+        pre_active.append(ZL)
+        LL = self.soft_max(ZL)
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match99-1.html#1" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        post_active.append(LL)
+
+        return post_active, pre_active
+    
+    def cross_entropy_loss(self, Ypred, Ytr):
+        n_sample = Ytr.shape[1] # number of samples
+        cr_ent_loss = -np.sum(Ytr * np.log(Ypred + 1e-7))/n_sample
+        return cr_ent_loss
+
+    def backprop(self, post_active, Ytr):
+</FONT>        """Function for 1 backpropagation pass
+        Ytr is the one hot encoded true labels matrix of shape (n_class, n_samples)"""
+        grads = {}
+        m = Ytr.shape[1] # number of samples
+        L = len(self.hid_layers) + 1 # number of layers
+
+        # Derviative of the loss function with respect to the output layer
+        derZL = post_active[-1] - Ytr # dL/dZL
+        derW_L = np.dot(derZL, post_active[-2].T)
+        derB_L = np.sum(derZL, axis=1, keepdims=True)
+        grads["dW_" + str(L)] = derW_L / m
+        grads["dB_" + str(L)] = derB_L / m
+
+        derA_last = np.dot(self.weights[-1].T, derZL)
+
+        # Backpropagation through the hidden layers
+        for j in range(L-1, 0, -1):
+            derZ = derA_last * self.der_sigm(post_active[j])
+            derW = np.dot(derZ, post_active[j-1].T)
+            derB = np.sum(derZ, axis=1, keepdims=True)
+            grads["dW_" + str(j)] = derW/m
+            grads["dB_" + str(j)] = derB/m
+            if j &gt; 1:
+                derA_last = np.dot(self.weights[j-1].T, derZ)
+
+        return grads
+
+    def para_update(self, grads):
+        for i in range(len(self.weights)):
+            # print(grads.keys())
+            self.weights[i] -= self.learn_rate * grads["dW_" + str(i+1)]
+            self.biases[i] -= self.learn_rate * grads["dB_" + str(i+1)]
+
+    def train(self, InpD, OutD, stopp_criteria=0.01):
+        m = InpD.shape[1]
+        epoch = 0
+        avg_loss_sample = []
+        while True:
+            shuffle_index = np.random.permutation(m)
+            InpD_sh = InpD[:, shuffle_index]
+            OutD_sh = OutD[:, shuffle_index]
+            epoch = epoch + 1
+            self.learn_rate = (0.01)/(np.sqrt(epoch)) # Learning rate decay
+            print(f"Learning rate: {self.learn_rate:.4f}")
+    
+            loss_for_epoch = 0
+            for j in range(0, m, self.mini_batch_size):
+                mini_batch_input = InpD_sh[:, j:j+self.mini_batch_size]
+                mini_batch_output = OutD_sh[:, j:j+self.mini_batch_size]
+
+                post_active, pre_active = self.forward_pass(mini_batch_input)
+                loss_for_epoch += self.cross_entropy_loss(post_active[-1], mini_batch_output)
+
+                grads = self.backprop(post_active, mini_batch_output)
+                self.para_update(grads) 
+
+            avg_loss = loss_for_epoch/(m/self.mini_batch_size)
+            # print(avg_loss)
+            avg_loss_sample.append(avg_loss)
+            # print(f"Average loss for the epoch {epoch}th epoch: {avg_loss_sample[-1]:.4f}\n")
+            # if epoch % 10 == 0:
+            #     k = np.abs(avg_loss_sample[-1] - avg_loss_sample[-2])
+            #     print(f" Difference in Average loss for the epoch {epoch}th epoch: {k:.4f}\n")
+                # print(avg_loss_sample)
+            if epoch &gt;= 2:
+                if np.abs(avg_loss_sample[-1] - avg_loss_sample[-2]) &lt; stopp_criteria:
+                    print(f"Training stopped at the {epoch}th epoch")
+                    break
+            if epoch % 20 == 0:
+                print(f'Epoch {epoch} loss: {avg_loss:.4f}')
+
+            if epoch &gt;= 200:
+                print("Maximum epochs reached, training stopped.")
+                break
+
+
+    def predict(self, test_data):
+        """Function to predict the class of the test data"""
+        post_active, pre_active = self.forward_pass(test_data)
+        pred = np.argmax(post_active[-1], axis=0)
+        return pred
+
+
+
+
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[13]:
+
+
+get_ipython().run_line_magic('reset', '-f')
+from PIL import Image
+import numpy as np
+from tqdm import trange
+import os
+
+k = os.listdir('train')
+n_classes = 43
+cls = 0
+Inp_Image = []
+Label_Image = []
+test_image = []
+Train_Label = []
+for j in trange(len(k), desc='Loading classes', leave=True):
+    i = os.listdir('train/' + k[j])
+    for l in trange(len(i), leave=False, desc='Loading images'):
+        img = Image.open('train/' + k[j] + '/' + i[l])
+        img_arr = np.array(img)/255.0
+        img_arr = img_arr.reshape(-1,1)
+        out_img = np.zeros(n_classes)
+        out_img[cls] = 1.0
+        out_img = out_img.reshape(-1,1)
+        class_image = np.hstack((class_image, img_arr)) if 'class_image' in locals() else img_arr
+        out_image = np.hstack((out_image, out_img)) if 'out_image' in locals() else out_img
+        Train_Label.append(cls) # = np.hstack((Train_Label, cls)) if 'Train_Label' in locals() else cls
+    cls += 1
+    Inp_Image.append(class_image) # = np.hstack((Inp_Image, class_image)) if 'Inp_Image' in locals() else class_image
+    Label_Image.append(out_image) # = np.hstack((Label_Image, out_image)) if 'Label_Image' in locals() else out_image
+    class_image = None
+    out_image = None
+    del class_image
+    del out_image
+
+a = os.listdir('test')
+for j in trange(len(a), desc='Loading test images', leave=True):
+    img = Image.open('test/' + a[j])
+    img_arr = np.array(img)/255.0
+    img_arr = img_arr.reshape(-1,1)
+    test_image.append(img_arr) # = np.hstack((test_image, img_arr)) if 'test_image' in locals() else img_arr
+    # test_image = np.hstack((test_image, img_arr)) if 'test_image' in locals() else img_arr
+
+true_out = np.loadtxt('test_labels.csv', delimiter=',', skiprows=1, usecols=1)
+true_out = true_out.reshape(-1,1)
+
+
+# In[107]:
+
+
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import classification_report
+import matplotlib.pyplot as plt
+
+n_feat = 28 *28 *3
+hid_layer = [[512]]
+hidden_layer = [1, 5, 10, 50, 100]
+n_classes = 43
+learn_rate = 0.01
+batch_size = 32
+Train_Inp = np.hstack(Inp_Image)
+Train_onehot = np.hstack(Label_Image)
+Test_Inp = np.hstack(test_image)
+Train_Label = np.array(Train_Label).reshape(-1,1)
+
+
+stopp_criteria = [1, 0.1, 0.01, 0.001]
+Train_Acc = []
+Test_Acc = []
+Prec_train = []
+Prec_avg_train = []
+Prec_test = []
+Prec_avg_test = []
+Recall_train = []
+Recall_avg_train = []
+Recall_test = []
+Recall_avg_test = []
+F1_train = []
+F1_test = []
+F1_avg_train = []
+F1_avg_test = []
+get_ipython().run_line_magic('run', './NeuralNetwork.py')
+for k in hid_layer:
+    ANN = NeuNet(n_feat, k, n_classes, learn_rate, batch_size)
+    ANN.train(Train_Inp, Train_onehot, 0.001)
+    pred_out = ANN.predict(Test_Inp)
+    pred_train  = ANN.predict(Train_Inp)
+    pred_out = pred_out.reshape(-1,1)
+    pred_train = pred_train.reshape(-1,1)
+    acc_train = accuracy_score(Train_Label, pred_train)
+    Train_Acc.append(acc_train)
+    acc_test = accuracy_score(true_out, pred_out)
+    Test_Acc.append(acc_test)
+    Prec_test.append(precision_score(true_out, pred_out, average=None,zero_division=0))
+    Prec_train.append(precision_score(Train_Label, pred_train, average=None, zero_division=0))
+    Prec_avg_train.append(precision_score(Train_Label, pred_train, average='macro', zero_division=0))
+    Prec_avg_test.append(precision_score(true_out, pred_out, average='macro', zero_division=0))
+    Recall_test.append(recall_score(true_out, pred_out, average=None))
+    Recall_train.append(recall_score(Train_Label, pred_train, average=None))
+    Recall_avg_train.append(recall_score(Train_Label, pred_train, average='macro'))
+    Recall_avg_test.append(recall_score(true_out, pred_out, average='macro'))
+    F1_test.append(f1_score(true_out, pred_out, average=None))
+    F1_train.append(f1_score(Train_Label, pred_train, average=None))
+    F1_avg_train.append(f1_score(Train_Label, pred_train, average='macro'))
+    F1_avg_test.append(f1_score(true_out, pred_out, average='macro'))
+
+    print(f'Train Accuracy for Hidden Layer {k}: ', acc_train)
+    print(f'Test Accuracy for Hidden Layer {k}: ', acc_test)
+# plt.figure()
+# plt.plot(hid_layer, Train_Acc, label='Train Accuracy', marker='o')
+# plt.plot(hid_layer, Test_Acc, label='Test Accuracy', marker ='x')
+# # plt.plot(hidden_layer, Recall_avg_train, label='Avg Recall Train', marker='*')
+# # plt.plot(hidden_layer, Recall_avg_test, label='Avg Recall Test', marker='+')
+# # plt.xscale('log')
+# plt.xlabel('Stopping criteria')
+# plt.ylabel('Accuracy Score')
+# plt.title(f'Stopping criteria vs Accuracy for hidden layer {hid_layer}') 
+# plt.legend()
+# plt.grid(True)
+# plt.show()
+
+
+# In[104]:
+
+
+hid_layer = ['1', '5', '10', '50', '100']
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match99-1.html#5" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+plt.figure()
+plt.plot(hid_layer, Train_Acc, label='Train accuracy', marker='o')
+plt.plot(hid_layer, Test_Acc, label='Test accuracy', marker ='x')
+# plt.plot(hidden_layer, Recall_avg_train, label='Avg Recall Train', marker='*')
+# plt.plot(hidden_layer, Recall_avg_test, label='Avg Recall Test', marker='+')
+# plt.xscale('log')
+plt.xlabel('Hidden Layer')
+plt.ylabel('Accuracy Score')
+</FONT>plt.title(f'Hidden layer Units vs Accuracy for hidden layer') 
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+# In[102]:
+
+
+print('Train Accuracy: ', Train_Acc)
+print('Test Accuracy: ', Test_Acc)  
+print('F1_avg_train : ', F1_avg_train)
+print('F1_avg_test : ', F1_avg_test)
+
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
