@@ -1,0 +1,1269 @@
+<HTML>
+<HEAD>
+<TITLE>./A3_processed_new_hash/combined_1I4TJ.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A3_processed_new_hash/combined_1I4TJ.py<p><PRE>
+
+
+import sys
+import os
+import math
+import copy
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.preprocessing import LabelEncoder
+
+# --------------------------------
+# Node class for Decision Tree
+# --------------------------------
+class Node:
+    def __init__(self, is_leaf, prediction, attribute=None, threshold=None, children=None):
+        self.is_leaf = is_leaf
+        self.prediction = prediction
+        self.attribute = attribute
+        self.threshold = threshold
+        self.children = children  # list (for continuous) or dict (for categorical)
+
+# --------------------------------
+# Utility functions: Entropy and Information Gain
+# --------------------------------
+def entropy(labels):
+    values, counts = np.unique(labels, return_counts=True)
+    probs = counts / counts.sum()
+    return -np.sum(probs * np.log2(probs + 1e-9))  # small value to prevent log2(0)
+
+def info_gain_continuous(data, attribute, target):
+    threshold = data[attribute].median()
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match46-1.html#2" TARGET="1"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    left = data[data[attribute] &lt;= threshold]
+    right = data[data[attribute] &gt; threshold]
+    
+    if len(left) == 0 or len(right) == 0:
+        return 0, threshold
+
+    H_parent = entropy(data[target])
+</FONT>    H_left = entropy(left[target])
+    H_right = entropy(right[target])
+    
+    gain = H_parent - (len(left) / len(data)) * H_left - (len(right) / len(data)) * H_right
+    return gain, threshold
+
+def info_gain_categorical(data, attribute, target):
+    H_parent = entropy(data[target])
+<A NAME="6"></A><FONT color = #00FF00><A HREF="match46-1.html#6" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    values = data[attribute].unique()
+    H_conditional = 0
+    for val in values:
+        subset = data[data[attribute] == val]
+        if len(subset) == 0:
+</FONT>            continue
+        H_conditional += (len(subset) / len(data)) * entropy(subset[target])
+    gain = H_parent - H_conditional
+    return gain
+
+# --------------------------------
+# Recursive function to build the decision tree
+# --------------------------------
+def build_tree(data, features, target, max_depth, depth=0):
+    if len(data) == 0:
+        return None
+
+    majority = data[target].mode()[0]
+    
+    # Base case: if node is pure or maximum depth reached, return a leaf.
+    if len(np.unique(data[target])) == 1 or depth &gt;= max_depth:
+        return Node(is_leaf=True, prediction=majority)
+    
+    best_gain = -1
+    best_attr = None
+    best_threshold = None
+    best_type = None  # 'continuous' or 'categorical'
+    
+    for attr in features:
+        if len(data[attr].unique()) &lt;= 1:
+            continue
+
+        if pd.api.types.is_numeric_dtype(data[attr]):
+            gain, threshold = info_gain_continuous(data, attr, target)
+            if gain &gt; best_gain:
+                best_gain = gain
+                best_attr = attr
+                best_threshold = threshold
+                best_type = 'continuous'
+        else:
+            gain = info_gain_categorical(data, attr, target)
+            if gain &gt; best_gain:
+                best_gain = gain
+                best_attr = attr
+                best_threshold = None
+                best_type = 'categorical'
+    
+    if best_gain &lt;= 1e-6 or best_attr is None:
+        return Node(is_leaf=True, prediction=majority)
+    
+    if best_type == 'continuous':
+        left_data = data[data[best_attr] &lt;= best_threshold]
+        right_data = data[data[best_attr] &gt; best_threshold]
+        if len(left_data) == 0 or len(right_data) == 0:
+            return Node(is_leaf=True, prediction=majority)
+        left_child = build_tree(left_data, features, target, max_depth, depth + 1)
+        right_child = build_tree(right_data, features, target, max_depth, depth + 1)
+        return Node(is_leaf=False, prediction=majority, attribute=best_attr,
+                    threshold=best_threshold, children=[left_child, right_child])
+    else:
+        children = {}
+        for val in data[best_attr].unique():
+            subset = data[data[best_attr] == val]
+            child = build_tree(subset, features, target, max_depth, depth + 1)
+            children[val] = child
+        return Node(is_leaf=False, prediction=majority, attribute=best_attr, children=children)
+
+# --------------------------------
+# Function to predict the class label for a single instance.
+# --------------------------------
+def predict_instance(node, instance):
+    if node is None:
+        return None
+    if node.is_leaf:
+        return node.prediction
+    
+    attr = node.attribute
+    if node.threshold is not None:
+        if instance[attr] &lt;= node.threshold:
+            return predict_instance(node.children[0], instance)
+        else:
+            return predict_instance(node.children[1], instance)
+    else:
+        val = instance[attr]
+        if val in node.children:
+            return predict_instance(node.children[val], instance)
+        else:
+            return node.prediction
+
+# --------------------------------
+# Helper function to convert candidate path to a readable string.
+# --------------------------------
+def candidate_path_to_str(path):
+    if not path:
+        return "Root"
+    steps = []
+    for step in path:
+        typ, key = step
+        if typ == "list":
+            if key == 0:
+                steps.append("left")
+            elif key == 1:
+                steps.append("right")
+            else:
+                steps.append(str(key))
+        elif typ == "dict":
+            steps.append(f"[{key}]")
+    return "Root -&gt; " + " -&gt; ".join(steps)
+
+# --------------------------------
+# Functions for Post-Pruning (Part (c))
+# --------------------------------
+def count_nodes(node):
+    if node is None:
+        return 0
+    if node.is_leaf:
+        return 1
+    if node.threshold is not None:  # continuous node with children list
+        return 1 + count_nodes(node.children[0]) + count_nodes(node.children[1])
+    else:
+        return 1 + sum(count_nodes(child) for child in node.children.values())
+
+def collect_pruning_candidates(node, path=None):
+    if path is None:
+        path = []
+    candidates = []
+    if not node.is_leaf:
+        candidates.append((list(path), node))
+        if node.threshold is not None:
+            candidates.extend(collect_pruning_candidates(node.children[0], path + [('list', 0)]))
+            candidates.extend(collect_pruning_candidates(node.children[1], path + [('list', 1)]))
+        else:
+            for key, child in node.children.items():
+                candidates.extend(collect_pruning_candidates(child, path + [('dict', key)]))
+    return candidates
+
+def prune_node_at_path(tree, path):
+    if not path:
+        # Prune the root.
+        tree.is_leaf = True
+        tree.attribute = None
+        tree.threshold = None
+        tree.children = None
+        return
+    current = tree
+    for step in path[:-1]:
+        typ, key = step
+        if typ == 'list':
+            current = current.children[key]
+        else:
+            current = current.children[key]
+    last_step = path[-1]
+    typ, key = last_step
+    if typ == 'list':
+        candidate = current.children[key]
+        current.children[key] = Node(is_leaf=True, prediction=candidate.prediction)
+    else:
+        candidate = current.children[key]
+        current.children[key] = Node(is_leaf=True, prediction=candidate.prediction)
+
+def evaluate_tree(tree, df, target):
+    preds = df.apply(lambda row: predict_instance(tree, row), axis=1)
+    return np.mean(preds == df[target])
+
+def post_prune(tree, train_df, valid_df, test_df, target):
+    record = []
+    current_tree = tree
+    current_validation_acc = evaluate_tree(current_tree, valid_df, target)
+    record.append((count_nodes(current_tree), 
+                   evaluate_tree(current_tree, train_df, target),
+                   current_validation_acc, 
+                   evaluate_tree(current_tree, test_df, target)))
+    
+    iteration = 0
+    while True:
+        iteration += 1
+        print("\nPost-Pruning Iteration:", iteration, "Current validation accuracy:", current_validation_acc)
+        candidates = collect_pruning_candidates(current_tree)
+        print("Number of pruning candidates:", len(candidates))
+        best_candidate_acc = current_validation_acc
+        best_candidate_tree = None
+        best_candidate_path = None
+        for path, cand_node in candidates:
+            candidate_tree = copy.deepcopy(current_tree)
+            prune_node_at_path(candidate_tree, path)
+            candidate_val_acc = evaluate_tree(candidate_tree, valid_df, target)
+            # Use the helper function to print a proper candidate path.
+            path_str = candidate_path_to_str(path)
+            # print("Candidate path:", path_str, "-&gt; Validation Accuracy:", candidate_val_acc)
+            if candidate_val_acc &gt; best_candidate_acc:
+                best_candidate_acc = candidate_val_acc
+                best_candidate_tree = candidate_tree
+                best_candidate_path = path
+        if best_candidate_tree is not None and best_candidate_acc &gt; current_validation_acc:
+            print("Improvement found! Pruning node at path:",
+                  candidate_path_to_str(best_candidate_path),
+                  "improves validation accuracy to", best_candidate_acc)
+            current_tree = best_candidate_tree
+            current_validation_acc = best_candidate_acc
+            record.append((count_nodes(current_tree), 
+                           evaluate_tree(current_tree, train_df, target),
+                           evaluate_tree(current_tree, valid_df, target),
+                           evaluate_tree(current_tree, test_df, target)))
+        else:
+            print("No further pruning improves validation accuracy; stopping pruning.")
+            break
+    return current_tree, record
+
+# --------------------------------
+# Part (d): Decision Tree using scikit-learn
+# --------------------------------
+def run_part_d(train_df, valid_df, test_df, target, output_folder):
+    from sklearn.tree import DecisionTreeClassifier
+    from sklearn.preprocessing import LabelEncoder
+    
+    print("\nRunning Part (d): Using scikit-learn's DecisionTreeClassifier")
+    
+    # Copy dataframes to avoid modifying the originals
+    train_df = train_df.copy()
+    valid_df = valid_df.copy()
+    test_df = test_df.copy()
+    
+    # Preprocessing: Convert categorical variables to numeric using LabelEncoder
+    categorical_columns = []
+    for col in train_df.columns:
+        if col == target:
+            continue
+        if not pd.api.types.is_numeric_dtype(train_df[col]):
+            categorical_columns.append(col)
+    
+    # Apply LabelEncoder to each categorical column
+    label_encoders = {}
+    for col in categorical_columns:
+        le = LabelEncoder()
+        # Ensure all values in validation and test are also seen in training
+        all_values = pd.concat([train_df[col], valid_df[col], test_df[col]]).unique()
+        le.fit(all_values)
+        train_df[col] = le.transform(train_df[col])
+        valid_df[col] = le.transform(valid_df[col])
+        test_df[col] = le.transform(test_df[col])
+<A NAME="7"></A><FONT color = #0000FF><A HREF="match46-1.html#7" TARGET="1"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        label_encoders[col] = le
+    
+    # Prepare data
+    X_train = train_df.drop(columns=[target])
+    y_train = train_df[target]
+    X_valid = valid_df.drop(columns=[target])
+</FONT>    y_valid = valid_df[target]
+    X_test = test_df.drop(columns=[target])
+    y_test = test_df[target]
+    
+    # (i) Vary max_depth
+    depths = [25, 35, 45, 55]
+    train_accuracies_depth = []
+    valid_accuracies_depth = []
+    test_accuracies_depth = []
+    models_depth = {}
+    
+    print("\n(i) Varying max_depth parameter:")
+    for depth in depths:
+        model = DecisionTreeClassifier(criterion='entropy', max_depth=depth, random_state=42)
+        model.fit(X_train, y_train)
+        models_depth[depth] = model
+        
+        train_acc = model.score(X_train, y_train)
+        valid_acc = model.score(X_valid, y_valid)
+        test_acc = model.score(X_test, y_test)
+        
+        train_accuracies_depth.append(train_acc)
+        valid_accuracies_depth.append(valid_acc)
+        test_accuracies_depth.append(test_acc)
+        
+        print(f"Max Depth: {depth} | Train Accuracy: {train_acc:.4f} | Validation Accuracy: {valid_acc:.4f} | Test Accuracy: {test_acc:.4f}")
+    
+    # Find best depth based on validation accuracy
+    best_depth_idx = np.argmax(valid_accuracies_depth)
+    best_depth = depths[best_depth_idx]
+    best_depth_model = models_depth[best_depth]
+    
+    print(f"Best max_depth: {best_depth} with validation accuracy: {valid_accuracies_depth[best_depth_idx]:.4f}")
+    
+    # Plot accuracies vs max_depth
+    plt.figure(figsize=(10, 6))
+    plt.plot(depths, train_accuracies_depth, marker='o', label='Train Accuracy')
+    plt.plot(depths, valid_accuracies_depth, marker='s', label='Validation Accuracy')
+    plt.plot(depths, test_accuracies_depth, marker='^', label='Test Accuracy')
+    plt.xlabel('Maximum Depth')
+    plt.ylabel('Accuracy')
+    plt.title('Accuracy vs Maximum Depth (scikit-learn)')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(os.path.join(output_folder, 'accuracy_plot_d_max_depth.png'))
+    plt.close()
+    
+    # (ii) Default depth but vary ccp_alpha
+    ccp_alphas = [0.001, 0.01, 0.1, 0.2]
+    train_accuracies_ccp = []
+    valid_accuracies_ccp = []
+    test_accuracies_ccp = []
+    models_ccp = {}
+    
+    print("\n(ii) Varying ccp_alpha parameter (with default depth):")
+    for alpha in ccp_alphas:
+        model = DecisionTreeClassifier(criterion='entropy', ccp_alpha=alpha, random_state=42)
+        model.fit(X_train, y_train)
+        models_ccp[alpha] = model
+        
+        train_acc = model.score(X_train, y_train)
+        valid_acc = model.score(X_valid, y_valid)
+        test_acc = model.score(X_test, y_test)
+        
+        train_accuracies_ccp.append(train_acc)
+        valid_accuracies_ccp.append(valid_acc)
+        test_accuracies_ccp.append(test_acc)
+        
+        print(f"ccp_alpha: {alpha} | Train Accuracy: {train_acc:.4f} | Validation Accuracy: {valid_acc:.4f} | Test Accuracy: {test_acc:.4f}")
+    
+    # Find best ccp_alpha based on validation accuracy
+    best_ccp_idx = np.argmax(valid_accuracies_ccp)
+    best_ccp = ccp_alphas[best_ccp_idx]
+    best_ccp_model = models_ccp[best_ccp]
+    
+    print(f"Best ccp_alpha: {best_ccp} with validation accuracy: {valid_accuracies_ccp[best_ccp_idx]:.4f}")
+    
+    # Plot accuracies vs ccp_alpha
+    plt.figure(figsize=(10, 6))
+    plt.plot(ccp_alphas, train_accuracies_ccp, marker='o', label='Train Accuracy')
+    plt.plot(ccp_alphas, valid_accuracies_ccp, marker='s', label='Validation Accuracy')
+    plt.plot(ccp_alphas, test_accuracies_ccp, marker='^', label='Test Accuracy')
+    plt.xlabel('ccp_alpha')
+    plt.ylabel('Accuracy')
+    plt.title('Accuracy vs ccp_alpha (scikit-learn)')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(os.path.join(output_folder, 'accuracy_plot_d_ccp_alpha.png'))
+    plt.close()
+    
+    # Compare best models from (i) and (ii)
+    print("\nComparison of best models from parts (i) and (ii):")
+    print(f"Best max_depth model: Test Accuracy = {best_depth_model.score(X_test, y_test):.4f}")
+    print(f"Best ccp_alpha model: Test Accuracy = {best_ccp_model.score(X_test, y_test):.4f}")
+    
+    # Save predictions from the better of the two models (based on validation)
+    if valid_accuracies_depth[best_depth_idx] &gt; valid_accuracies_ccp[best_ccp_idx]:
+        best_final_model = best_depth_model
+        param_type = f"max_depth={best_depth}"
+    else:
+        best_final_model = best_ccp_model
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match46-1.html#1" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        param_type = f"ccp_alpha={best_ccp}"
+    
+    test_predictions = best_final_model.predict(X_test)
+    prediction_df = pd.DataFrame({'prediction': test_predictions})
+    prediction_file = os.path.join(output_folder, 'prediction_d.csv')
+    prediction_df.to_csv(prediction_file, index=False)
+    print(f"Test predictions saved to: {prediction_file} using best model with {param_type}")
+</FONT>    
+    return {
+        'best_depth_model': best_depth_model,
+        'best_ccp_model': best_ccp_model,
+        'best_depth': best_depth,
+        'best_ccp': best_ccp,
+        'depth_scores': (train_accuracies_depth, valid_accuracies_depth, test_accuracies_depth),
+        'ccp_scores': (train_accuracies_ccp, valid_accuracies_ccp, test_accuracies_ccp)
+    }
+
+# --------------------------------
+# Part (e): Random Forest using scikit-learn with Grid Search
+# --------------------------------
+def run_part_e(train_df, valid_df, test_df, target, output_folder):
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.preprocessing import LabelEncoder
+    from mpl_toolkits.mplot3d import Axes3D  # Needed for 3D plotting
+
+    print("\nRunning Part (e): Random Forest Grid Search with OOB Accuracy")
+    
+    # Make copies to avoid modifying original data
+    train_df = train_df.copy()
+    valid_df = valid_df.copy()
+    test_df = test_df.copy()
+
+    # Identify categorical columns that need encoding
+    categorical_columns = []
+    for col in train_df.columns:
+        if col == target:
+            continue
+        if not pd.api.types.is_numeric_dtype(train_df[col]):
+            categorical_columns.append(col)
+    
+    # Handle categorical columns
+    label_encoders = {}
+    for col in categorical_columns:
+        # For binary categorical columns, use label encoding
+        if train_df[col].nunique() &lt;= 2:
+            le = LabelEncoder()
+            all_values = pd.concat([train_df[col], valid_df[col], test_df[col]]).unique()
+            le.fit(all_values)
+            train_df[col] = le.transform(train_df[col])
+            valid_df[col] = le.transform(valid_df[col])
+            test_df[col] = le.transform(test_df[col])
+            label_encoders[col] = le
+        else:
+            # For non-binary categorical columns, use one-hot encoding.
+            dummies = pd.get_dummies(pd.concat([train_df[col], valid_df[col], test_df[col]]), prefix=col)
+            train_dummies = dummies[:len(train_df)]
+            valid_dummies = dummies[len(train_df):len(train_df)+len(valid_df)]
+            test_dummies = dummies[len(train_df)+len(valid_df):]
+            
+            train_df = pd.concat([train_df.drop(col, axis=1), train_dummies], axis=1)
+            valid_df = pd.concat([valid_df.drop(col, axis=1), valid_dummies], axis=1)
+            test_df = pd.concat([test_df.drop(col, axis=1), test_dummies], axis=1)
+    
+    # Prepare data for model
+    X_train = train_df.drop(columns=[target])
+    y_train = train_df[target]
+    X_valid = valid_df.drop(columns=[target])
+    y_valid = valid_df[target]
+    X_test = test_df.drop(columns=[target])
+    y_test = test_df[target]
+
+    # Define parameter grids
+    n_estimators_grid = [50, 150, 250, 350]
+    max_features_grid = [0.1, 0.3, 0.5, 0.7, 0.9]
+    min_samples_split_grid = [2, 4, 6, 8, 10]
+    
+    best_oob_accuracy = -1.0
+    best_model = None
+    best_params = {}
+    
+    results = []  # Store results for plotting
+    
+    print("Starting grid search over Random Forest parameters...")
+    total_combinations = len(n_estimators_grid) * len(max_features_grid) * len(min_samples_split_grid)
+    current = 0
+
+    for n_est in n_estimators_grid:
+        for max_feat in max_features_grid:
+            for min_split in min_samples_split_grid:
+                current += 1
+                print(f"\nTrying combination {current}/{total_combinations}:")
+                print(f"n_estimators={n_est}, max_features={max_feat}, min_samples_split={min_split}")
+                
+                rf = RandomForestClassifier(
+                    criterion='entropy',
+                    n_estimators=n_est,
+                    max_features=max_feat,
+                    min_samples_split=min_split,
+                    oob_score=True,
+                    random_state=42,
+                    n_jobs=-1
+                )
+                
+                rf.fit(X_train, y_train)
+                
+                # Calculate all metrics
+                oob_acc = rf.oob_score_
+                train_acc = rf.score(X_train, y_train)
+                valid_acc = rf.score(X_valid, y_valid)
+                test_acc = rf.score(X_test, y_test)
+                
+                results.append({
+                    'n_estimators': n_est,
+                    'max_features': max_feat,
+                    'min_samples_split': min_split,
+                    'oob_acc': oob_acc,
+                    'train_acc': train_acc,
+                    'valid_acc': valid_acc,
+                    'test_acc': test_acc
+                })
+                
+                print(f"OOB Accuracy: {oob_acc:.4f}")
+                print(f"Train Accuracy: {train_acc:.4f}")
+                print(f"Validation Accuracy: {valid_acc:.4f}")
+                print(f"Test Accuracy: {test_acc:.4f}")
+                
+                if oob_acc &gt; best_oob_accuracy:
+                    best_oob_accuracy = oob_acc
+                    best_model = rf
+                    best_params = {
+                        'n_estimators': n_est,
+                        'max_features': max_feat,
+                        'min_samples_split': min_split
+                    }
+    
+    # Report final results
+    print("\nBest Random Forest parameters (based on OOB accuracy):")
+    print(f"n_estimators: {best_params['n_estimators']}")
+    print(f"max_features: {best_params['max_features']}")
+    print(f"min_samples_split: {best_params['min_samples_split']}")
+    print(f"Best OOB Accuracy: {best_oob_accuracy:.4f}")
+    print(f"Final Train Accuracy: {best_model.score(X_train, y_train):.4f}")
+    print(f"Final Validation Accuracy: {best_model.score(X_valid, y_valid):.4f}")
+    print(f"Final Test Accuracy: {best_model.score(X_test, y_test):.4f}")
+    
+    # Save predictions
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match46-1.html#3" TARGET="1"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    test_predictions = best_model.predict(X_test)
+    prediction_df = pd.DataFrame({'prediction': test_predictions})
+    prediction_file = os.path.join(output_folder, 'prediction_e.csv')
+    prediction_df.to_csv(prediction_file, index=False)
+    print(f"\nTest predictions saved to: {prediction_file}")
+</FONT>    
+    # Create visualization of results: 3D scatter plot for parameter relationships
+    results_df = pd.DataFrame(results)
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    # Use n_estimators, max_features, and min_samples_split as the three axes
+    sc = ax.scatter(results_df['n_estimators'], results_df['max_features'], results_df['min_samples_split'], 
+               c=results_df['oob_acc'], cmap='viridis', marker='o', s=60)
+    ax.set_xlabel('n_estimators')
+    ax.set_ylabel('max_features')
+    ax.set_zlabel('min_samples_split')
+    ax.set_title('Grid Search Results: 3D Scatter of Parameters\n(Color = OOB Accuracy)')
+    # Include a colorbar to indicate OOB accuracy values
+    plt.colorbar(sc, ax=ax, label='OOB Accuracy')
+    plot3d_path = os.path.join(output_folder, 'rf_3d_parameter_relationship.png')
+    plt.savefig(plot3d_path)
+    plt.close()
+    print(f"\n3D parameter relationship plot saved to: {plot3d_path}")
+    
+    # Pairwise plotting for OOB accuracy
+    print("\nGenerating pairwise plots for OOB accuracy...")
+
+    # Convert results to a DataFrame for easier plotting
+    results_df = pd.DataFrame(results)
+
+    # Plot OOB accuracy vs n_estimators
+    plt.figure(figsize=(8, 6))
+    for min_split in min_samples_split_grid:
+        subset = results_df[results_df['min_samples_split'] == min_split]
+        plt.plot(subset['n_estimators'], subset['oob_acc'], marker='o', label=f"min_samples_split={min_split}")
+    plt.xlabel('n_estimators')
+    plt.ylabel('OOB Accuracy')
+    plt.title('OOB Accuracy vs n_estimators')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(os.path.join(output_folder, 'oob_accuracy_vs_n_estimators.png'))
+    plt.close()
+
+    # Plot OOB accuracy vs max_features
+    plt.figure(figsize=(8, 6))
+    for n_est in n_estimators_grid:
+        subset = results_df[results_df['n_estimators'] == n_est]
+        plt.plot(subset['max_features'], subset['oob_acc'], marker='o', label=f"n_estimators={n_est}")
+    plt.xlabel('max_features')
+    plt.ylabel('OOB Accuracy')
+    plt.title('OOB Accuracy vs max_features')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(os.path.join(output_folder, 'oob_accuracy_vs_max_features.png'))
+    plt.close()
+
+    # Plot OOB accuracy vs min_samples_split
+    plt.figure(figsize=(8, 6))
+    for max_feat in max_features_grid:
+        subset = results_df[results_df['max_features'] == max_feat]
+        plt.plot(subset['min_samples_split'], subset['oob_acc'], marker='o', label=f"max_features={max_feat}")
+    plt.xlabel('min_samples_split')
+    plt.ylabel('OOB Accuracy')
+    plt.title('OOB Accuracy vs min_samples_split')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(os.path.join(output_folder, 'oob_accuracy_vs_min_samples_split.png'))
+    plt.close()
+
+    print("Pairwise plots saved to output folder.")
+    
+    # Corrected Pairwise Plotting for OOB Accuracy
+    print("\nGenerating corrected pairwise plots for OOB accuracy...")
+
+    # Convert results to a DataFrame for easier plotting
+    results_df = pd.DataFrame(results)
+
+    # Plot OOB accuracy vs n_estimators
+    plt.figure(figsize=(8, 6))
+    for max_feat in results_df['max_features'].unique():
+        subset = results_df[results_df['max_features'] == max_feat]
+        plt.plot(subset['n_estimators'], subset['oob_acc'], marker='o', label=f"max_features={max_feat}")
+    plt.xlabel('n_estimators')
+    plt.ylabel('OOB Accuracy')
+    plt.title('OOB Accuracy vs n_estimators')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(os.path.join(output_folder, 'oob_accuracy_vs_n_estimators.png'))
+    plt.close()
+
+    # Plot OOB accuracy vs max_features
+    plt.figure(figsize=(8, 6))
+    for n_est in results_df['n_estimators'].unique():
+        subset = results_df[results_df['n_estimators'] == n_est]
+        plt.plot(subset['max_features'], subset['oob_acc'], marker='o', label=f"n_estimators={n_est}")
+    plt.xlabel('max_features')
+    plt.ylabel('OOB Accuracy')
+    plt.title('OOB Accuracy vs max_features')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(os.path.join(output_folder, 'oob_accuracy_vs_max_features.png'))
+    plt.close()
+
+    # Plot OOB accuracy vs min_samples_split
+    plt.figure(figsize=(8, 6))
+    for n_est in results_df['n_estimators'].unique():
+        subset = results_df[results_df['n_estimators'] == n_est]
+        plt.plot(subset['min_samples_split'], subset['oob_acc'], marker='o', label=f"n_estimators={n_est}")
+    plt.xlabel('min_samples_split')
+    plt.ylabel('OOB Accuracy')
+    plt.title('OOB Accuracy vs min_samples_split')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(os.path.join(output_folder, 'oob_accuracy_vs_min_samples_split.png'))
+    plt.close()
+
+    print("Pairwise plots saved to output folder.")
+    
+    return {
+        'best_model': best_model,
+        'best_params': best_params,
+        'best_oob_accuracy': best_oob_accuracy,
+        'final_train_acc': best_model.score(X_train, y_train),
+        'final_valid_acc': best_model.score(X_valid, y_valid),
+        'final_test_acc': best_model.score(X_test, y_test)
+    }
+# --------------------------------
+# Main Function: Combine Parts (a), (b), (c), (d), and (e)
+# --------------------------------
+def main():
+    if len(sys.argv) != 6:
+        print("Usage: python decision_tree.py &lt;train_data_path&gt; &lt;validation_data_path&gt; &lt;test_data_path&gt; &lt;output_folder_path&gt; &lt;question_part&gt;")
+        sys.exit(1)
+    
+    train_path = sys.argv[1]
+    valid_path = sys.argv[2]
+    test_path = sys.argv[3]
+    output_folder = sys.argv[4]
+    question_part = sys.argv[5].lower()
+
+    if question_part not in ['a', 'b', 'c', 'd', 'e']:
+        print("Error: question part must be 'a', 'b', 'c', 'd', or 'e'.")
+        sys.exit(1)
+    
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    
+    # Read datasets.
+    train_df = pd.read_csv(train_path)
+    valid_df = pd.read_csv(valid_path)
+    test_df = pd.read_csv(test_path)
+    
+    # Assume target column is 'income'.
+    target = 'income'
+    
+    if question_part == 'a':
+        depths = [5, 10, 15, 20]
+        features = [col for col in train_df.columns if col != target]
+        prediction_file_name = 'prediction_a.csv'
+        plot_file_name = 'accuracy_plot_a.png'
+        print("Running Part (a): Using original features (no one-hot encoding).")
+    
+    elif question_part in ['b', 'c']:
+        # For parts (b) and (c) use one-hot encoding for categorical attributes with &gt;2 unique values.
+        depths = [25, 35, 45, 55]
+        columns_to_encode = []
+        for col in train_df.columns:
+            if col == target:
+                continue
+            if (not pd.api.types.is_numeric_dtype(train_df[col])) and (train_df[col].nunique() &gt; 2):
+                columns_to_encode.append(col)
+        print("Columns to one-hot encode:", columns_to_encode)
+        
+        train_df = pd.get_dummies(train_df, columns=columns_to_encode)
+        valid_df = pd.get_dummies(valid_df, columns=columns_to_encode)
+        test_df = pd.get_dummies(test_df, columns=columns_to_encode)
+        # Align columns so that all datasets have the same features.
+        train_df, valid_df = train_df.align(valid_df, join='outer', axis=1, fill_value=0)
+        train_df, test_df = train_df.align(test_df, join='outer', axis=1, fill_value=0)
+        
+        features = [col for col in train_df.columns if col != target]
+        if question_part == 'b':
+            prediction_file_name = 'prediction_b.csv'
+            plot_file_name = 'accuracy_plot_b.png'
+            print("Running Part (b): Using one-hot encoded features (no post-pruning).")
+        else:
+            prediction_file_name = 'prediction_c.csv'
+            print("Running Part (c): Using one-hot encoded features with post-pruning based on validation set.")
+
+    # -------------------------
+    # For Parts (a) and (b): Build trees for each candidate depth.
+    # -------------------------
+    if question_part in ['a', 'b']:
+        train_accuracies = []
+        test_accuracies = []
+        models = {}
+        print("Training Decision Trees for various maximum depths:")
+        for depth in depths:
+            model = build_tree(train_df, features, target, max_depth=depth)
+            models[depth] = model
+            train_pred = train_df.apply(lambda row: predict_instance(model, row), axis=1)
+            test_pred = test_df.apply(lambda row: predict_instance(model, row), axis=1)
+            train_acc = np.mean(train_pred == train_df[target])
+            test_acc = np.mean(test_pred == test_df[target])
+            train_accuracies.append(train_acc)
+            test_accuracies.append(test_acc)
+            print(f"Max Depth: {depth} | Train Accuracy: {train_acc:.4f} | Test Accuracy: {test_acc:.4f}")
+        
+        plt.figure()
+        plt.plot(depths, train_accuracies, marker='o', label='Train Accuracy')
+        plt.plot(depths, test_accuracies, marker='o', label='Test Accuracy')
+        plt.xlabel('Maximum Depth')
+        plt.ylabel('Accuracy')
+        plt.title(f'Accuracy vs Maximum Depth (Part {question_part.upper()})')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(os.path.join(output_folder, plot_file_name))
+        plt.close()
+        
+        # Select best model based on test accuracy.
+        best_index = np.argmax(test_accuracies)
+        best_depth = depths[best_index]
+        best_model = models[best_depth]
+        print(f"Selected best model with max depth = {best_depth} based on test accuracy.")
+        
+        test_predictions = test_df.apply(lambda row: predict_instance(best_model, row), axis=1)
+        prediction_df = pd.DataFrame({'prediction': test_predictions})
+        prediction_file = os.path.join(output_folder, prediction_file_name)
+        prediction_df.to_csv(prediction_file, index=False)
+        print(f"Test predictions saved to: {prediction_file}")
+    
+    # -------------------------
+    # For Part (c): Post-Pruning using the validation set.
+    # -------------------------
+    elif question_part == 'c':
+        all_pruned_models = {}
+        pruning_records = {}  # Map depth -&gt; list of records for plotting
+        best_val_acc_overall = -1
+        best_pruned_tree = None
+        best_depth_chosen = None
+        
+        for depth in depths:
+            print(f"\nBuilding and post-pruning tree for max depth = {depth}")
+            initial_tree = build_tree(train_df, features, target, max_depth=depth)
+            pruned_tree, record = post_prune(initial_tree, train_df, valid_df, test_df, target)
+            all_pruned_models[depth] = pruned_tree
+            pruning_records[depth] = record
+            # record is a list of tuples: (node_count, train_acc, valid_acc, test_acc)
+            final_val_acc = record[-1][2]
+            print(f"Final pruned tree (initial depth {depth}): Nodes = {record[-1][0]}, Validation Accuracy = {final_val_acc:.4f}")
+            if final_val_acc &gt; best_val_acc_overall:
+                best_val_acc_overall = final_val_acc
+                best_pruned_tree = pruned_tree
+                best_depth_chosen = depth
+            
+            # Plot pruning curve for this candidate depth.
+            node_counts = [r[0] for r in record]
+            train_accs = [r[1] for r in record]
+            valid_accs = [r[2] for r in record]
+            test_accs  = [r[3] for r in record]
+            plt.figure()
+            plt.plot(node_counts, train_accs, marker='o', label='Train Accuracy')
+            plt.plot(node_counts, valid_accs, marker='o', label='Validation Accuracy')
+            plt.plot(node_counts, test_accs, marker='o', label='Test Accuracy')
+            plt.xlabel('Total Nodes in Tree')
+            plt.ylabel('Accuracy')
+            plt.title(f'Pruning Curve for Tree with initial max depth = {depth}')
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(os.path.join(output_folder, f'pruning_curve_depth_{depth}.png'))
+            plt.close()
+        
+        print(f"\nSelected best pruned tree is from initial max depth = {best_depth_chosen} with Validation Accuracy = {best_val_acc_overall:.4f}")
+        # Generate final test predictions using the best pruned tree.
+        test_predictions = test_df.apply(lambda row: predict_instance(best_pruned_tree, row), axis=1)
+        prediction_df = pd.DataFrame({'prediction': test_predictions})
+        prediction_file = os.path.join(output_folder, prediction_file_name)
+        prediction_df.to_csv(prediction_file, index=False)
+        print(f"Test predictions (post-pruned) saved to: {prediction_file}")
+
+    # -------------------------
+    # For Part (d): Use scikit-learn's implementation of a single Decision Tree
+    # -------------------------
+    elif question_part == 'd':
+        # Process data similar to part (b) - using one-hot encoding
+        columns_to_encode = []
+        for col in train_df.columns:
+            if col == target:
+                continue
+            if (not pd.api.types.is_numeric_dtype(train_df[col])) and (train_df[col].nunique() &gt; 2):
+                columns_to_encode.append(col)
+                
+        train_df = pd.get_dummies(train_df, columns=columns_to_encode)
+        valid_df = pd.get_dummies(valid_df, columns=columns_to_encode)
+        test_df = pd.get_dummies(test_df, columns=columns_to_encode)
+        # Align columns
+        train_df, valid_df = train_df.align(valid_df, join='outer', axis=1, fill_value=0)
+        train_df, test_df = train_df.align(test_df, join='outer', axis=1, fill_value=0)
+        
+        # Run part (d) implementation
+        results_d = run_part_d(train_df, valid_df, test_df, target, output_folder)
+    
+    # -------------------------
+    # For Part (e): Random Forest with Grid Search (using out-of-bag accuracy)
+    # -------------------------
+    elif question_part == 'e':
+        # For consistency, apply one-hot encoding (if needed) as in parts (b) and (d)
+        columns_to_encode = []
+        for col in train_df.columns:
+            if col == target:
+                continue
+            if (not pd.api.types.is_numeric_dtype(train_df[col])) and (train_df[col].nunique() &gt; 2):
+                columns_to_encode.append(col)
+        if columns_to_encode:
+            train_df = pd.get_dummies(train_df, columns=columns_to_encode)
+            valid_df = pd.get_dummies(valid_df, columns=columns_to_encode)
+            test_df = pd.get_dummies(test_df, columns=columns_to_encode)
+            train_df, valid_df = train_df.align(valid_df, join='outer', axis=1, fill_value=0)
+            train_df, test_df = train_df.align(test_df, join='outer', axis=1, fill_value=0)
+        
+        results_e = run_part_e(train_df, valid_df, test_df, target, output_folder)
+
+if __name__ == "__main__":
+    main()
+
+
+
+import os 
+import sys
+import numpy as np
+from PIL import Image
+import pandas as pd
+import time
+import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report, f1_score, precision_score, recall_score
+from sklearn.neural_network import MLPClassifier
+import math
+
+class NeuralNetworks:
+    def __init__(self, in_layer_size, hidden_sizes, out_layer_size):
+        # Define the architecture: input, hidden layers, output
+        self.layer_sizes = in_layer_size + hidden_sizes + out_layer_size
+        self.layers = len(self.layer_sizes) - 1
+        self.Ws = []
+        self.bs = []
+    
+    def fit(self, X, y, max_epochs=50, M=1, eta=0.01, seed=42, thresh=0, adaptive=False, activation='sigmoid'):
+        np.random.seed(seed)
+
+        for i in range(self.layers):
+            # weight = np.random.randn(self.sizes[i+1], self.sizes[i]) * np.sqrt(2. / self.sizes[i])
+            w = np.random.randn(self.layer_sizes[i+1], self.layer_sizes[i])
+            w *= np.sqrt(2. / self.layer_sizes[i])
+            self.Ws.append(w)
+            
+            b = np.zeros((self.layer_sizes[i+1], 1))
+            self.bs.append(b)
+        
+        # X shape: (input_size, num_samples)
+        # Convert labels to one-hot encoding
+        total_classes = np.max(y) + 1
+        y_en = np.zeros((total_classes, y.shape[0]))
+        for i in range(y.shape[0]):
+            y_en[y[i], i] = 1
+        _, m = X.shape
+
+        prev_loss = None
+
+        for e in range(1, max_epochs + 1):
+            if adaptive:
+                learning_rate = eta / (math.sqrt(e))
+            # Shuffle indices for mini-batch sampling
+            indices = np.random.permutation(m)
+            X_shuffled = X[:, indices]
+            y_en_shuffled = y_en[:, indices]
+            
+            epoch_loss = 0  # Initialize epoch loss
+            num_batches = 0  # Track the number of batches
+
+            for i in range(0, m, M):
+                X_batch = X_shuffled[:, i:i+M]
+                y_batch = y_en_shuffled[:, i:i+M]
+                
+                # Forward propagation
+                Zs, acts = self.forward_propagation(X_batch, activation)
+                # Backward propagation and update parameters
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match46-1.html#5" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+                W_desc, b_desc = self.backward_propagation(X_batch, y_batch, acts, Zs, activation)
+
+                for i in range(self.layers):
+                    self.Ws[i] -= learning_rate * W_desc[i]
+                    self.bs[i]  -= learning_rate * b_desc[i]
+</FONT>
+                # Compute loss for the current batch
+                batch_loss = self.cross_entropy_loss(y_batch, acts[-1])
+                epoch_loss += batch_loss
+                num_batches += 1
+
+            # Compute average loss for the epoch
+            avg_epoch_loss = epoch_loss / num_batches
+
+            # Check for convergence
+            if prev_loss != None and abs(prev_loss - avg_epoch_loss) &lt; thresh:
+                print(f"Converged at epoch {e}")
+                break
+            prev_loss = avg_epoch_loss
+
+            if e % 10 == 0:
+                print(f"Epoch {e}, Average Loss: {avg_epoch_loss:.4f}")
+        
+        return self.Ws, self.bs
+
+    def predict(self, X, activation='sigmoid'):
+        Zs, acts = self.forward_propagation(X, activation)
+        y_hat = acts[-1]
+        y_hat = np.argmax(y_hat, axis=0)
+        return y_hat
+    
+    def cross_entropy_loss(self, y, y_hat, eps = 1e-12):
+        # Clip predictions to avoid log(0)
+        y_hat = np.clip(y_hat, eps, 1 - eps)
+        # Compute cross-entropy loss
+        loss = -np.sum(y * np.log(y_hat)) / y.shape[1]
+        return loss
+
+    def forward_propagation(self, X, activation):
+        activated = [X]
+        Zs = []
+        A = X
+        
+        for i in range(self.layers):
+            z = np.dot(self.Ws[i], A) + self.bs[i]
+            Zs.append(z)
+
+            exp_z = np.exp(z - np.max(z, axis=0, keepdims=True))
+            softed = exp_z / np.sum(exp_z, axis=0, keepdims=True)
+
+            if activation == 'relu':
+                A = np.maximum(0, z) if i &lt; self.layers - 1 else softed
+            else:
+                A = 1. / (1. + np.exp(-z)) if i &lt; self.layers - 1 else softed
+
+            activated.append(A)
+        
+        return Zs, activated
+
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match46-1.html#0" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    def backward_propagation(self, X, y, acts, zs, activation):
+        m = X.shape[1]
+        W_desc = [None] * self.layers
+        b_desc = [None] * self.layers
+        
+        # Compute error at output layer
+        delta = acts[-1] - y  # shape: (output_size, m)
+        W_desc[-1] = np.dot(delta, acts[-2].T) / m
+</FONT>        b_desc[-1] = np.mean(delta, axis=1, keepdims=True)
+        
+        # Backpropagate error through hidden layers
+        for l in range(2, self.layers + 1):
+            z = zs[-l]
+            if activation == 'relu':
+                sp = (z &gt; 0).astype(float)
+            else:
+                a = acts[-l]
+                sp = a * (1 - a)
+            delta = np.dot(self.Ws[-l+1].T, delta) * sp
+            W_desc[-l] = np.dot(delta, acts[-l-1].T) / m
+            b_desc[-l] = np.mean(delta, axis=1, keepdims=True)
+        
+        return W_desc, b_desc
+            
+
+def load_train_data(data_path, input_size=28*28*3):
+    features, labels = [], []
+
+    for folder in os.listdir(data_path):
+        folder_path = os.path.join(data_path, folder)
+        if not os.path.isdir(folder_path):
+            continue
+
+        try:
+            label = int(folder)  # Convert folder name to label
+        except ValueError:
+            continue  # Skip folders with non-numeric names
+
+        for file in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, file)
+            if not (os.path.isfile(file_path) and file.endswith('.jpg')):
+                continue
+
+            try:
+                # Load and preprocess the image
+                image = Image.open(file_path).resize((28, 28)).convert('RGB')
+                image_array = np.array(image, dtype=np.float32) / 255.0
+                flattened_image = image_array.flatten()
+
+                if flattened_image.shape[0] != input_size:
+                    raise ValueError("Image size mismatch.")
+
+                features.append(flattened_image)
+                labels.append(label)
+            except Exception as error:
+                print(f"Error processing file {file_path}: {error}")
+
+    # Convert lists to numpy arrays
+    X = np.array(features).T  # Transpose to shape (input_size, num_samples)
+    y = np.array(labels)
+    return X, y
+
+def load_test_data(data_path, input_size=28*28*3):
+    X, y = [], []
+    labels_path = os.path.join(data_path, "test_labels.csv")
+    labels_df = pd.read_csv(labels_path)
+    
+    image_files = sorted(os.listdir(data_path))
+
+    for image_file in image_files:
+        image_path = os.path.join(data_path, image_file)
+        if os.path.isfile(image_path) and image_path.endswith('.jpg'):
+            try:
+                # Load and preprocess the image
+                image = Image.open(image_path).resize((28, 28)).convert('RGB')
+                image_array = np.array(image, dtype=np.float32) / 255.0
+                flattened_image = image_array.flatten()
+                
+                if flattened_image.shape[0] != input_size:
+                    raise ValueError("Image dimensions do not match the expected input size.")
+                
+                X.append(flattened_image)
+
+                # Match the image file name with the corresponding label
+                matched_label = labels_df[labels_df['image'] == image_file]
+                if not matched_label.empty:
+                    y.append(matched_label['label'].values[0])
+                else:
+                    print(f"Warning: Label not found for image {image_file}. Skipping.")
+            except Exception as error:
+                print(f"Error processing {image_path}: {error}")
+    
+    # Convert lists to numpy arrays
+    X = np.array(X).T  # Transpose to shape (input_size, num_samples)
+    y = np.array(y)
+    return X, y
+
+
+def analysis(y_train, train_pred, y_test, test_pred):
+    f1_train = f1_score(y_train, train_pred, average='macro', zero_division=0)
+    f1_test = f1_score(y_test, test_pred, average='macro', zero_division=0)
+
+    report = classification_report(y_test, test_pred, output_dict=True, zero_division=0)
+
+    return f1_train, f1_test, report
+
+def make_plot(train_scores, test_scores, hidden_layer_units, question_part):
+    plt.figure(figsize=(10, 5))
+    plt.plot(train_scores, label='Train F1 Score')
+    plt.plot(test_scores, label='Test F1 Score')
+    plt.title('F1 Score vs Hidden Layer Units')
+    plt.xlabel('Hidden Layer Units')
+    plt.ylabel('F1 Score')
+    plt.xticks(range(len(hidden_layer_units)), hidden_layer_units)
+    plt.legend()
+    plt.savefig(f'plot_{question_part}.png')
+    plt.show()
+
+def save_reports(reports, question_part):
+    report_df = pd.DataFrame.from_dict(reports, orient='index')
+    report_df.to_csv(f'reports_{question_part}.csv')
+
+def save_predictions(output_folder, predictions, question_part):
+    output_csv = os.path.join(output_folder, f"predictions_{question_part}.csv")
+    df = pd.DataFrame({"predictions": predictions})
+    df.to_csv(output_csv, index=False)
+    print(f"Predictions saved to {output_csv}")
+
+def print_results(time_taken, f1_train, f1_test, report):
+    print(f"Time taken: {time_taken:.2f} seconds")
+    print(f"Accuracy: {report['accuracy']:.4f}")
+    print(f"Train F1 Score: {f1_train:.4f}")
+    print(f"Test F1 Score: {f1_test:.4f}")
+    print(f"Recall Score: {report['macro avg']['recall']:.4f}")
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match46-1.html#4" TARGET="1"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    print(f"Precision Score: {report['macro avg']['precision']:.4f}")
+
+if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        print("Usage: python neural_network.py &lt;train_data_path&gt; &lt;test_data_path&gt; &lt;output_folder_path&gt; &lt;question_part&gt;")
+        sys.exit(1)
+
+    train_data_path = sys.argv[1]
+    test_data_path = sys.argv[2]
+</FONT>    output_folder_path = sys.argv[3]
+    question_part = sys.argv[4]
+
+    X_train, y_train = load_train_data(train_data_path)
+    print(f"Shape of X_train: {X_train.shape}")
+    print(f"Shape of y_train: {y_train.shape}")
+
+    X_test, y_test = load_test_data(test_data_path)
+    print(f"Shape of X_test: {X_test.shape}")
+    print(f"Shape of y_test: {y_test.shape}")
+
+    input_size = X_train.shape[0]
+    output_size = np.max(y_train) + 1
+
+    varried_hidden_layers = [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]
+
+    train_scores = []
+    test_scores = []
+    reports = {}
+
+    if question_part == 'a':
+        hidden_sizes = [100]
+        start_time = time.time()
+        nn = NeuralNetworks([input_size], hidden_sizes, [output_size])
+        nn.fit(X_train, y_train, max_epochs=100, M=32, eta=0.01)
+        end_time = time.time()
+        print(f"Training time: {end_time - start_time:.2f} seconds")
+        predictions = nn.predict(X_test)
+        # Compute accuracy using integer labels (not one-hot)
+        accuracy = np.mean(predictions == y_test)
+        print(f"Accuracy: {accuracy * 100:.2f}%")
+    elif question_part == 'b':
+        hidden_layer_units = [1, 5, 10, 50, 100]
+
+        for units in hidden_layer_units:
+            print(f"\n\nTraining with {units} hidden layer units...")
+            start_time = time.time()
+            nn = NeuralNetworks([input_size], [units], [output_size])
+            nn.fit(X_train, y_train, max_epochs=100, M=32, eta=0.01, thresh=1e-4)
+            end_time = time.time()
+
+            predictions = nn.predict(X_test)
+            accuracy = np.mean(predictions == y_test)
+
+            train_pred = nn.predict(X_train)
+
+            train_score, test_score, report = analysis(y_train, train_pred, y_test, predictions)
+
+            train_scores.append(train_score)
+            test_scores.append(test_score)
+
+            reports[units] = report
+            
+            print_results(end_time - start_time, train_score, test_score, report)
+
+        make_plot(train_scores, test_scores, hidden_layer_units, question_part)
+        save_reports(reports, question_part)
+    
+    elif question_part in ['c', 'd', 'e']:
+        adaptive = True if question_part &gt;= 'd' else False
+        activation = 'relu' if question_part == 'e' else 'sigmoid'
+        for i, hidden_layers in enumerate(varried_hidden_layers):
+            print(f"\n\nTraining with hidden layers: {hidden_layers}...")
+            start_time = time.time()
+            nn = NeuralNetworks([input_size], hidden_layers, [output_size])
+            nn.fit(X_train, y_train, max_epochs=100, M=32, eta=0.01, thresh=1e-4, adaptive=adaptive, activation=activation)
+            end_time = time.time()
+
+            predictions = nn.predict(X_test)
+            accuracy = np.mean(predictions == y_test)
+
+            train_pred = nn.predict(X_train)
+
+            train_score, test_score, report = analysis(y_train, train_pred, y_test, predictions)
+
+            train_scores.append(train_score)
+            test_scores.append(test_score)
+
+            reports[str(hidden_layers)] = report
+
+            print_results(end_time - start_time, train_score, test_score, report)
+        
+        make_plot(train_scores, test_scores, varried_hidden_layers, question_part)
+        save_reports(reports, question_part)
+    
+    elif question_part == 'f':
+        for i, hidden_layers in enumerate(varried_hidden_layers):
+            print(f"\n\nTraining with hidden layers: {hidden_layers}...")
+            mlp = MLPClassifier(hidden_layer_sizes=hidden_layers, max_iter=100, learning_rate_init=0.01, random_state=42, activation='relu', solver='sgd', alpha=0, batch_size=32, learning_rate='invscaling', tol=1e-4)
+            start_time = time.time()
+            mlp.fit(X_train.T, y_train)
+            end_time = time.time()
+
+            predictions = mlp.predict(X_test.T)
+            accuracy = np.mean(predictions == y_test),
+
+            train_pred = mlp.predict(X_train.T)
+            train_score, test_score, report = analysis(y_train, train_pred, y_test, predictions)
+            train_scores.append(train_score)
+            test_scores.append(test_score)
+            reports[str(hidden_layers)] = report
+
+            print_results(end_time - start_time, train_score, test_score, report)
+
+        make_plot(train_scores, test_scores, varried_hidden_layers, question_part)
+        save_reports(reports, question_part)
+    else:
+        print("Invalid question part. Please specify 'a', 'b', 'c', 'd', 'e', or 'f'.")
+        sys.exit(1)
+
+    os.makedirs(output_folder_path, exist_ok=True)
+    save_predictions(output_folder_path, predictions, question_part)
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
