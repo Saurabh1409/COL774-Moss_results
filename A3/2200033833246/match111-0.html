@@ -1,0 +1,1830 @@
+<HTML>
+<HEAD>
+<TITLE>./A3_processed_new_hash/combined_8TOF2.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A3_processed_new_hash/combined_8TOF2.py<p><PRE>
+
+
+# imports
+from sys import argv
+from math import log2
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import GridSearchCV, PredefinedSplit
+
+# class defintion
+class Decision_Tree:
+    class Node:
+        def __init__(self, is_leaf: bool, class_label=None, 
+                    split_attribute=None, split_value=None,
+                    split_type=None, parent=None):
+            self.is_leaf = is_leaf
+            self.class_label = class_label
+            self.split_attribute = split_attribute
+            self.split_value = split_value
+            self.split_type = split_type
+            self.true_richs = 0
+            self.true_poors = 0
+            self.correct_predictions = 0
+            self.parent = parent
+            self.children = {}
+
+    def __init__(self, max_depth: int):
+        self.max_depth = max_depth
+
+    @staticmethod
+    def entropy(poor: int, everyone: int) -&gt; float:
+        if everyone == 0:
+            return 0.0
+        p = poor / everyone
+        if p == 0 or p == 1:
+            return 0.0
+        return -p * log2(p) - (1 - p) * log2(1 - p)
+
+    def build_tree(self, df: pd.DataFrame) -&gt; None:
+        self.root = self._build_tree(df.copy(), 0)
+
+    def _build_tree(self, df: pd.DataFrame, depth: int) -&gt; Node:
+        everyone = len(df)
+
+        # no data to do
+        if everyone == 0:
+            return self.Node(is_leaf=True)
+        
+        rich = (df['income'] == ' &gt;50K').sum()
+        poor = everyone - rich
+        majority_class = ' &gt;50K' if rich &gt; poor else ' &lt;=50K'
+        base_entropy = self.entropy(poor, everyone)
+
+        # zero entropy means data is pure
+        if base_entropy == 0.0 or depth == self.max_depth:
+            return self.Node(is_leaf=True, class_label=majority_class)
+
+        best_gain = -float('inf')
+        best_attr = None
+        best_split_value = None
+        best_subsets = []
+        best_split_type = None
+
+        for attribute in df.columns:
+            if attribute == 'income':
+                continue
+
+            if pd.api.types.is_numeric_dtype(df[attribute]):
+                # Numerical split handling
+                median_val = df[attribute].median()
+                left_df = df[df[attribute] &lt;= median_val]
+                right_df = df[df[attribute] &gt; median_val]
+                
+                left_total = len(left_df)
+                right_total = len(right_df)
+                left_rich = (left_df['income'] == ' &gt;50K').sum()
+                left_poor = left_total - left_rich
+                right_rich = (right_df['income'] == ' &gt;50K').sum()
+                right_poor = right_total - right_rich
+                
+                left_entropy = self.entropy(left_poor, left_total)
+                right_entropy = self.entropy(right_poor, right_total)
+                weighted_entropy = (left_total * left_entropy + right_total * right_entropy) / everyone
+                gain = base_entropy - weighted_entropy
+                
+                best_candidate = (gain, attribute, median_val, [('left',left_df),('right',right_df)], 'numerical')
+
+            else:
+                # Categorical split handling
+                value_subsets = []
+                weighted_entropy = 0.0
+                for val in df[attribute].unique():
+                    subset = df[df[attribute] == val]
+                    subset_total = len(subset)
+                    subset_rich = (subset['income'] == ' &gt;50K').sum()
+                    subset_poor = subset_total - subset_rich
+                    subset_entropy = self.entropy(subset_poor, subset_total)
+                    weighted_entropy += subset_total * subset_entropy
+                    value_subsets.append((val, subset))
+                weighted_entropy /= everyone
+                gain = base_entropy - weighted_entropy
+                
+                best_candidate = (gain, attribute, None, value_subsets, 'categorical')
+
+            if best_candidate[0] &gt; best_gain:
+                best_gain, best_attr, best_split_value, best_subsets, best_split_type = best_candidate
+
+        if best_gain &lt;= 0:
+            return self.Node(is_leaf=True, class_label=majority_class)
+
+        node = self.Node(
+            is_leaf=False,
+            class_label=majority_class,
+            split_attribute=best_attr,
+            split_value=best_split_value,
+            split_type=best_split_type,
+        )
+
+        for val, subset in best_subsets:
+            node.children[val] = self._build_tree(subset, depth + 1)
+        
+        for child in node.children.values():
+            child.parent = node
+            if child.class_label is None:
+                child.class_label = node.class_label
+
+        return node
+
+    def _traverse_tree(self, row: pd.Series, update_nodes: bool) -&gt; str:
+        current_node = self.root
+        while not current_node.is_leaf:
+            split_attr = current_node.split_attribute
+            
+            if split_attr not in row:
+                break
+                
+            if current_node.split_type == 'categorical':
+                attr_value = row[split_attr]
+                if attr_value in current_node.children:
+                    current_node = current_node.children[attr_value]
+                else:
+                    break
+            else:
+                direction = 'left' if row[split_attr] &lt;= current_node.split_value else 'right'
+                current_node = current_node.children[direction]
+        
+        class_label = current_node.class_label
+        true_label = row['income']
+        node = current_node
+        while node:
+            if update_nodes:
+                if true_label == ' &gt;50K':
+                    node.true_richs += 1
+                else:
+                    node.true_poors += 1
+
+                if class_label == true_label:
+                    node.correct_predictions += 1
+
+            node = node.parent
+
+        return class_label
+
+    def predict(self, df: pd.DataFrame, update_nodes:bool = False) -&gt; pd.Series:
+        if not hasattr(self, 'root') or self.root is None:
+            raise ValueError("Decision tree not trained yet. Call build_tree() first")
+            
+        return df.apply(lambda row: self._traverse_tree(row, update_nodes), axis=1)
+    
+    def _get_post_order_nodes(self, node: Node) -&gt; list[Node]:
+        """Get nodes in post-order (children before parents)"""
+        nodes = []
+        if not node.is_leaf:
+            for child in node.children.values():
+                nodes += self._get_post_order_nodes(child)
+        nodes.append(node)
+        return nodes
+    
+    def reset_counts(self):
+        def _reset(node):
+            if node:
+                node.true_richs = 0
+                node.true_poors = 0
+                node.correct_predictions = 0
+                for child in node.children.values():
+                    _reset(child)
+        _reset(self.root)
+
+    def prune(self,df: pd.DataFrame):
+        """Efficient pruning with single dataset pass using precomputed paths"""
+        total = len(df)
+        iter = 0
+        while True:
+            self.reset_counts()
+            print(f'exptected validation accuracy = {100*((self.predict(df,True) == df["income"]).mean())}%')
+            correct_preds = self.root.correct_predictions
+            print(f'iteration = {iter}: validation accuracy = {100*(correct_preds/total)}%')
+            
+            nodes = self._get_post_order_nodes(self.root)
+            best_change = 0
+            best_node = None
+            for node in nodes:
+                if not node.is_leaf:
+                    change = -node.correct_predictions + (node.true_richs if node.class_label == ' &gt;50K' else node.true_poors)
+                    if change &gt; best_change:
+                        best_change = change
+                        best_node = node
+            if best_change &gt; 0:
+                best_node.is_leaf = True
+            else:
+                break
+            correct_preds += best_change
+            iter += 1
+
+# int main code
+if __name__ == '__main__':
+
+    # argument reading
+    if len(argv) == 6:
+        train_data_path, validation_data_path, test_data_path, output_folder_path, question_part = argv[1:]
+    else:
+        train_data_path = '/home/atharva-verma/Documents/course/col774/Assignment3/data/Q1/train.csv'
+        validation_data_path = '/home/atharva-verma/Documents/course/col774/Assignment3/data/Q1/valid.csv'
+        test_data_path = '/home/atharva-verma/Documents/course/col774/Assignment3/data/Q1/test.csv'
+        output_folder_path = '/home/atharva-verma/Documents/course/col774/Assignment3/output/Q1/'
+        question_part = 'b'
+
+    df_train = pd.read_csv(train_data_path)
+    df_test = pd.read_csv(test_data_path)
+    df_val = pd.read_csv(validation_data_path)
+    # preprossing
+    if question_part != 'a':
+        categorical_cols = df_train.select_dtypes(include=['object', 'category']).columns.difference(['income'])
+
+        df_train = pd.get_dummies(df_train, columns=categorical_cols)
+        train_columns = df_train.columns
+
+        df_test = pd.get_dummies(df_test, columns=categorical_cols).reindex(columns=train_columns, fill_value=0)
+        df_val = pd.get_dummies(df_val, columns=categorical_cols).reindex(columns=train_columns, fill_value=0)
+
+    if question_part == 'a':
+        depths = [5, 10, 15, 20]
+        depths = [20]
+        train_accuracies = []
+        test_accuracies = []
+        validation_accuracies = []
+
+        for d in depths:
+            tree = Decision_Tree(max_depth=d)
+            tree.build_tree(df_train)
+
+            train_preds = tree.predict(df_train)
+            test_preds = tree.predict(df_test)
+            val_preds = tree.predict(df_val)
+            
+            train_acc = (train_preds == df_train['income']).mean()
+            test_acc = (test_preds == df_test['income']).mean()
+            val_acc = (val_preds == df_val['income']).mean()
+            
+            train_accuracies.append(train_acc)
+            test_accuracies.append(test_acc)
+            validation_accuracies.append(val_acc)
+
+            
+            print(f"Max Depth: {d} | Train Accuracy: {100*train_acc:.2f}% | Test Accuracy: {100*test_acc:.2f}% | Validation Accuracy {100*val_acc:.2f}%")
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(depths, train_accuracies, marker='o', label='Train Accuracy')
+        plt.plot(depths, test_accuracies, marker='o', label='Test Accuracy')
+        plt.plot(depths, validation_accuracies, marker='o', label='Validation Accuracy')
+        plt.xlabel("Maximum Depth")
+        plt.ylabel("Accuracy")
+        plt.title("Decision Tree: Accuracy vs Maximum Depth")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"{output_folder_path}/accuracy_vs_depth_part_{question_part}.png")
+
+        output_df = pd.DataFrame({'prediction': tree.predict(df_test)})
+        output_df.to_csv(f'{output_folder_path}/xprediction_{question_part}.csv',index=False)
+
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match111-1.html#5" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    elif question_part == 'b':
+        depths = [25, 35, 45, 55]
+        train_accuracies = []
+        test_accuracies = []
+        validation_accuracies = []
+
+        for d in depths:
+</FONT>            tree = Decision_Tree(max_depth=d)
+            tree.build_tree(df_train)
+
+            train_preds = tree.predict(df_train)
+            test_preds = tree.predict(df_test)
+            val_preds = tree.predict(df_val)
+            
+            train_acc = (train_preds == df_train['income']).mean()
+            test_acc = (test_preds == df_test['income']).mean()
+            val_acc = (val_preds == df_val['income']).mean()
+            
+            train_accuracies.append(train_acc)
+            test_accuracies.append(test_acc)
+            validation_accuracies.append(val_acc)
+            
+            print(f"Max Depth: {d} | Train Accuracy: {100*train_acc:.2f}% | Test Accuracy: {100*test_acc:.2f}% | Validation Accuracy {100*val_acc:.2f}%")
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(depths, train_accuracies, marker='o', label='Train Accuracy')
+        plt.plot(depths, test_accuracies, marker='o', label='Test Accuracy')
+        plt.plot(depths, validation_accuracies, marker='o', label='Validation Accuracy')
+        plt.xlabel("Maximum Depth")
+        plt.ylabel("Accuracy")
+        plt.title("Decision Tree: Accuracy vs Maximum Depth")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"{output_folder_path}/accuracy_vs_depth_part_{question_part}.png")
+
+        output_df = pd.DataFrame({'prediction': tree.predict(df_test)})
+        output_df.to_csv(f'{output_folder_path}/xprediction_{question_part}.csv',index=False)
+
+    
+    elif question_part == 'c':
+        depths = [25, 35, 45, 55]
+        train_accuracies = []
+        test_accuracies = []
+        validation_accuracies = []
+
+
+        for d in depths:
+            tree = Decision_Tree(max_depth=d)
+            tree.build_tree(df_train)
+            tree.prune(df_val)
+
+            train_preds = tree.predict(df_train)
+            test_preds = tree.predict(df_test)
+            val_preds = tree.predict(df_val)
+
+            train_acc = (train_preds == df_train['income']).mean()
+            test_acc = (test_preds == df_test['income']).mean()
+            val_acc = (val_preds == df_val['income']).mean()
+            
+            train_accuracies.append(train_acc)
+            test_accuracies.append(test_acc)
+            validation_accuracies.append(val_acc)
+            
+            print(f"Max Depth: {d} | Train Accuracy: {100*train_acc:.2f}% | Test Accuracy: {100*test_acc:.2f}% | Validation Accuracy {100*val_acc:.2f}%")
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(depths, train_accuracies, marker='o', label='Train Accuracy')
+        plt.plot(depths, test_accuracies, marker='o', label='Test Accuracy')
+        plt.plot(depths, validation_accuracies, marker='o', label='Validation Accuracy')
+        plt.xlabel("Maximum Depth")
+        plt.ylabel("Accuracy")
+        plt.title("Decision Tree: Accuracy vs Maximum Depth")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"{output_folder_path}/accuracy_vs_depth_part_{question_part}.png")
+
+        output_df = pd.DataFrame({'prediction': tree.predict(df_test)})
+        output_df.to_csv(f'{output_folder_path}/xprediction_{question_part}.csv',index=False)
+
+
+    elif question_part == 'd':
+        X_train = df_train.drop('income', axis=1)
+        y_train = df_train['income']
+        X_val   = df_val.drop('income', axis=1)
+        y_val   = df_val['income']
+        X_test  = df_test.drop('income', axis=1)
+        y_test  = df_test['income']
+
+        # Part (i):
+        depths = [25, 35, 45, 55]
+        train_accuracies = []
+        test_accuracies = []
+        validation_accuracies = []
+
+        print("Part (i): Varying max_depth")
+        for depth in depths:
+            clf = DecisionTreeClassifier(criterion='entropy', max_depth=depth, random_state=42)
+            clf.fit(X_train, y_train)
+            
+            train_acc = (y_train == clf.predict(X_train)).mean()
+            test_acc  = (y_test == clf.predict(X_test)).mean()
+            val_acc   = (y_val == clf.predict(X_val)).mean()
+            
+            train_accuracies.append(train_acc)
+            test_accuracies.append(test_acc)
+            validation_accuracies.append(val_acc)
+            
+            print(f"Max Depth: {depth} -&gt; Train Accuracy: {100*train_acc:.2f}, Validation Accuracy: {100*val_acc:.2f}, Test Acc: {100*test_acc:.2f}")
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(depths, train_accuracies, marker='o', label='Train Accuracy')
+        plt.plot(depths, test_accuracies, marker='o', label='Test Accuracy')
+        plt.plot(depths, validation_accuracies, marker='o', label='Validation Accuracy')
+        plt.xlabel("Maximum Depth")
+        plt.ylabel("Accuracy")
+        plt.title("Decision Tree (Entropy): Accuracy vs Maximum Depth")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"{output_folder_path}/accuracy_vs_depth_part_{question_part}.png")
+
+        best_depth = depths[validation_accuracies.index(max(validation_accuracies))]
+        print("Best max_depth based on validation set:", best_depth)
+
+        # Part (ii): Varying ccp_alpha
+        ccp_alphas = [0.001, 0.01, 0.1, 0.2]
+        train_accuracies = []
+        test_accuracies = []
+        validation_accuracies = []
+
+        print("\nPart (ii): Varying ccp_alpha")
+        for alpha in ccp_alphas:
+            clf = DecisionTreeClassifier(criterion='entropy', ccp_alpha=alpha, random_state=42)
+            clf.fit(X_train, y_train)
+            
+            train_acc = (y_train == clf.predict(X_train)).mean()
+            test_acc  = (y_test == clf.predict(X_test)).mean()
+            val_acc   = (y_val == clf.predict(X_val)).mean()
+            
+            train_accuracies.append(train_acc)
+            test_accuracies.append(test_acc)
+            validation_accuracies.append(val_acc)
+            
+            print(f"ccp_alpha: {alpha} -&gt; Train Acc: {100*train_acc:.2f}, Validation Acc: {100*val_acc:.2f}, Test Acc: {100*test_acc:.2f}")
+
+        plt.figure(figsize=(8,6))
+        plt.plot(ccp_alphas, train_accuracies, marker='o', label='Train Accuracy')
+        plt.plot(ccp_alphas, test_accuracies, marker='o', label='Test Accuracy')
+        plt.plot(ccp_alphas, validation_accuracies, marker='o', label='Validation Accuracy')
+        plt.xlabel('ccp_alpha')
+        plt.ylabel('Accuracy')
+        plt.title('Decision Tree (Entropy) Accuracy vs ccp_alpha')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"{output_folder_path}/accuracy_vs_ccp_alpha_{question_part}.png")
+
+        # Choose the best ccp_alpha based on validation set accuracy.
+        best_alpha = ccp_alphas[validation_accuracies.index(max(validation_accuracies))]
+
+        print("Best ccp_alpha based on validation set:", best_alpha)
+
+        output_df = pd.DataFrame({'prediction': clf.predict(df_test)})
+        output_df.to_csv(f'{output_folder_path}/xprediction_{question_part}.csv',index=False)
+
+        # final best model
+        clf = DecisionTreeClassifier(criterion='entropy', max_depth=best_depth, ccp_alpha=best_alpha, random_state=42)
+        clf.fit(X_train, y_train)
+        
+        train_acc = (y_train == clf.predict(X_train)).mean()
+        test_acc  = (y_test == clf.predict(X_test)).mean()
+        val_acc   = (y_val == clf.predict(X_val)).mean()
+
+        print(f"Best Model | Train Accuracy: {100*train_acc:.2f}% | Test Accuracy: {100*test_acc:.2f}% | Validation Accuracy {100*val_acc:.2f}%")
+        
+
+    elif question_part == 'e':
+
+        X_train = df_train.drop('income', axis=1)
+        y_train = df_train['income']
+        X_val = df_val.drop('income', axis=1)
+        y_val = df_val['income']
+        X_test = df_test.drop('income', axis=1)
+        y_test = df_test['income']
+
+        X_train_val = pd.concat([X_train, X_val], ignore_index=True)
+        y_train_val = pd.concat([y_train, y_val], ignore_index=True)
+
+        test_fold = [-1]*len(X_train) + [0]*len(X_val)
+        ps = PredefinedSplit(test_fold=test_fold)
+
+        param_grid = {
+            'n_estimators': [50, 150, 250, 350],
+            'max_features': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            'min_samples_split': [2, 4, 6, 8, 10]
+        }
+
+        rf = RandomForestClassifier(criterion='entropy', oob_score=True, random_state=42)
+
+        grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, cv=ps, scoring='accuracy')
+        grid_search.fit(X_train_val, y_train_val)
+
+        best_rf = grid_search.best_estimator_
+
+        train_acc = (y_train == best_rf.predict(X_train)).mean()
+        test_acc  = (y_test == best_rf.predict(X_test)).mean()
+        val_acc   = (y_val == best_rf.predict(X_val)).mean()
+
+        print("Best Parameters:", grid_search.best_params_)
+        print("Training Accuracy:", train_acc)
+        print("Test Accuracy:", test_acc)
+        print("Validation Accuracy:", val_acc)
+        print("OOB Accuracy:", best_rf.oob_score_)
+
+        output_df = pd.DataFrame({'prediction': best_rf.predict(df_test)})
+        output_df.to_csv(f'{output_folder_path}/xprediction_{question_part}.csv',index=False)
+
+
+
+from sys import argv
+import numpy as np
+import os
+import pandas as pd
+from PIL import Image
+import matplotlib.pyplot as plt
+from sklearn.metrics import precision_recall_fscore_support,accuracy_score,f1_score
+from sklearn.neural_network import MLPClassifier
+
+class NeuralNetwork:
+    def __init__(self, mini_batch_size: int, num_features: int, hidden_layers: list[int], 
+                 num_classes: int, learning_rate: float = 0.01, adaptive_learning: bool = False, 
+                 activation: str = 'sigmoid', random_seed: int | None = 42) -&gt; None:
+        self.mini_batch_size = mini_batch_size
+        self.learning_rate = learning_rate
+        self.adaptive_learning = adaptive_learning
+        self.activation = activation
+        self.layer_sizes = [num_features] + hidden_layers + [num_classes]
+        self.num_layers = len(self.layer_sizes)
+        self.weights = [] # weights[l] will give the weight matrix needed to get the activation output of layer l, given the hidden layers start with 0
+        self.biases = [] # bias[l] will give the bias needed to get the activation output of layer l, given the hidden layers start with 0
+        if random_seed is not None:
+            np.random.seed(random_seed)
+        # initialize weights with shape (layer_sizes[l-1], layer_sizes[l])
+        for L in range(1, self.num_layers):
+            W = np.random.randn(self.layer_sizes[L-1], self.layer_sizes[L]) * np.sqrt(1.0 / self.layer_sizes[L-1]) if self.activation == 'sigmoid' else np.random.randn(self.layer_sizes[L-1], self.layer_sizes[L]) * np.sqrt(2.0 / self.layer_sizes[L-1])
+            b = np.zeros(self.layer_sizes[L])
+            self.weights.append(W)
+            self.biases.append(b)
+
+    @staticmethod
+    def relu(z: np.ndarray) -&gt; np.ndarray:
+        return np.maximum(0, z)
+    
+    @staticmethod
+    def derivative_relu(z: np.ndarray) -&gt; np.ndarray:
+        return (z &gt; 0).astype(z.dtype)
+
+    @staticmethod
+    def sigmoid(z: np.ndarray) -&gt; np.ndarray:
+        return 1.0 / (1.0 + np.exp(-z))
+
+    @staticmethod
+    def derivative_sigmoid(z: np.ndarray) -&gt; np.ndarray:
+        s = 1.0 / (1.0 + np.exp(-z))
+        return s * (1 - s)
+
+    @staticmethod
+    def softmax(z: np.ndarray) -&gt; np.ndarray:
+        ez = np.exp(z - np.max(z, axis = 1, keepdims = True))
+        return ez / np.sum(ez, axis = 1, keepdims = True)
+    
+    def activate(self, z: np.ndarray) -&gt; np.ndarray:
+        return self.sigmoid(z) if self.activation == 'sigmoid' else self.relu(z)
+    
+    def derivative_activate(self, z: np.ndarray) -&gt; np.ndarray:
+        return self.derivative_sigmoid(z) if self.activation == 'sigmoid' else self.derivative_relu(z)
+    
+    def forward(self, X: np.ndarray) -&gt; tuple[list[np.ndarray], list[np.ndarray], np.ndarray]:
+        a = X.copy()
+        a_list: list[np.ndarray] = [X.copy()]
+        z_list: list[np.ndarray] = []
+
+        for L in range(self.num_layers - 2):
+            z = a @ self.weights[L] + self.biases[L]
+            z_list.append(z)
+            a = self.activate(z)
+            a_list.append(a)
+        
+        z = a @ self.weights[-1] + self.biases[-1]
+        z_list.append(z)
+        a = self.softmax(z)
+        a_list.append(a)
+
+        return z_list, a_list, np.argmax(a, axis=1)
+    
+    def compute_loss(self, y_true: np.ndarray, y_pred: np.ndarray) -&gt; float:
+        m = y_true.shape[0]
+        return float(np.mean(-np.log(y_pred[range(m), y_true] + 1e-9)))
+
+    def backward(self, a_list: list[np.ndarray], z_list: list[np.ndarray], 
+                 y_true: np.ndarray, y_pred: np.ndarray) -&gt; tuple[list[np.ndarray], list[np.ndarray]]:
+
+        m = y_true.shape[0]
+        grads_w: list[np.ndarray] = [None] * (self.num_layers - 1)
+        grads_b: list[np.ndarray] = [None] * (self.num_layers - 1)
+
+        # output Layer with shape (m, num_classes)
+        delta = (y_pred - y_true) / m
+        grads_w[-1] = a_list[-2].T @ delta  # (hidden_units, m) @ (m, num_classes) -&gt; (hidden_units, num_classes)
+        grads_b[-1] = np.sum(delta, axis=0)
+
+        for L in range(self.num_layers - 3, -1, -1):
+<A NAME="6"></A><FONT color = #00FF00><A HREF="match111-1.html#6" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            delta = (delta @ self.weights[L+1].T) * self.derivative_activate(z_list[L]) # (m, layer_sizes[L])
+            grads_w[L] = a_list[L].T @ delta  # (layer_sizes[L], m) @ (m, layer_sizes[L+1]) -&gt; (layer_sizes[L], layer_sizes[L+1])
+</FONT>            grads_b[L] = np.sum(delta, axis=0)
+
+        return grads_w, grads_b
+    
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, epochs: int = 100, 
+            tol: float = 2e-3, verbose: bool = True) -&gt; None:
+        
+        m = X_train.shape[0]
+        batch_size = self.mini_batch_size
+        num_batches = int(np.ceil(m / batch_size))
+        num_classes = self.layer_sizes[-1]
+        learning_rate = self.learning_rate
+        loss_history: list[float] = []
+        for epoch in range(epochs):
+            permutation = np.random.permutation(m)
+            X_shuffled = X_train[permutation]
+            y_shuffled = y_train[permutation]
+            epoch_loss = 0.0
+
+            if self.adaptive_learning:
+                learning_rate = self.learning_rate / np.sqrt(epoch + 1)
+
+            # babtch training loop
+            for i in range(0, m, batch_size): 
+                X_batch = X_shuffled[i:i+batch_size]
+                y_batch = y_shuffled[i:i+batch_size]
+                y_batch_onehot = np.eye(num_classes)[y_batch]
+
+                # forward pass
+                z_list, a_list, _ = self.forward(X_batch)
+                y_pred = a_list[-1]
+
+                # backward pass
+                loss = self.compute_loss(y_batch, y_pred)
+                epoch_loss += loss
+                grads_w, grads_b = self.backward(a_list, z_list, y_batch_onehot, y_pred)
+                loss_history.append(loss)
+
+
+                # parameter update
+                for layer_idx in range(len(self.weights)):
+                    self.weights[layer_idx] -= learning_rate * grads_w[layer_idx]
+                    self.biases[layer_idx] -= learning_rate * grads_b[layer_idx]
+            
+            if verbose:
+                print(f"Epoch {epoch+1}/{epochs} - Loss: {epoch_loss/num_batches:.4f}")
+            
+            if epoch &gt; 40 and len(loss_history) &gt; 10000:
+                x1=np.mean(np.asarray(loss_history[-5000:]))
+                x2=np.mean(np.asarray(loss_history[-10000:-5000]))
+                avg_diff = abs(x1-x2)
+
+                if avg_diff&lt;tol:
+                    break
+            if len(loss_history) &gt; 100000:
+                loss_history = loss_history[-10000:]
+
+    def predict(self, X: np.ndarray) -&gt; np.ndarray:
+        _, _, predictions = self.forward(X)
+        return predictions
+
+def load_training_data(train_data_path: str) -&gt; tuple[np.ndarray, np.ndarray]:
+    X_train = []
+    y_train = []
+    
+    for label in os.listdir(train_data_path):
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match111-1.html#0" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        label_dir = os.path.join(train_data_path, label)
+        if not os.path.isdir(label_dir):
+            continue
+            
+        for filename in os.listdir(label_dir):
+            file_path = os.path.join(label_dir, filename)
+            try:
+</FONT>                with Image.open(file_path) as image:
+                    image_array = np.array(image)
+                    X_train.append(image_array.flatten())
+                    y_train.append(int(label))
+            except Exception as e:
+                print(f"Error loading {file_path}: {e}")
+    
+    X_train = np.array(X_train) / 255.0
+    y_train = np.array(y_train)
+    
+    return X_train, y_train
+
+def load_test_data(test_data_path: str) -&gt; tuple[np.ndarray, list[str]]:
+    X_test = []
+    filenames = []
+    
+    for filename in sorted(os.listdir(test_data_path)):
+        file_path = os.path.join(test_data_path, filename)
+        try:
+            with Image.open(file_path) as image:
+                image_array = np.array(image)
+                X_test.append(image_array.flatten())
+                filenames.append(filename)
+        except Exception as e:
+            print(f"Error loading {file_path}: {e}")
+    
+    X_test = np.array(X_test) / 255.0
+    
+    return X_test, filenames
+
+def load_test_labels(csv_path: str) -&gt; np.ndarray:
+
+    df = pd.read_csv(csv_path)
+    return df['label'].to_numpy()
+
+def save_predictions(predictions: np.ndarray, output_folder_path: str):
+    df = pd.DataFrame({'prediction': predictions})
+    df.to_csv(output_folder_path, index=False)
+    print(f"Predictions saved to {output_folder_path}")
+
+if __name__ == '__main__':
+
+    if len(argv) == 5:
+        train_data_path, test_data_path, output_folder_path, question_part = argv[1:]
+    else:
+        train_data_path = '/home/atharva-verma/Documents/course/col774/Assignment3/data/Q2/train'
+        test_data_path = '/home/atharva-verma/Documents/course/col774/Assignment3/data/Q2/test'
+        output_folder_path = '/home/atharva-verma/Documents/course/col774/Assignment3/output/Q2'
+        question_part = 'b'
+    y_pred_path = '/home/atharva-verma/Documents/course/col774/Assignment3/data/Q2/test_labels.csv'
+
+    print("Loading training data...")
+    X_train, y_train = load_training_data(train_data_path)
+    print(f"Training data loaded: {X_train.shape[0]} samples with {X_train.shape[1]} features each.")
+
+    print("Loading test data...")
+    X_test, test_files = load_test_data(test_data_path)
+    print(f"Test data loaded: {X_test.shape[0]} samples.")
+
+    print("Loading test labels...")
+    y_test = load_test_labels(y_pred_path)
+
+    input_dim = X_train.shape[1]
+    num_classes = len(np.unique(y_train))
+    print(f"Input dimension: {input_dim}, Number of classes: {num_classes}")
+
+    if question_part == 'a':
+        hidden_layers = [100, 50]
+        learning_rate = 0.01
+        epochs =  125
+        batch_size = 32
+
+        nn = NeuralNetwork(mini_batch_size=batch_size, num_features=input_dim, hidden_layers=hidden_layers,
+                            num_classes=num_classes, learning_rate=learning_rate,activation='sigmoid')
+        print("Starting training...")
+        nn.train(X_train, y_train, epochs=epochs)
+        print("Training complete.")
+
+        predictions = nn.predict(X_test)
+        test_accuracy = np.mean(predictions == y_test)
+        print("Test Accuracy: {:.2f}%".format(100 * test_accuracy))
+
+        save_predictions(predictions, f'{output_folder_path}/test_prediction_{question_part}.csv')
+
+    elif question_part == 'b':
+        hidden_layer_sizes = [1, 5, 10, 50, 100]
+        learning_rate = 0.01
+        batch_size = 32
+        epochs =  125
+        input_dim = 2352
+
+        f1_scores_test = {}
+        f1_scores_train = {}
+
+        for hidden_units in hidden_layer_sizes:
+            print(f"Training with {hidden_units} hidden units...")
+
+            nn = NeuralNetwork(mini_batch_size=batch_size,
+                            num_features=input_dim,
+                            hidden_layers=[hidden_units],
+                            num_classes=num_classes,
+                            learning_rate=learning_rate,
+                            adaptive_learning=False,
+                            activation='sigmoid')
+
+            nn.train(X_train, y_train, epochs=epochs)
+
+            y_train_pred = nn.predict(X_train)
+            y_test_pred = nn.predict(X_test)
+
+            precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(
+                y_train, y_train_pred, average=None, zero_division=0)
+            f1_train_avg = f1_score(y_train, y_train_pred, average='macro')
+
+            precision_test, recall_test, f1_test, _ = precision_recall_fscore_support(
+                y_test, y_test_pred, average=None, zero_division=0)
+            f1_test_avg = f1_score(y_test, y_test_pred, average='macro')
+
+            f1_scores_train[hidden_units] = f1_train_avg
+            f1_scores_test[hidden_units] = f1_test_avg
+
+            print('---------------------------------------------------')
+            print(f"Hidden Units: {hidden_units}")
+            print('Metrics for training data:')
+            for i, (prec, rec, f1) in enumerate(zip(precision_train, recall_train, f1_train)):
+                print(f"    Class {i}: Precision = {prec:.4f}, Recall = {rec:.4f}, F1 Score = {f1:.4f}")
+            print('\nMetrics for testing data:')
+            for i, (prec, rec, f1) in enumerate(zip(precision_test, recall_test, f1_test)):
+                print(f"    Class {i}: Precision = {prec:.4f}, Recall = {rec:.4f}, F1 Score = {f1:.4f}")
+            print('---------------------------------------------------')
+                
+        save_predictions(y_test_pred, f'{output_folder_path}/test_prediction_{question_part}.csv')
+        print(accuracy_score(y_test_pred,y_test))
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(hidden_layer_sizes, [f1_scores_test[units] for units in hidden_layer_sizes], marker='o', label='Test F1 Score')
+        plt.plot(hidden_layer_sizes, [f1_scores_train[units] for units in hidden_layer_sizes], marker='o', label='Train F1 Score')
+        plt.xlabel('Number of Hidden Units')
+        plt.ylabel('Average F1 Score (Macro)')
+        plt.title('Average F1 Score vs. Number of Hidden Units')
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(f'{output_folder_path}/graph_part_{question_part}.png')
+
+    elif question_part == 'c':
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match111-1.html#3" TARGET="1"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        hidden_layer_configs = [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]
+        learning_rate = 0.01
+        batch_size = 32
+        epochs =  125
+        input_dim = 2352
+</FONT>
+        f1_scores_test = {}
+        f1_scores_train = {}
+
+        for hidden_layers in hidden_layer_configs:
+            print(f"Training with {hidden_layers} hidden units...")
+
+            nn = NeuralNetwork(mini_batch_size=batch_size,
+                            num_features=input_dim,
+                            hidden_layers=hidden_layers,
+                            num_classes=num_classes,
+                            learning_rate=learning_rate,
+                            adaptive_learning=False,
+                            activation='sigmoid')
+
+            nn.train(X_train, y_train, epochs=epochs)
+
+            y_train_pred = nn.predict(X_train)
+            y_test_pred = nn.predict(X_test)
+
+            precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(
+                y_train, y_train_pred, average=None, zero_division=0)
+            f1_train_avg = f1_score(y_train, y_train_pred, average='macro')
+
+            precision_test, recall_test, f1_test, _ = precision_recall_fscore_support(
+                y_test, y_test_pred, average=None, zero_division=0)
+            f1_test_avg = f1_score(y_test, y_test_pred, average='macro')
+
+            f1_scores_train[tuple(hidden_layers)] = f1_train_avg
+            f1_scores_test[tuple(hidden_layers)] = f1_test_avg
+
+            print('---------------------------------------------------')
+            print(f"Hidden Units: {hidden_layers}")
+            print('Metrics for training data:')
+            for i, (prec, rec, f1) in enumerate(zip(precision_train, recall_train, f1_train)):
+                print(f"    Class {i}: Precision = {prec:.4f}, Recall = {rec:.4f}, F1 Score = {f1:.4f}")
+            print('\nMetrics for testing data:')
+            for i, (prec, rec, f1) in enumerate(zip(precision_test, recall_test, f1_test)):
+                print(f"    Class {i}: Precision = {prec:.4f}, Recall = {rec:.4f}, F1 Score = {f1:.4f}")
+            print('---------------------------------------------------')
+                
+        save_predictions(y_test_pred, f'{output_folder_path}/test_prediction_{question_part}.csv')
+        print(accuracy_score(y_test_pred,y_test))
+
+        plt.figure(figsize=(10, 6))
+        plt.plot([str(config) for config in hidden_layer_configs],
+                [f1_scores_test[tuple(config)] for config in hidden_layer_configs],
+                marker='o', label='Test F1 Score')
+        plt.plot([str(config) for config in hidden_layer_configs],
+                [f1_scores_train[tuple(config)] for config in hidden_layer_configs],
+                marker='o', label='Train F1 Score')
+        plt.xlabel('Hidden Layer Configuration')
+        plt.ylabel('Average F1 Score (Macro)')
+        plt.title('Average F1 Score vs. Hidden Layer Configuration')
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(f'{output_folder_path}/graph_part_{question_part}.png')
+
+    elif question_part == 'd':
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match111-1.html#4" TARGET="1"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        hidden_layer_configs = [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]
+        learning_rate = 0.01
+        batch_size = 32
+        epochs =  125
+        input_dim = 2352
+</FONT>
+        f1_scores_test = {}
+        f1_scores_train = {}
+
+        for hidden_layers in hidden_layer_configs:
+            print(f"Training with {hidden_layers} hidden units...")
+
+            nn = NeuralNetwork(mini_batch_size=batch_size,
+                            num_features=input_dim,
+                            hidden_layers=hidden_layers,
+                            num_classes=num_classes,
+                            learning_rate=learning_rate,
+                            adaptive_learning=True,
+                            activation='sigmoid')
+
+            nn.train(X_train, y_train, epochs=epochs)
+
+            y_train_pred = nn.predict(X_train)
+            y_test_pred = nn.predict(X_test)
+
+            precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(
+                y_train, y_train_pred, average=None, zero_division=0)
+            f1_train_avg = f1_score(y_train, y_train_pred, average='macro')
+
+            precision_test, recall_test, f1_test, _ = precision_recall_fscore_support(
+                y_test, y_test_pred, average=None, zero_division=0)
+            f1_test_avg = f1_score(y_test, y_test_pred, average='macro')
+
+            f1_scores_train[tuple(hidden_layers)] = f1_train_avg
+            f1_scores_test[tuple(hidden_layers)] = f1_test_avg
+
+            print('---------------------------------------------------')
+            print(f"Hidden Units: {hidden_layers}")
+            print('Metrics for training data:')
+            for i, (prec, rec, f1) in enumerate(zip(precision_train, recall_train, f1_train)):
+                print(f"    Class {i}: Precision = {prec:.4f}, Recall = {rec:.4f}, F1 Score = {f1:.4f}")
+            print('\nMetrics for testing data:')
+            for i, (prec, rec, f1) in enumerate(zip(precision_test, recall_test, f1_test)):
+                print(f"    Class {i}: Precision = {prec:.4f}, Recall = {rec:.4f}, F1 Score = {f1:.4f}")
+            print('---------------------------------------------------')
+                
+        save_predictions(y_test_pred, f'{output_folder_path}/test_prediction_{question_part}.csv')
+        print(accuracy_score(y_test_pred,y_test))
+
+        plt.figure(figsize=(10, 6))
+        plt.plot([str(config) for config in hidden_layer_configs],
+                [f1_scores_test[tuple(config)] for config in hidden_layer_configs],
+                marker='o', label='Test F1 Score')
+        plt.plot([str(config) for config in hidden_layer_configs],
+                [f1_scores_train[tuple(config)] for config in hidden_layer_configs],
+                marker='o', label='Train F1 Score')
+        plt.xlabel('Hidden Layer Configuration')
+        plt.ylabel('Average F1 Score (Macro)')
+        plt.title('Average F1 Score vs. Hidden Layer Configuration')
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(f'{output_folder_path}/graph_part_{question_part}.png')
+
+    elif question_part == 'e':
+        hidden_layer_configs = [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]
+        learning_rate = 0.01
+        batch_size = 32
+        epochs =  125
+        input_dim = 2352
+
+        f1_scores_test = {}
+        f1_scores_train = {}
+
+        for hidden_layers in hidden_layer_configs:
+            print(f"Training with {hidden_layers} hidden units...")
+
+            nn = NeuralNetwork(mini_batch_size=batch_size,
+                            num_features=input_dim,
+                            hidden_layers=hidden_layers,
+                            num_classes=num_classes,
+                            learning_rate=learning_rate,
+                            adaptive_learning=True,
+                            activation='relu')
+
+            nn.train(X_train, y_train, epochs=epochs)
+
+            y_train_pred = nn.predict(X_train)
+            y_test_pred = nn.predict(X_test)
+
+            precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(
+                y_train, y_train_pred, average=None, zero_division=0)
+            f1_train_avg = f1_score(y_train, y_train_pred, average='macro')
+
+            precision_test, recall_test, f1_test, _ = precision_recall_fscore_support(
+                y_test, y_test_pred, average=None, zero_division=0)
+            f1_test_avg = f1_score(y_test, y_test_pred, average='macro')
+
+            f1_scores_train[tuple(hidden_layers)] = f1_train_avg
+            f1_scores_test[tuple(hidden_layers)] = f1_test_avg
+
+            print('---------------------------------------------------')
+            print(f"Hidden Units: {hidden_layers}")
+            print('Metrics for training data:')
+            for i, (prec, rec, f1) in enumerate(zip(precision_train, recall_train, f1_train)):
+                print(f"    Class {i}: Precision = {prec:.4f}, Recall = {rec:.4f}, F1 Score = {f1:.4f}")
+            print('\nMetrics for testing data:')
+            for i, (prec, rec, f1) in enumerate(zip(precision_test, recall_test, f1_test)):
+                print(f"    Class {i}: Precision = {prec:.4f}, Recall = {rec:.4f}, F1 Score = {f1:.4f}")
+            print('---------------------------------------------------')
+                
+        save_predictions(y_test_pred, f'{output_folder_path}/test_prediction_{question_part}.csv')
+        print(accuracy_score(y_test_pred,y_test))
+
+        plt.figure(figsize=(10, 6))
+        plt.plot([str(config) for config in hidden_layer_configs],
+                [f1_scores_test[tuple(config)] for config in hidden_layer_configs],
+                marker='o', label='Test F1 Score')
+        plt.plot([str(config) for config in hidden_layer_configs],
+                [f1_scores_train[tuple(config)] for config in hidden_layer_configs],
+                marker='o', label='Train F1 Score')
+        plt.xlabel('Hidden Layer Configuration')
+        plt.ylabel('Average F1 Score (Macro)')
+        plt.title('Average F1 Score vs. Hidden Layer Configuration')
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(f'{output_folder_path}/graph_part_{question_part}.png')
+
+    elif question_part == 'f':
+        hidden_layer_configs = [
+            (512,),
+            (512, 256),
+            (512, 256, 128),
+            (512, 256, 128, 64)
+        ]
+        learning_rate_init = 0.01
+        batch_size = 32
+        max_iter =  125
+
+        f1_scores_test = {}
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match111-1.html#2" TARGET="1"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        f1_scores_train = {}
+
+        for hidden_layers in hidden_layer_configs:
+            print(f"\nTraining with hidden layer configuration: {hidden_layers}...")
+
+            # Initialize the MLPClassifier with the specified parameters
+            mlp = MLPClassifier(hidden_layer_sizes=hidden_layers,
+                                activation='relu',
+                                solver='sgd',
+                                alpha=0,
+                                batch_size=batch_size,
+                                learning_rate='invscaling',
+                                learning_rate_init=learning_rate_init,
+</FONT>                                max_iter=max_iter,
+                                early_stopping=True,
+                                n_iter_no_change=10,
+                                random_state=42)
+            
+            mlp.fit(X_train, y_train)
+            
+            y_train_pred = mlp.predict(X_train)
+            y_test_pred = mlp.predict(X_test)
+            
+            precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(
+                y_train, y_train_pred, average=None, zero_division=0)
+            f1_train_avg = f1_score(y_train, y_train_pred, average='macro')
+
+            precision_test, recall_test, f1_test, _ = precision_recall_fscore_support(
+                y_test, y_test_pred, average=None, zero_division=0)
+            f1_test_avg = f1_score(y_test, y_test_pred, average='macro')
+
+            f1_scores_train[tuple(hidden_layers)] = f1_train_avg
+            f1_scores_test[tuple(hidden_layers)] = f1_test_avg
+            
+            print('---------------------------------------------------')
+            print(f"Hidden Units: {hidden_layers}")
+            print('Metrics for training data:')
+            for i, (prec, rec, f1) in enumerate(zip(precision_train, recall_train, f1_train)):
+                print(f"    Class {i}: Precision = {prec:.4f}, Recall = {rec:.4f}, F1 Score = {f1:.4f}")
+            print('\nMetrics for testing data:')
+            for i, (prec, rec, f1) in enumerate(zip(precision_test, recall_test, f1_test)):
+                print(f"    Class {i}: Precision = {prec:.4f}, Recall = {rec:.4f}, F1 Score = {f1:.4f}")
+            print('---------------------------------------------------')
+
+        save_predictions(y_test_pred, f'{output_folder_path}/test_prediction_{question_part}.csv')
+        print(accuracy_score(y_test_pred,y_test))
+
+        plt.figure(figsize=(10, 6))
+        plt.plot([str(config) for config in hidden_layer_configs],
+                [f1_scores_test[tuple(config)] for config in hidden_layer_configs],
+                marker='o', label='Test F1 Score')
+        plt.plot([str(config) for config in hidden_layer_configs],
+                [f1_scores_train[tuple(config)] for config in hidden_layer_configs],
+                marker='o', label='Train F1 Score')
+        plt.xlabel('Hidden Layer Configuration')
+        plt.ylabel('Average F1 Score (Macro)')
+        plt.title('Average F1 Score vs. Hidden Layer Configuration')
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(f'{output_folder_path}/graph_part_{question_part}.png')
+
+
+
+
+# imports
+from sys import argv
+from math import log2
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import GridSearchCV, PredefinedSplit
+
+# class defintion
+class Decision_Tree:
+    class Node:
+        def __init__(self, is_leaf: bool, class_label=None, 
+                    split_attribute=None, split_value=None,
+                    split_type=None, parent=None):
+            self.is_leaf = is_leaf
+            self.class_label = class_label
+            self.split_attribute = split_attribute
+            self.split_value = split_value
+            self.split_type = split_type
+            self.true_richs = 0
+            self.true_poors = 0
+            self.correct_predictions = 0
+            self.parent = parent
+            self.children = {}
+
+    def __init__(self, max_depth: int):
+        self.max_depth = max_depth
+
+    @staticmethod
+    def entropy(poor: int, everyone: int) -&gt; float:
+        if everyone == 0:
+            return 0.0
+        p = poor / everyone
+        if p == 0 or p == 1:
+            return 0.0
+        return -p * log2(p) - (1 - p) * log2(1 - p)
+
+    def build_tree(self, df: pd.DataFrame) -&gt; None:
+        self.root = self._build_tree(df.copy(), 0)
+
+    def _build_tree(self, df: pd.DataFrame, depth: int) -&gt; Node:
+        everyone = len(df)
+
+        # no data to do
+        if everyone == 0:
+            return self.Node(is_leaf=True)
+        
+        rich = (df['income'] == ' &gt;50K').sum()
+        poor = everyone - rich
+        majority_class = ' &gt;50K' if rich &gt; poor else ' &lt;=50K'
+        base_entropy = self.entropy(poor, everyone)
+
+        # zero entropy means data is pure
+        if base_entropy == 0.0 or depth == self.max_depth:
+            return self.Node(is_leaf=True, class_label=majority_class)
+
+        best_gain = -float('inf')
+        best_attr = None
+        best_split_value = None
+        best_subsets = []
+        best_split_type = None
+
+        for attribute in df.columns:
+            if attribute == 'income':
+                continue
+
+            if pd.api.types.is_numeric_dtype(df[attribute]):
+                # Numerical split handling
+                median_val = df[attribute].median()
+                left_df = df[df[attribute] &lt;= median_val]
+                right_df = df[df[attribute] &gt; median_val]
+                
+                left_total = len(left_df)
+                right_total = len(right_df)
+                left_rich = (left_df['income'] == ' &gt;50K').sum()
+                left_poor = left_total - left_rich
+                right_rich = (right_df['income'] == ' &gt;50K').sum()
+                right_poor = right_total - right_rich
+                
+                left_entropy = self.entropy(left_poor, left_total)
+                right_entropy = self.entropy(right_poor, right_total)
+                weighted_entropy = (left_total * left_entropy + right_total * right_entropy) / everyone
+                gain = base_entropy - weighted_entropy
+                
+                best_candidate = (gain, attribute, median_val, [('left',left_df),('right',right_df)], 'numerical')
+
+            else:
+                # Categorical split handling
+                value_subsets = []
+                weighted_entropy = 0.0
+                for val in df[attribute].unique():
+                    subset = df[df[attribute] == val]
+                    subset_total = len(subset)
+                    subset_rich = (subset['income'] == ' &gt;50K').sum()
+                    subset_poor = subset_total - subset_rich
+                    subset_entropy = self.entropy(subset_poor, subset_total)
+                    weighted_entropy += subset_total * subset_entropy
+                    value_subsets.append((val, subset))
+                weighted_entropy /= everyone
+                gain = base_entropy - weighted_entropy
+                
+                best_candidate = (gain, attribute, None, value_subsets, 'categorical')
+
+            if best_candidate[0] &gt; best_gain:
+                best_gain, best_attr, best_split_value, best_subsets, best_split_type = best_candidate
+
+        if best_gain &lt;= 0:
+            return self.Node(is_leaf=True, class_label=majority_class)
+
+        node = self.Node(
+            is_leaf=False,
+            class_label=majority_class,
+            split_attribute=best_attr,
+            split_value=best_split_value,
+            split_type=best_split_type,
+        )
+
+        for val, subset in best_subsets:
+            node.children[val] = self._build_tree(subset, depth + 1)
+        
+        for child in node.children.values():
+            child.parent = node
+            if child.class_label is None:
+                child.class_label = node.class_label
+
+        return node
+
+    def _traverse_tree(self, row: pd.Series, update_nodes: bool) -&gt; str:
+        current_node = self.root
+        while not current_node.is_leaf:
+            split_attr = current_node.split_attribute
+            
+            if split_attr not in row:
+                break
+                
+            if current_node.split_type == 'categorical':
+                attr_value = row[split_attr]
+                if attr_value in current_node.children:
+                    current_node = current_node.children[attr_value]
+                else:
+                    break
+            else:
+                direction = 'left' if row[split_attr] &lt;= current_node.split_value else 'right'
+                current_node = current_node.children[direction]
+        
+        class_label = current_node.class_label
+        true_label = row['income']
+        node = current_node
+        while node:
+            if update_nodes:
+                if true_label == ' &gt;50K':
+                    node.true_richs += 1
+                else:
+                    node.true_poors += 1
+
+                if class_label == true_label:
+                    node.correct_predictions += 1
+
+            node = node.parent
+
+        return class_label
+
+    def predict(self, df: pd.DataFrame, update_nodes:bool = False) -&gt; pd.Series:
+        if not hasattr(self, 'root') or self.root is None:
+            raise ValueError("Decision tree not trained yet. Call build_tree() first")
+            
+        return df.apply(lambda row: self._traverse_tree(row, update_nodes), axis=1)
+    
+    def _get_post_order_nodes(self, node: Node) -&gt; list[Node]:
+        """Get nodes in post-order (children before parents)"""
+        nodes = []
+        if not node.is_leaf:
+            for child in node.children.values():
+                nodes += self._get_post_order_nodes(child)
+        nodes.append(node)
+        return nodes
+    
+    def reset_counts(self):
+        def _reset(node):
+            if node:
+                node.true_richs = 0
+                node.true_poors = 0
+                node.correct_predictions = 0
+                for child in node.children.values():
+                    _reset(child)
+        _reset(self.root)
+
+    def prune(self,df: pd.DataFrame):
+        """Efficient pruning with single dataset pass using precomputed paths"""
+        total = len(df)
+        iter = 0
+        while True:
+            self.reset_counts()
+            print(f'exptected validation accuracy = {100*((self.predict(df,True) == df["income"]).mean())}%')
+            correct_preds = self.root.correct_predictions
+            print(f'iteration = {iter}: validation accuracy = {100*(correct_preds/total)}%')
+            
+            nodes = self._get_post_order_nodes(self.root)
+            best_change = 0
+            best_node = None
+            for node in nodes:
+                if not node.is_leaf:
+                    change = -node.correct_predictions + (node.true_richs if node.class_label == ' &gt;50K' else node.true_poors)
+                    if change &gt; best_change:
+                        best_change = change
+                        best_node = node
+            if best_change &gt; 0:
+                best_node.is_leaf = True
+            else:
+                break
+            correct_preds += best_change
+            iter += 1
+
+# int main code
+if __name__ == '__main__':
+
+    # argument reading
+    if len(argv) == 6:
+        train_data_path, validation_data_path, test_data_path, output_folder_path, question_part = argv[1:]
+    else:
+        train_data_path = '/home/atharva-verma/Documents/course/col774/Assignment3/data/Q1/train.csv'
+        validation_data_path = '/home/atharva-verma/Documents/course/col774/Assignment3/data/Q1/valid.csv'
+        test_data_path = '/home/atharva-verma/Documents/course/col774/Assignment3/data/Q1/test.csv'
+        output_folder_path = '/home/atharva-verma/Documents/course/col774/Assignment3/output/Q1/'
+        question_part = 'b'
+
+    df_train = pd.read_csv(train_data_path)
+    df_test = pd.read_csv(test_data_path)
+    df_val = pd.read_csv(validation_data_path)
+    # preprossing
+    if question_part != 'a':
+        categorical_cols = df_train.select_dtypes(include=['object', 'category']).columns.difference(['income'])
+
+        df_train = pd.get_dummies(df_train, columns=categorical_cols)
+        train_columns = df_train.columns
+
+        df_test = pd.get_dummies(df_test, columns=categorical_cols).reindex(columns=train_columns, fill_value=0)
+        df_val = pd.get_dummies(df_val, columns=categorical_cols).reindex(columns=train_columns, fill_value=0)
+
+    if question_part == 'a':
+        depths = [20]
+
+        for d in depths:
+            tree = Decision_Tree(max_depth=d)
+            tree.build_tree(df_train)
+
+            test_preds = tree.predict(df_test)
+            
+            output_df = pd.DataFrame({'prediction': tree.predict(df_test)})
+            output_df.to_csv(f'{output_folder_path}/prediction_{question_part}.csv',index=False)
+
+    elif question_part == 'b':
+        depths = [55]
+
+        for d in depths:
+            tree = Decision_Tree(max_depth=d)
+            tree.build_tree(df_train)
+
+            test_preds = tree.predict(df_test)
+            
+            output_df = pd.DataFrame({'prediction': tree.predict(df_test)})
+            output_df.to_csv(f'{output_folder_path}/prediction_{question_part}.csv',index=False)
+
+            
+    
+    elif question_part == 'c':
+        depths = [55]
+
+        for d in depths:
+            tree = Decision_Tree(max_depth=d)
+            tree.build_tree(df_train)
+            tree.prune(df_val)
+
+            test_preds = tree.predict(df_test)
+
+            output_df = pd.DataFrame({'prediction': tree.predict(df_test)})
+            output_df.to_csv(f'{output_folder_path}/prediction_{question_part}.csv',index=False)
+
+
+    elif question_part == 'd':
+        X_train = df_train.drop('income', axis=1)
+        y_train = df_train['income']
+        X_val   = df_val.drop('income', axis=1)
+        y_val   = df_val['income']
+        X_test  = df_test.drop('income', axis=1,errors='ignore')
+
+        # Part (i):
+        depths = [25, 35, 45, 55]
+        train_accuracies = []
+        validation_accuracies = []
+
+        print("Part (i): Varying max_depth")
+        for depth in depths:
+            clf = DecisionTreeClassifier(criterion='entropy', max_depth=depth, random_state=42)
+            clf.fit(X_train, y_train)
+            
+            train_acc = (y_train == clf.predict(X_train)).mean()
+            val_acc   = (y_val == clf.predict(X_val)).mean()
+            
+            train_accuracies.append(train_acc)
+            validation_accuracies.append(val_acc)
+            
+
+        best_depth = depths[validation_accuracies.index(max(validation_accuracies))]
+        print("Best max_depth based on validation set:", best_depth)
+
+        # Part (ii): Varying ccp_alpha
+        ccp_alphas = [0.001, 0.01, 0.1, 0.2]
+        train_accuracies = []
+        validation_accuracies = []
+
+        print("\nPart (ii): Varying ccp_alpha")
+        for alpha in ccp_alphas:
+            clf = DecisionTreeClassifier(criterion='entropy', ccp_alpha=alpha, random_state=42)
+            clf.fit(X_train, y_train)
+            
+            train_acc = (y_train == clf.predict(X_train)).mean()
+            val_acc   = (y_val == clf.predict(X_val)).mean()
+            
+            train_accuracies.append(train_acc)
+            validation_accuracies.append(val_acc)
+
+        # Choose the best ccp_alpha based on validation set accuracy.
+        best_alpha = ccp_alphas[validation_accuracies.index(max(validation_accuracies))]
+
+        print("Best ccp_alpha based on validation set:", best_alpha)
+
+        # final best model
+        clf = DecisionTreeClassifier(criterion='entropy', max_depth=best_depth, ccp_alpha=best_alpha, random_state=42)
+        clf.fit(X_train, y_train)
+
+        output_df = pd.DataFrame({'prediction': clf.predict(df_test)})
+        output_df.to_csv(f'{output_folder_path}/prediction_{question_part}.csv',index=False)
+
+
+    elif question_part == 'e':
+
+        X_train = df_train.drop('income', axis=1)
+        y_train = df_train['income']
+        X_val = df_val.drop('income', axis=1)
+        y_val = df_val['income']
+        X_test = df_test.drop('income', axis=1,errors='ignore')
+
+        X_train_val = pd.concat([X_train, X_val], ignore_index=True)
+        y_train_val = pd.concat([y_train, y_val], ignore_index=True)
+
+        test_fold = [-1]*len(X_train) + [0]*len(X_val)
+        ps = PredefinedSplit(test_fold=test_fold)
+
+        param_grid = {
+            'n_estimators': [50, 150, 250, 350],
+            'max_features': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            'min_samples_split': [2, 4, 6, 8, 10]
+        }
+
+        rf = RandomForestClassifier(criterion='entropy', oob_score=True, random_state=42)
+
+        grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, cv=ps, scoring='accuracy')
+        grid_search.fit(X_train_val, y_train_val)
+
+        best_rf = grid_search.best_estimator_
+
+        output_df = pd.DataFrame({'prediction': best_rf.predict(df_test)})
+        output_df.to_csv(f'{output_folder_path}/prediction_{question_part}.csv',index=False)
+
+
+
+from sys import argv
+import numpy as np
+import os
+import pandas as pd
+from PIL import Image
+import matplotlib.pyplot as plt
+from sklearn.metrics import precision_recall_fscore_support,accuracy_score,f1_score
+from sklearn.neural_network import MLPClassifier
+
+class NeuralNetwork:
+    def __init__(self, mini_batch_size: int, num_features: int, hidden_layers: list[int], 
+                 num_classes: int, learning_rate: float = 0.01, adaptive_learning: bool = False, 
+                 activation: str = 'sigmoid', random_seed: int | None = 42) -&gt; None:
+        self.mini_batch_size = mini_batch_size
+        self.learning_rate = learning_rate
+        self.adaptive_learning = adaptive_learning
+        self.activation = activation
+        self.layer_sizes = [num_features] + hidden_layers + [num_classes]
+        self.num_layers = len(self.layer_sizes)
+        self.weights = [] # weights[l] will give the weight matrix needed to get the activation output of layer l, given the hidden layers start with 0
+        self.biases = [] # bias[l] will give the bias needed to get the activation output of layer l, given the hidden layers start with 0
+        if random_seed is not None:
+            np.random.seed(random_seed)
+        # initialize weights with shape (layer_sizes[l-1], layer_sizes[l])
+        for L in range(1, self.num_layers):
+            W = np.random.randn(self.layer_sizes[L-1], self.layer_sizes[L]) * np.sqrt(1.0 / self.layer_sizes[L-1]) if self.activation == 'sigmoid' else np.random.randn(self.layer_sizes[L-1], self.layer_sizes[L]) * np.sqrt(2.0 / self.layer_sizes[L-1])
+            b = np.zeros(self.layer_sizes[L])
+            self.weights.append(W)
+            self.biases.append(b)
+
+    @staticmethod
+    def relu(z: np.ndarray) -&gt; np.ndarray:
+        return np.maximum(0, z)
+    
+    @staticmethod
+    def derivative_relu(z: np.ndarray) -&gt; np.ndarray:
+        return (z &gt; 0).astype(z.dtype)
+
+    @staticmethod
+    def sigmoid(z: np.ndarray) -&gt; np.ndarray:
+        return 1.0 / (1.0 + np.exp(-z))
+
+    @staticmethod
+    def derivative_sigmoid(z: np.ndarray) -&gt; np.ndarray:
+        s = 1.0 / (1.0 + np.exp(-z))
+        return s * (1 - s)
+
+    @staticmethod
+    def softmax(z: np.ndarray) -&gt; np.ndarray:
+        ez = np.exp(z - np.max(z, axis = 1, keepdims = True))
+        return ez / np.sum(ez, axis = 1, keepdims = True)
+    
+    def activate(self, z: np.ndarray) -&gt; np.ndarray:
+        return self.sigmoid(z) if self.activation == 'sigmoid' else self.relu(z)
+    
+    def derivative_activate(self, z: np.ndarray) -&gt; np.ndarray:
+        return self.derivative_sigmoid(z) if self.activation == 'sigmoid' else self.derivative_relu(z)
+    
+    def forward(self, X: np.ndarray) -&gt; tuple[list[np.ndarray], list[np.ndarray], np.ndarray]:
+        a = X.copy()
+        a_list: list[np.ndarray] = [X.copy()]
+        z_list: list[np.ndarray] = []
+
+        for L in range(self.num_layers - 2):
+            z = a @ self.weights[L] + self.biases[L]
+            z_list.append(z)
+            a = self.activate(z)
+            a_list.append(a)
+        
+        z = a @ self.weights[-1] + self.biases[-1]
+        z_list.append(z)
+        a = self.softmax(z)
+        a_list.append(a)
+
+        return z_list, a_list, np.argmax(a, axis=1)
+    
+    def compute_loss(self, y_true: np.ndarray, y_pred: np.ndarray) -&gt; float:
+        m = y_true.shape[0]
+        return float(np.mean(-np.log(y_pred[range(m), y_true] + 1e-9)))
+
+    def backward(self, a_list: list[np.ndarray], z_list: list[np.ndarray], 
+                 y_true: np.ndarray, y_pred: np.ndarray) -&gt; tuple[list[np.ndarray], list[np.ndarray]]:
+
+        m = y_true.shape[0]
+        grads_w: list[np.ndarray] = [None] * (self.num_layers - 1)
+        grads_b: list[np.ndarray] = [None] * (self.num_layers - 1)
+
+        # output Layer with shape (m, num_classes)
+        delta = (y_pred - y_true) / m
+        grads_w[-1] = a_list[-2].T @ delta  # (hidden_units, m) @ (m, num_classes) -&gt; (hidden_units, num_classes)
+        grads_b[-1] = np.sum(delta, axis=0)
+
+        for L in range(self.num_layers - 3, -1, -1):
+            delta = (delta @ self.weights[L+1].T) * self.derivative_activate(z_list[L]) # (m, layer_sizes[L])
+            grads_w[L] = a_list[L].T @ delta  # (layer_sizes[L], m) @ (m, layer_sizes[L+1]) -&gt; (layer_sizes[L], layer_sizes[L+1])
+            grads_b[L] = np.sum(delta, axis=0)
+
+        return grads_w, grads_b
+    
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, epochs: int = 100, 
+            tol: float = 2e-3, verbose: bool = True) -&gt; None:
+        
+        m = X_train.shape[0]
+        batch_size = self.mini_batch_size
+        num_batches = int(np.ceil(m / batch_size))
+        num_classes = self.layer_sizes[-1]
+        learning_rate = self.learning_rate
+        loss_history: list[float] = []
+        for epoch in range(epochs):
+            permutation = np.random.permutation(m)
+            X_shuffled = X_train[permutation]
+            y_shuffled = y_train[permutation]
+            epoch_loss = 0.0
+
+            if self.adaptive_learning:
+                learning_rate = self.learning_rate / np.sqrt(epoch + 1)
+
+            # babtch training loop
+            for i in range(0, m, batch_size): 
+                X_batch = X_shuffled[i:i+batch_size]
+                y_batch = y_shuffled[i:i+batch_size]
+                y_batch_onehot = np.eye(num_classes)[y_batch]
+
+                # forward pass
+                z_list, a_list, _ = self.forward(X_batch)
+                y_pred = a_list[-1]
+
+                # backward pass
+                loss = self.compute_loss(y_batch, y_pred)
+                epoch_loss += loss
+                grads_w, grads_b = self.backward(a_list, z_list, y_batch_onehot, y_pred)
+                loss_history.append(loss)
+
+
+                # parameter update
+                for layer_idx in range(len(self.weights)):
+                    self.weights[layer_idx] -= learning_rate * grads_w[layer_idx]
+                    self.biases[layer_idx] -= learning_rate * grads_b[layer_idx]
+            
+            if verbose:
+                print(f"Epoch {epoch+1}/{epochs} - Loss: {epoch_loss/num_batches:.4f}")
+            
+            if epoch &gt; 40 and len(loss_history) &gt; 10000:
+                x1=np.mean(np.asarray(loss_history[-5000:]))
+                x2=np.mean(np.asarray(loss_history[-10000:-5000]))
+                avg_diff = abs(x1-x2)
+
+                if avg_diff&lt;tol:
+                    break
+            if len(loss_history) &gt; 100000:
+                loss_history = loss_history[-10000:]
+
+    def predict(self, X: np.ndarray) -&gt; np.ndarray:
+        _, _, predictions = self.forward(X)
+        return predictions
+
+def load_training_data(train_data_path: str) -&gt; tuple[np.ndarray, np.ndarray]:
+    X_train = []
+    y_train = []
+    
+    for label in os.listdir(train_data_path):
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match111-1.html#1" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        label_dir = os.path.join(train_data_path, label)
+        if not os.path.isdir(label_dir):
+            continue
+            
+        for filename in os.listdir(label_dir):
+            file_path = os.path.join(label_dir, filename)
+            try:
+</FONT>                with Image.open(file_path) as image:
+                    image_array = np.array(image)
+                    X_train.append(image_array.flatten())
+                    y_train.append(int(label))
+            except Exception as e:
+                print(f"Error loading {file_path}: {e}")
+    
+    X_train = np.array(X_train) / 255.0
+    y_train = np.array(y_train)
+    
+    return X_train, y_train
+
+def load_test_data(test_data_path: str) -&gt; tuple[np.ndarray, list[str]]:
+    X_test = []
+    filenames = []
+    
+    for filename in sorted(os.listdir(test_data_path)):
+        file_path = os.path.join(test_data_path, filename)
+        try:
+            with Image.open(file_path) as image:
+                image_array = np.array(image)
+                X_test.append(image_array.flatten())
+                filenames.append(filename)
+        except Exception as e:
+            print(f"Error loading {file_path}: {e}")
+    
+    X_test = np.array(X_test) / 255.0
+    
+    return X_test, filenames
+
+def load_test_labels(csv_path: str) -&gt; np.ndarray:
+
+    df = pd.read_csv(csv_path)
+    return df['label'].to_numpy()
+
+def save_predictions(predictions: np.ndarray, output_folder_path: str):
+    df = pd.DataFrame({'prediction': predictions})
+    df.to_csv(output_folder_path, index=False)
+    print(f"Predictions saved to {output_folder_path}")
+
+if __name__ == '__main__':
+
+    if len(argv) == 5:
+        train_data_path, test_data_path, output_folder_path, question_part = argv[1:]
+    else:
+        raise('invalid argument passing')
+
+    X_train, y_train = load_training_data(train_data_path)
+
+    X_test, test_files = load_test_data(test_data_path)
+
+
+    input_dim = X_train.shape[1]
+    num_classes = len(np.unique(y_train))
+
+    if question_part == 'b':
+        hidden_layer_sizes = [100]
+        learning_rate = 0.01
+        batch_size = 32
+        epochs = 125
+        input_dim = 2352
+
+        f1_scores_test = {}
+        f1_scores_train = {}
+
+        for hidden_units in hidden_layer_sizes:
+
+            nn = NeuralNetwork(mini_batch_size=batch_size,
+                            num_features=input_dim,
+                            hidden_layers=[hidden_units],
+                            num_classes=num_classes,
+                            learning_rate=learning_rate,
+                            adaptive_learning=False,
+                            activation='sigmoid')
+
+            nn.train(X_train, y_train, epochs=epochs)
+
+            y_test_pred = nn.predict(X_test)
+                
+            save_predictions(y_test_pred, f'{output_folder_path}/prediction_b.csv')
+
+
+    elif question_part == 'c':
+        hidden_layer_configs = [[512, 256, 128, 64]]
+        learning_rate = 0.01
+        batch_size = 32
+        epochs = 125
+        input_dim = 2352
+
+        f1_scores_test = {}
+        f1_scores_train = {}
+
+        for hidden_layers in hidden_layer_configs:
+
+            nn = NeuralNetwork(mini_batch_size=batch_size,
+                            num_features=input_dim,
+                            hidden_layers=hidden_layers,
+                            num_classes=num_classes,
+                            learning_rate=learning_rate,
+                            adaptive_learning=False,
+                            activation='sigmoid')
+
+            nn.train(X_train, y_train, epochs=epochs)
+
+            y_test_pred = nn.predict(X_test)
+                
+            save_predictions(y_test_pred, f'{output_folder_path}/prediction_c.csv')
+        
+    elif question_part == 'd':
+        hidden_layer_configs = [[512, 256, 128, 64]]
+        learning_rate = 0.01
+        batch_size = 32
+        epochs = 125
+        input_dim = 2352
+
+        for hidden_layers in hidden_layer_configs:
+
+            nn = NeuralNetwork(mini_batch_size=batch_size,
+                            num_features=input_dim,
+                            hidden_layers=hidden_layers,
+                            num_classes=num_classes,
+                            learning_rate=learning_rate,
+                            adaptive_learning=True,
+                            activation='sigmoid')
+
+            nn.train(X_train, y_train, epochs=epochs)
+
+            y_test_pred = nn.predict(X_test)
+                
+            save_predictions(y_test_pred, f'{output_folder_path}/prediction_d.csv')
+
+    elif question_part == 'e':
+        hidden_layer_configs = [[512, 256, 128, 64]]
+        learning_rate = 0.01
+        batch_size = 32
+        epochs = 125
+        input_dim = 2352
+
+
+        for hidden_layers in hidden_layer_configs:
+
+            nn = NeuralNetwork(mini_batch_size=batch_size,
+                            num_features=input_dim,
+                            hidden_layers=hidden_layers,
+                            num_classes=num_classes,
+                            learning_rate=learning_rate,
+                            adaptive_learning=True,
+                            activation='relu')
+
+            nn.train(X_train, y_train, epochs=epochs)
+
+            y_test_pred = nn.predict(X_test)
+
+            save_predictions(y_test_pred, f'{output_folder_path}/prediction_e.csv')
+
+
+    elif question_part == 'f':
+        hidden_layer_configs = [(512, 256, 128, 64)]
+        learning_rate_init = 0.01
+        batch_size = 32
+        max_iter = 125
+
+        f1_scores_test = {}
+        f1_scores_train = {}
+
+        for hidden_layers in hidden_layer_configs:
+
+            mlp = MLPClassifier(hidden_layer_sizes=hidden_layers,
+                                activation='relu',
+                                solver='sgd',
+                                alpha=0,
+                                batch_size=batch_size,
+                                learning_rate='invscaling',
+                                learning_rate_init=learning_rate_init,
+                                max_iter=max_iter,
+                                early_stopping=True,
+                                n_iter_no_change=10,
+                                random_state=42)
+            
+            mlp.fit(X_train, y_train)
+            
+            y_test_pred = mlp.predict(X_test)
+            
+            save_predictions(y_test_pred, f'{output_folder_path}/prediction_f.csv')
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
