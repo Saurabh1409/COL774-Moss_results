@@ -1,0 +1,1077 @@
+<HTML>
+<HEAD>
+<TITLE>./A3_processed_new_hash/combined_G8GO6.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A3_processed_new_hash/combined_KQ3JZ.py<p><PRE>
+
+
+import sys
+import os
+import pandas as pd
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+from collections import Counter
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.ensemble import RandomForestClassifier
+import itertools
+
+# ------------------------------
+# Utility Functions (shared across parts)
+# ------------------------------
+
+def entropy(y):
+    counts = np.bincount(y)
+    probabilities = counts[np.nonzero(counts)] / len(y)
+    return -np.sum(probabilities * np.log2(probabilities))
+
+def information_gain(y, splits):
+    parent_entropy = entropy(y)
+    total_instances = len(y)
+    weighted_entropy = sum((len(split) / total_instances) * entropy(split)
+                           for split in splits if len(split) &gt; 0)
+    return parent_entropy - weighted_entropy
+
+def accuracy(y_true, y_pred):
+    return np.mean(np.array(y_true) == np.array(y_pred))
+
+def count_nodes(node):
+    if node.is_leaf:
+        return 1
+    return 1 + sum(count_nodes(child) for child in node.children.values())
+
+# ------------------------------
+# Part (a) – Our Custom Decision Tree (without pruning)
+# ------------------------------
+
+class TreeNodeA:
+    def __init__(self, depth=0, max_depth=None):
+        self.depth = depth              # current depth of the node
+        self.max_depth = max_depth      # maximum allowable depth
+        self.split_attr = None          # attribute used for splitting here
+        self.threshold = None           # for continuous attributes: split threshold (median)
+        self.children = {}              # dictionary for children nodes; keys depend on attribute type
+        self.is_leaf = False            # indicates whether the node is a leaf
+        self.prediction = None          # label prediction if node is leaf
+        self.attr_type = None           # 'continuous' or 'categorical'
+
+    def fit(self, X, y, feature_types):
+        """
+        Build the tree recursively.
+        
+        Parameters:
+          X: pandas DataFrame (features)
+          y: numpy array or pandas Series (labels)
+          feature_types: dict mapping column names to 'continuous' or 'categorical'
+        """
+        if len(set(y)) == 1 or self.max_depth is not None and self.depth &gt;= self.max_depth or X.empty:
+            self.is_leaf = True
+            self.prediction = Counter(y).most_common(1)[0][0]
+            return
+
+        best_gain = -1
+        best_attr = None
+        best_splits = None
+        best_threshold = None
+        best_attr_type = None
+        for attr in X.columns:
+            attr_type = feature_types[attr]
+            if attr_type == 'continuous':
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match146-0.html#1" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+                median_val = X[attr].median()
+                left_mask = X[attr] &lt;= median_val
+                right_mask = X[attr] &gt; median_val
+                if left_mask.sum() == 0 or right_mask.sum() == 0:
+</FONT>                    continue
+                splits = [y[left_mask], y[right_mask]]
+                gain = information_gain(y, splits)
+                if gain &gt; best_gain:
+                    best_gain = gain
+                    best_attr = attr
+                    best_threshold = median_val
+                    best_attr_type = 'continuous'
+                    best_splits = {
+                        'left': (X[left_mask], y[left_mask]),
+                        'right': (X[right_mask], y[right_mask])
+                    }
+            elif attr_type == 'categorical':
+                unique_vals = X[attr].unique()
+                splits = []
+                current_splits = {}
+                valid_split = True
+                for val in unique_vals:
+                    mask = X[attr] == val
+                    if mask.sum() == 0:
+                        valid_split = False
+                        break
+                    splits.append(y[mask])
+                    current_splits[val] = (X[mask], y[mask])
+                if not valid_split or len(splits) == 0:
+                    continue
+                gain = information_gain(y, splits)
+                if gain &gt; best_gain:
+                    best_gain = gain
+                    best_attr = attr
+                    best_threshold = None   # Not applicable
+                    best_attr_type = 'categorical'
+                    best_splits = current_splits
+        if best_gain &lt; 0 or best_attr is None:
+            self.is_leaf = True
+            self.prediction = Counter(y).most_common(1)[0][0]
+            return
+        self.split_attr = best_attr
+        self.attr_type = best_attr_type
+        self.threshold = best_threshold
+        for branch, (child_X, child_y) in best_splits.items():
+            child_node = TreeNodeA(depth=self.depth + 1, max_depth=self.max_depth)
+            child_node.fit(child_X, child_y, feature_types)
+            self.children[branch] = child_node
+
+    def predict_instance(self, instance):
+        """
+        Predict the label for a single instance.
+        """
+        if self.is_leaf:
+            return self.prediction
+        if self.attr_type == 'continuous':
+            if instance[self.split_attr] &lt;= self.threshold:
+                branch = 'left'
+            else:
+                branch = 'right'
+            if branch not in self.children:
+                return self.prediction
+            return self.children[branch].predict_instance(instance)
+        else:
+            val = instance[self.split_attr]
+            if val in self.children:
+                return self.children[val].predict_instance(instance)
+            else:
+                return self.prediction
+
+    def predict(self, X):
+        """
+        Predict the label for each instance in X.
+        """
+        return X.apply(lambda row: self.predict_instance(row), axis=1)
+    
+def run_experiments_a(train_file, test_file, feature_types, depths=[20]):
+    income_mapping = {"&gt;50K": 1, "&lt;=50K": 0}
+    train_df = pd.read_csv(train_file)
+    test_df = pd.read_csv(test_file)
+    train_df["income"] = train_df["income"].str.strip()
+    train_df["income"] = train_df["income"].map(income_mapping)
+    X_train = train_df.drop("income", axis=1)
+    y_train = train_df["income"].values.astype(int)
+    print(y_train)
+    X_test = test_df
+
+    train_accuracies = []
+    test_accuracies = []
+    tree = TreeNodeA(max_depth=20)
+    tree.fit(X_train, y_train, feature_types)
+    y_train_pred = tree.predict(X_train)
+    y_test_pred = tree.predict(X_test)
+
+    acc_train = accuracy(y_train, y_train_pred)
+
+    train_accuracies.append(acc_train)
+    return y_test_pred
+
+# ------------------------------
+# Part (b) and (c) – One-Hot Encoding & Post-Pruning
+# ------------------------------
+
+class TreeNodeBC:
+    def __init__(self, depth=0, max_depth=None):
+        self.depth = depth
+        self.max_depth = max_depth
+        self.split_attr = None
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match146-0.html#4" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        self.threshold = None
+        self.children = {}
+        self.is_leaf = False
+        self.prediction = None          # This must be set on every node.
+        self.attr_type = None
+        self.val_indices = []
+</FONT>
+    def fit(self, X, y, feature_types):
+        if len(set(y)) == 1 or (self.max_depth is not None and self.depth &gt;= self.max_depth) or X.empty:
+            self.is_leaf = True
+            self.prediction = Counter(y).most_common(1)[0][0]
+            return
+
+        best_gain = -1
+        best_attr = None
+        best_splits = None
+        best_threshold = None
+        best_attr_type = None
+
+        for attr in X.columns:
+            attr_type = feature_types[attr]
+            if attr_type == 'continuous':
+                median_val = X[attr].median()
+                left_mask = X[attr] &lt;= median_val
+                right_mask = X[attr] &gt; median_val
+                if left_mask.sum() == 0 or right_mask.sum() == 0:
+                    continue
+                splits = [y[left_mask], y[right_mask]]
+                gain = information_gain(y, splits)
+                if gain &gt; best_gain:
+                    best_gain = gain
+                    best_attr = attr
+                    best_threshold = median_val
+                    best_attr_type = 'continuous'
+                    best_splits = {
+                        'left': (X[left_mask], y[left_mask]),
+                        'right': (X[right_mask], y[right_mask])
+                    }
+            elif attr_type == 'categorical':
+                unique_vals = X[attr].unique()
+                splits = []
+                current_splits = {}
+                valid_split = True
+                for val in unique_vals:
+                    mask = X[attr] == val
+                    if mask.sum() == 0:
+                        valid_split = False
+                        break
+                    splits.append(y[mask])
+                    current_splits[val] = (X[mask], y[mask])
+                if not valid_split or len(splits) == 0:
+                    continue
+                gain = information_gain(y, splits)
+                if gain &gt; best_gain:
+                    best_gain = gain
+                    best_attr = attr
+                    best_threshold = None
+                    best_attr_type = 'categorical'
+                    best_splits = current_splits
+        if best_gain &lt; 0 or best_attr is None:
+            self.is_leaf = True
+            self.prediction = Counter(y).most_common(1)[0][0]
+            return
+        self.split_attr = best_attr
+        self.attr_type = best_attr_type
+        self.threshold = best_threshold
+        self.prediction = Counter(y).most_common(1)[0][0]
+        for branch, (child_X, child_y) in best_splits.items():
+            child_node = TreeNodeBC(depth=self.depth + 1, max_depth=self.max_depth)
+            child_node.fit(child_X, child_y, feature_types)
+            self.children[branch] = child_node
+    def predict_instance(self, instance):
+        if self.is_leaf:
+            return self.prediction
+        if self.attr_type == 'continuous':
+            branch = 'left' if instance[self.split_attr] &lt;= self.threshold else 'right'
+            if branch not in self.children:
+                return self.prediction
+            return self.children[branch].predict_instance(instance)
+        else:
+            val = instance[self.split_attr]
+            if val in self.children:
+                return self.children[val].predict_instance(instance)
+            else:
+                return self.prediction
+
+    def predict(self, X):
+        return X.apply(lambda row: self.predict_instance(row), axis=1)
+
+def one_hot_encode_df(df, feature_types):
+    """
+    One-hot encode categorical attributes with more than 2 unique values.
+    Updates the DataFrame and feature_types mapping.
+    """
+    df_encoded = df.copy()
+    updated_feature_types = feature_types.copy()
+    cols_to_encode = [col for col, ftype in feature_types.items() if ftype == 'categorical' and df[col].nunique() &gt; 2]
+    if cols_to_encode:
+        df_encoded = pd.get_dummies(df_encoded, columns=cols_to_encode)
+        for col in cols_to_encode:
+            del updated_feature_types[col]
+        for col in df_encoded.columns:
+            if any(col.startswith(prefix + "_") for prefix in cols_to_encode):
+                updated_feature_types[col] = 'categorical'
+    return df_encoded, updated_feature_types
+
+def record_validation_paths(tree, X_valid):
+    """
+    Traverse the tree for each validation sample and record the node paths.
+    Each node will store a list of indices (of X_valid) that passed through it.
+    """
+    def clear_node_indices(node):
+        node.val_indices = []
+        for child in node.children.values():
+            clear_node_indices(child)
+    clear_node_indices(tree)
+
+    for idx, row in X_valid.iterrows():
+        current = tree
+        current.val_indices.append(idx)
+        while not current.is_leaf:
+            if current.attr_type == 'continuous':
+                branch = 'left' if row[current.split_attr] &lt;= current.threshold else 'right'
+            else:
+                branch = row[current.split_attr] if row[current.split_attr] in current.children else None
+            if branch is None or branch not in current.children:
+                break
+            current = current.children[branch]
+            current.val_indices.append(idx)
+
+def optimized_post_prune(tree, X_valid, y_valid, X_train, y_train, X_test):
+    val_preds = tree_predict(tree, X_valid).values  # numpy array
+    correct_count = np.sum(val_preds == y_valid)
+    best_valid_acc = correct_count / len(y_valid)
+
+    history = [(count_nodes(tree),
+                np.mean(y_train == tree_predict(tree, X_train)),
+                best_valid_acc
+                )]
+    record_validation_paths(tree, X_valid)
+    nodes_postorder = []
+    def traverse(node):
+        for child in node.children.values():
+            traverse(child)
+        nodes_postorder.append(node)
+    traverse(tree)
+
+    improvement = True
+    iteration = 0
+    while improvement:
+        improvement = False
+        for node in nodes_postorder:
+            if node.is_leaf:
+                continue  # Skip already pruned (leaf) nodes.
+            backup_children = node.children
+            backup_is_leaf = node.is_leaf
+            backup_prediction = node.prediction
+            node.children = {}
+            node.is_leaf = True
+            if not node.val_indices:
+                continue
+            indices = np.array(node.val_indices)
+            current_preds = val_preds[indices]
+            new_preds = np.full_like(current_preds, node.prediction)
+            current_correct = np.sum(current_preds == y_valid[indices])
+            new_correct = np.sum(new_preds == y_valid[indices])
+            diff = new_correct - current_correct
+            new_total_correct = correct_count + diff
+            new_valid_acc = new_total_correct / len(y_valid)
+
+            if new_valid_acc &gt;= best_valid_acc:
+                best_valid_acc = new_valid_acc
+                correct_count = new_total_correct
+                val_preds[indices] = node.prediction
+                improvement = True
+                iteration += 1
+                print(f"Iteration {iteration}: Pruned node at depth {node.depth}; New valid accuracy: {new_valid_acc:.4f}; Total nodes: {count_nodes(tree)}")
+                history.append((count_nodes(tree),
+                                np.mean(y_train == tree_predict(tree, X_train)),
+                                new_valid_acc
+                                ))
+            else:
+                node.children = backup_children
+                node.is_leaf = backup_is_leaf
+                node.prediction = backup_prediction
+        if improvement:
+            record_validation_paths(tree, X_valid)
+    return tree, history
+
+def tree_predict(tree, X):
+    return X.apply(lambda row: tree.predict_instance(row), axis=1)
+
+def run_experiments_onehot(train_file, valid_file, test_file, feature_types, depths=[55]):
+    income_mapping = {"&gt;50K": 1, "&lt;=50K": 0}
+    train_df = pd.read_csv(train_file)
+    valid_df = pd.read_csv(valid_file)
+    test_df  = pd.read_csv(test_file)
+    for df in [train_df, valid_df]:
+        df["income"] = df["income"].str.strip().map(income_mapping)
+    train_df_encoded, updated_feature_types = one_hot_encode_df(train_df, feature_types)
+    valid_df_encoded, _ = one_hot_encode_df(valid_df, feature_types)
+    test_df_encoded, _  = one_hot_encode_df(test_df, feature_types)
+    train_df_encoded, valid_df_encoded = train_df_encoded.align(valid_df_encoded, join='left', axis=1, fill_value=0)
+    train_df_encoded, test_df_encoded  = train_df_encoded.align(test_df_encoded, join='left', axis=1, fill_value=0)
+    X_train = train_df_encoded.drop("income", axis=1)
+    y_train = train_df_encoded["income"].values.astype(int)
+    X_valid = valid_df_encoded.drop("income", axis=1)
+    y_valid = valid_df_encoded["income"].values.astype(int)
+    X_test  = test_df_encoded.drop("income", axis=1)
+
+    print(X_train.shape)
+    print(X_test.shape)
+
+    trees = {}
+    for depth in depths:
+        print(f"\nTraining one-hot encoded tree with max depth = {depth}")
+        tree = TreeNodeBC(max_depth=depth)
+        tree.fit(X_train, y_train, updated_feature_types)
+        trees[depth] = tree
+        train_acc = np.mean(y_train == tree.predict(X_train))
+
+    return trees, (X_train, y_train, X_valid, y_valid, X_test), updated_feature_types, trees[55].predict(X_test)
+
+def run_experiments_prune(train_file, valid_file, test_file, feature_types):
+    trees, data_splits, updated_feature_types,my = run_experiments_onehot(train_file, valid_file, test_file, feature_types, depths=[55])
+    X_train, y_train, X_valid, y_valid, X_test = data_splits
+    original_tree = trees[55]
+    print(f"\nNumber of nodes before pruning: {count_nodes(original_tree)}")
+    pruned_tree, pruning_history = optimized_post_prune(original_tree, X_valid, y_valid, X_train, y_train, X_test)
+    print(f"Number of nodes after pruning: {count_nodes(pruned_tree)}")
+    return pruned_tree.predict(X_test)
+
+# ------------------------------
+# Part (d) – Scikit-Learn Decision Tree
+# ------------------------------
+
+def run_part_d(train_file, valid_file, test_file, categorical_cols):
+    def load_and_preprocess_data(train_file, valid_file, test_file, categorical_cols):
+        train_df = pd.read_csv(train_file)
+        valid_df = pd.read_csv(valid_file)
+        test_df  = pd.read_csv(test_file)
+        print(train_df.shape)
+        print(test_df.shape)
+        for df in [train_df, valid_df]:
+            df["income"] = df["income"].str.strip()
+        income_mapping = {"&gt;50K": 1, "&lt;=50K": 0}
+        train_df["income"] = train_df["income"].replace(income_mapping)
+        valid_df["income"] = valid_df["income"].replace(income_mapping)
+        def conditional_one_hot(df, cat_cols):
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match146-0.html#0" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+            df_enc = df.copy()
+            for col in cat_cols:
+                if df_enc[col].nunique() &gt; 2:
+                    df_enc = pd.get_dummies(df_enc, columns=[col], prefix=col)
+</FONT>                else:
+                    unique_vals = sorted(df_enc[col].unique())
+                    mapping = {unique_vals[0]: 0, unique_vals[1]: 1}
+                    df_enc[col] = df_enc[col].replace(mapping)
+            return df_enc
+        orig_categorical = categorical_cols
+
+        train_df_enc = conditional_one_hot(train_df, orig_categorical)
+        valid_df_enc = conditional_one_hot(valid_df, orig_categorical)
+        test_df_enc  = conditional_one_hot(test_df, orig_categorical)
+        print(train_df_enc.shape)
+        print(test_df_enc.shape)
+        train_df_enc, valid_df_enc = train_df_enc.align(valid_df_enc, join='left', axis=1, fill_value=0)
+        train_df_enc, test_df_enc  = train_df_enc.align(test_df_enc, join='left', axis=1, fill_value=0)
+        print(train_df_enc.shape)
+        print(test_df_enc.shape)
+        X_train = train_df_enc.drop("income", axis=1)
+        y_train = train_df_enc["income"].astype(int)
+        X_valid = valid_df_enc.drop("income", axis=1)
+        y_valid = valid_df_enc["income"].astype(int)
+        X_test  = test_df_enc.drop("income", axis=1)
+        
+        return X_train, y_train, X_valid, y_valid, X_test
+    
+    X_train, y_train, X_valid, y_valid, X_test= load_and_preprocess_data(train_file, valid_file, test_file, categorical_cols)
+    
+
+    ccp_alpha_values = [0.001, 0.01, 0.1, 0.2]
+    train_acc_alpha = []
+    valid_acc_alpha = []
+    test_acc_alpha = []
+    print("\n=== Decision Tree: Varying ccp_alpha on Fully Grown Tree ===")
+    for alpha in ccp_alpha_values:
+        clf = DecisionTreeClassifier(criterion="entropy", ccp_alpha=alpha, random_state=42)
+        clf.fit(X_train, y_train)
+        
+        y_train_pred = clf.predict(X_train)
+        y_valid_pred = clf.predict(X_valid)
+        acc_train = accuracy_score(y_train, y_train_pred)
+        acc_valid = accuracy_score(y_valid, y_valid_pred)
+        train_acc_alpha.append(acc_train)
+        valid_acc_alpha.append(acc_valid)
+    best_alpha = ccp_alpha_values[np.argmax(valid_acc_alpha)]
+    clf = DecisionTreeClassifier(criterion="entropy", ccp_alpha=best_alpha, random_state=42)
+    clf.fit(X_train, y_train)
+    y_test_pred = clf.predict(X_test)
+    return y_test_pred
+    print(f"Selected best ccp_alpha = {best_alpha} based on the validation set.")
+
+# ------------------------------
+# Part (e) – Random Forest
+# ------------------------------
+
+def run_part_e(train_file, valid_file, test_file, categorical_cols):
+    def load_and_preprocess_data(train_file, valid_file, test_file, categorical_cols):
+        train_df = pd.read_csv(train_file)
+        valid_df = pd.read_csv(valid_file)
+        test_df  = pd.read_csv(test_file)
+        for df in [train_df, valid_df]:
+            df["income"] = df["income"].str.strip()
+        income_mapping = {"&gt;50K": 1, "&lt;=50K": 0}
+        train_df["income"] = train_df["income"].replace(income_mapping)
+        valid_df["income"] = valid_df["income"].replace(income_mapping)
+        def conditional_one_hot(df, cat_cols):
+            df_enc = df.copy()
+            for col in cat_cols:
+                if df_enc[col].nunique() &gt; 2:
+                    df_enc = pd.get_dummies(df_enc, columns=[col], prefix=col)
+                else:
+                    unique_vals = sorted(df_enc[col].unique())
+                    mapping = {unique_vals[0]: 0, unique_vals[1]: 1}
+                    df_enc[col] = df_enc[col].replace(mapping)
+            return df_enc
+        orig_categorical = categorical_cols
+
+        train_df_enc = conditional_one_hot(train_df, orig_categorical)
+        valid_df_enc = conditional_one_hot(valid_df, orig_categorical)
+        test_df_enc  = conditional_one_hot(test_df, orig_categorical)
+        train_df_enc, valid_df_enc = train_df_enc.align(valid_df_enc, join='left', axis=1, fill_value=0)
+        train_df_enc, test_df_enc  = train_df_enc.align(test_df_enc, join='left', axis=1, fill_value=0)
+        X_train = train_df_enc.drop("income", axis=1)
+        y_train = train_df_enc["income"].astype(int)
+        X_valid = valid_df_enc.drop("income", axis=1)
+        y_valid = valid_df_enc["income"].astype(int)
+        X_test  = test_df_enc.drop("income", axis=1)
+        
+        return X_train, y_train, X_valid, y_valid, X_test
+    
+    X_train, y_train, X_valid, y_valid, X_test = load_and_preprocess_data(train_file, valid_file, test_file, categorical_cols)
+    param_grid = {
+        "n_estimators": [50, 150, 250, 350],
+    "max_features": [round(x, 2) for x in np.arange(0.1, 1.1, 0.2)],
+    "min_samples_split": [2, 4, 6, 8, 10]
+    }
+    best_val_acc = 0.0
+    best_params = None
+    best_model = None
+    for n_estimators in param_grid["n_estimators"]:
+        for max_features in param_grid["max_features"]:
+            for min_samples_split in param_grid["min_samples_split"]:
+                clf = RandomForestClassifier(
+                    criterion="entropy",
+                    n_estimators=n_estimators,
+                    max_features=max_features,
+                    min_samples_split=min_samples_split,
+                    oob_score=True,
+                    bootstrap=True,
+                    random_state=42
+                )
+                clf.fit(X_train, y_train)
+                y_valid_pred = clf.predict(X_valid)
+                val_acc = accuracy_score(y_valid, y_valid_pred)
+                print("Done: ", n_estimators, max_features, min_samples_split)
+                if val_acc &gt; best_val_acc:
+                    best_val_acc = val_acc
+                    best_params = {
+                        "n_estimators": n_estimators,
+                        "max_features": max_features,
+                        "min_samples_split": min_samples_split
+                    }
+                    best_model = clf
+    
+    y_test_pred_rf  = best_model.predict(X_test)
+    return y_test_pred_rf
+def main():
+    if len(sys.argv) != 6:
+        print("Usage: python decision_tree.py &lt;train_data_path&gt; &lt;validation_data_path&gt; &lt;test_data_path&gt; &lt;output_folder_path&gt; &lt;question_part&gt;")
+        sys.exit(1)
+
+    train_path = sys.argv[1]
+    valid_path = sys.argv[2]
+    test_path = sys.argv[3]
+    output_folder = sys.argv[4]
+    question_part = sys.argv[5].lower()
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    
+    predictions = None
+    if question_part == "a":
+        feature_types = {
+            "age": "continuous",
+            "education": "categorical",
+            "occupation": "categorical",
+            "hours.per.week": "continuous",
+            "marital.status": "categorical",
+            "workclass": "categorical",
+            "fnlwgt": "continuous",
+            "education.num": "continuous",
+            "relationship": "categorical",
+            "race": "categorical",
+            "sex": "categorical",
+            "capital.gain": "continuous",
+            "capital.loss": "continuous",
+            "native.country": "categorical"
+        }
+        predictions = run_experiments_a(train_path, test_path, feature_types)
+    elif question_part in ["b"]:
+        _,_,_,predictions = run_experiments_onehot(train_path, valid_path, test_path, {
+            "age": "continuous",
+            "education": "categorical",
+            "occupation": "categorical",
+            "hours.per.week": "continuous",
+            "marital.status": "categorical",
+            "workclass": "categorical",
+            "fnlwgt": "continuous",
+            "education.num": "continuous",
+            "relationship": "categorical",
+            "race": "categorical",
+            "sex": "categorical",
+            "capital.gain": "continuous",
+            "capital.loss": "continuous",
+            "native.country": "categorical"
+        })
+    elif question_part in ["c"]:
+        predictions = run_experiments_prune(train_path, valid_path, test_path, {
+            "age": "continuous",
+            "education": "categorical",
+            "occupation": "categorical",
+            "hours.per.week": "continuous",
+            "marital.status": "categorical",
+            "workclass": "categorical",
+            "fnlwgt": "continuous",
+            "education.num": "continuous",
+            "relationship": "categorical",
+            "race": "categorical",
+            "sex": "categorical",
+            "capital.gain": "continuous",
+            "capital.loss": "continuous",
+            "native.country": "categorical"
+        })
+    elif question_part == "d":
+        categorical_cols = ["education", "occupation", "marital.status", "workclass", "relationship", "race", "sex", "native.country"]
+        predictions = run_part_d(train_path, valid_path, test_path, categorical_cols)
+    elif question_part == "e":
+        categorical_cols = ["education", "occupation", "marital.status", "workclass", "relationship", "race", "sex", "native.country"]
+        predictions = run_part_e(train_path, valid_path, test_path, categorical_cols)
+    else:
+        print("Invalid question part. Choose from 'a', 'b', 'c', 'd', or 'e'.")
+        sys.exit(1)
+    output_file = os.path.join(output_folder, f"prediction_{question_part}.csv")
+    pd.DataFrame({"prediction": predictions}).to_csv(output_file, index=False)
+    print(f"Predictions saved to {output_file}")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
+
+
+
+from cProfile import label
+import numpy as np
+import copy
+import pandas as pd
+import os
+import cv2
+import sys
+np.random.seed(42)
+
+# -------------------------------
+# Activation functions and their derivatives
+# -------------------------------
+def relu(z):
+    # ReLU: returns max(0, z)
+    return np.maximum(0, z)
+
+def relu_derivative(z):
+    # ReLU derivative: 1 for z &gt; 0, 0 otherwise.
+    # At z = 0, subgradient can be any value in [0,1]; we choose 0 here.
+    return (z &gt; 0).astype(float)
+    
+def sigmoid(z):
+    z = np.clip(z, -500, 500)
+    return 1 / (1 + np.exp(-z))
+
+def sigmoid_derivative(a):
+    return a * (1 - a)
+
+def softmax(z):
+    exp_z = np.exp(z - np.max(z, axis=1, keepdims=True))
+    return exp_z / np.sum(exp_z, axis=1, keepdims=True)
+
+# -------------------------------
+# Neural Network Class Definition
+# -------------------------------
+class NeuralNetwork:
+    def __init__(self, input_size, hidden_layers, num_classes, learning_rate=0.01, seed=None,is_relu=False):
+        if seed is not None:
+            np.random.seed(seed)
+        layer_sizes = [input_size] + hidden_layers + [num_classes]
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match146-0.html#2" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        self.num_layers = len(layer_sizes)
+        self.learning_rate = learning_rate
+        self.initial_lr=learning_rate
+        self.weights = []
+        self.biases = []
+        self.relu=is_relu
+</FONT>        for i in range(1, self.num_layers):
+            w = np.random.randn(layer_sizes[i-1], layer_sizes[i]) * 0.01
+            b = np.zeros((1, layer_sizes[i]))
+            self.weights.append(w)
+            self.biases.append(b)
+    
+    def forward(self, X):
+        outputs = []
+        a = X
+        outputs.append((None, a))
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match146-0.html#5" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        for i in range(len(self.weights)-1):
+            z = np.dot(a, self.weights[i]) + self.biases[i]
+</FONT>            if self.relu:
+                a=relu(z)
+            else:
+                a = sigmoid(z)
+            outputs.append((z, a))
+        z = np.dot(a, self.weights[-1]) + self.biases[-1]
+        a = softmax(z)
+        outputs.append((z, a))
+        return outputs
+    
+    def compute_loss(self, y_true, y_pred):
+        m = y_true.shape[0]
+        one_hot = np.zeros_like(y_pred)
+        one_hot[np.arange(m), y_true] = 1
+        epsilon = 1e-12
+        loss = -np.sum(one_hot * np.log(y_pred + epsilon)) / m
+        return loss
+    
+    def compute_accuracy(self, y_true, y_pred):
+        predictions = np.argmax(y_pred, axis=1)
+        accuracy = np.mean(predictions == y_true)
+        return accuracy
+    
+    def backward(self, outputs, y_true):
+        m = y_true.shape[0]
+        grads_w = [None] * len(self.weights)
+        grads_b = [None] * len(self.biases)
+        
+        one_hot = np.zeros_like(outputs[-1][1])
+        one_hot[np.arange(m), y_true] = 1
+        
+        # Output layer gradients (softmax + cross-entropy)
+        zL, aL = outputs[-1]
+        delta = (aL - one_hot)  # shape (m, num_classes)
+        a_prev = outputs[-2][1]
+        grads_w[-1] = np.dot(a_prev.T, delta) / m
+<A NAME="6"></A><FONT color = #00FF00><A HREF="match146-0.html#6" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        grads_b[-1] = np.sum(delta, axis=0, keepdims=True) / m
+        
+        # Backpropagate for hidden layers using the sigmoid derivative.
+        for l in range(len(self.weights)-2, -1, -1):
+</FONT>            z, a = outputs[l+1]
+            if self.relu:
+                delta = np.dot(delta, self.weights[l+1].T) * relu_derivative(a)
+            else:
+                delta = np.dot(delta, self.weights[l+1].T) * sigmoid_derivative(a)
+            a_prev = outputs[l][1]
+            grads_w[l] = np.dot(a_prev.T, delta) / m
+            grads_b[l] = np.sum(delta, axis=0, keepdims=True) / m
+        return grads_w, grads_b
+    
+    def update_parameters(self, grads_w, grads_b):
+        for i in range(len(self.weights)):
+            self.weights[i] -= self.learning_rate * grads_w[i]
+            self.biases[i] -= self.learning_rate * grads_b[i]
+    
+    def train(self, X_train, y_train, epochs=10, batch_size=32, patience=5, min_delta=1e-4, verbose=True,adaptive=False,X_test='',y_test=''):
+        m = X_train.shape[0]
+        best_accuracy = 0
+        epochs_without_improvement = 0
+        best_weights=[]
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match146-0.html#3" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        best_biases=[]
+        
+        for epoch in range(epochs):
+            if adaptive:
+                self.learning_rate = self.initial_lr / np.sqrt(epoch + 1)
+            # Shuffle training data.
+            indices = np.arange(m)
+</FONT>            np.random.shuffle(indices)
+            X_train_shuffled = X_train[indices]
+            y_train_shuffled = y_train[indices]
+            epoch_loss = 0
+            
+            # Mini-batch update.
+            for i in range(0, m, batch_size):
+                X_batch = X_train_shuffled[i:i+batch_size]
+                y_batch = y_train_shuffled[i:i+batch_size]
+                outputs = self.forward(X_batch)
+                loss = self.compute_loss(y_batch, outputs[-1][1])
+                epoch_loss += loss * X_batch.shape[0]
+                grads_w, grads_b = self.backward(outputs, y_batch)
+                self.update_parameters(grads_w, grads_b)
+            
+            epoch_loss /= m  # Average loss for the epoch.
+            
+            # Compute training accuracy on entire training set.
+            outputs_train = self.forward(X_train)
+            train_accuracy = self.compute_accuracy(y_train, outputs_train[-1][1])
+            # outputs_test = self.forward(X_test)
+            # test_accuracy = self.compute_accuracy(y_test, outputs_test[-1][1])
+
+            if verbose:
+                print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}, Training Accuracy: {train_accuracy*100:.2f}%")
+            
+            # Check for improvement in training accuracy.
+            if train_accuracy - best_accuracy &gt; min_delta:
+                best_accuracy = train_accuracy
+                epochs_without_improvement = 0
+                best_weights = copy.deepcopy(self.weights)
+                best_biases = copy.deepcopy(self.biases)
+                # print("hi",train_accuracy,best_accuracy)
+            else:
+                epochs_without_improvement += 1
+            
+            # if epochs_without_improvement &gt;= patience and epoch&gt;20:
+            #     if verbose:
+            #         print("Stopping training: no significant improvement in training accuracy.")
+            #     break
+        # self.weights=best_weights
+        # self.biases=best_biases
+        # print(best_accuracy)
+    
+    def predict(self, X):
+        outputs = self.forward(X)
+        probabilities = outputs[-1][1]
+        predictions = np.argmax(probabilities, axis=1)
+        return predictions
+
+
+
+def load_gtsrb_data(data_folder):
+    """
+    Loads GTSRB data from the given folder without resizing.
+    Each image (already 28x28x3) is flattened into a vector of 2352 features.
+    Assumes folder structure: data_folder/00000, data_folder/00001, ... , data_folder/00042.
+
+    Parameters:
+        data_folder (str): Path to the folder (e.g., "train" or "test")
+
+    Returns:
+        X (np.array): Training images as flattened vectors, shape (num_samples, 2352)
+        y (np.array): Corresponding integer labels.
+    """
+    X = []
+    y = []
+    
+    # Iterate through each subfolder representing a class.
+    for folder_name in sorted(os.listdir(data_folder)):
+        folder_path = os.path.join(data_folder, folder_name)
+        if not os.path.isdir(folder_path):
+            continue
+        label = int(folder_name)
+        for filename in os.listdir(folder_path):
+            if filename.lower().endswith(('.ppm', '.png', '.jpg', '.jpeg')):
+                image_path = os.path.join(folder_path, filename)
+                image = cv2.imread(image_path)  # OpenCV reads as BGR by default.
+                if image is None:
+                    print(f"Warning: Unable to read image {image_path}")
+                    continue
+                # Convert BGR to RGB.
+                image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                # Do not resize as images are already 28x28.
+                image_flat = image_rgb.flatten()  # Flatten to a vector of 2352 elements.
+                X.append(image_flat)
+                y.append(label)
+    
+    X = np.array(X)
+    y = np.array(y)
+    return X, y
+
+
+def load_gtsrb_test_data(test_folder):
+    """
+    Loads the test data from the GTSRB dataset. The test folder directly contains the images,
+    and a CSV file provides the mapping from image filename to label.
+    
+    Parameters:
+        test_folder (str): Path to the test folder containing images (e.g., "00000.jpg", etc.).
+        csv_file (str): Path to the CSV file (e.g., "test_labels.csv") containing two columns:
+                        'image' for image filename and 'label' for its integer label.
+                        
+    Returns:
+        X (np.array): Array of flattened test images with shape (num_test_samples, 2352).
+        y (np.array): Array of corresponding integer labels.
+    """
+    # Read the CSV file using pandas.
+    # df = pd.read_csv(csv_file)
+    X = []
+    y = []
+    
+    # Iterate over each row: each row contains a filename and its corresponding label.
+    for filename in sorted(os.listdir(test_folder)):
+        # filename = row['image']
+        # label = row['label']
+        image_path = os.path.join(test_folder, filename)
+        image = cv2.imread(image_path)
+        if image is None:
+            print(f"Warning: Unable to read image {image_path}")
+            continue
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image_flat = image_rgb.flatten()
+        X.append(image_flat)
+        # y.append(label)
+    
+    X = np.array(X)
+    y = np.array(y)
+    return X, y
+
+
+train_folder = sys.argv[1]  # Path to training folder.
+test_folder = sys.argv[2]   # Path to test folder.
+output_path = sys.argv[3]  # Path to output folder.
+
+print("Loading training data...")
+X_train, y_train = load_gtsrb_data(train_folder)  # X_train: shape (num_train_samples, 2352)
+print("Training data loaded. Shape:", X_train.shape)
+
+test_labels='test_labels.csv'
+print("Loading test data...")
+X_test, y_test = load_gtsrb_test_data(test_folder)
+print("Test data loaded. Shape:", X_test.shape)
+# y_test=[]
+# df=pd.read_csv('test_labels.csv')
+# for idx,row in df.iterrows():
+#     label=row['label']
+#     y_test.append(label)
+
+X_train = X_train.astype(float) / 255.0
+X_test = X_test.astype(float) / 255.0
+
+from sklearn.neural_network import MLPClassifier
+# hidden_units_options = [1,5,10,50,100]
+learning_rate = 0.01
+batch_size = 32
+input_size = 28 * 28 * 3  # 2352 features.
+num_classes = 43
+if sys.argv[4]=='b':
+    print("Loading Part B model...")
+    model = NeuralNetwork(input_size=input_size, hidden_layers=[100], 
+                          num_classes=num_classes, learning_rate=learning_rate, seed=42)
+    model.train(X_train, y_train, epochs=190, batch_size=batch_size, patience=10, min_delta=1e-4, verbose=True)
+    test_preds = model.predict(X_test)
+    # print(np.mean(test_preds==y_test))
+    output_filename = f"prediction_b.csv"
+    output_file_path = os.path.join(output_path, output_filename)
+
+    prediction_df = pd.DataFrame({'prediction': test_preds})
+    prediction_df.to_csv(output_file_path, index=False)
+
+    print(f"Predictions saved to {output_file_path}")
+    # print("\nClassification Report on Test Data:")
+    # print(classification_report(y_test, test_preds, digits=4))
+    # precision_macro = precision_score(y_test, test_preds, average='macro', zero_division=0)
+    # recall_macro = recall_score(y_test, test_preds, average='macro', zero_division=0)
+    # f1_macro = f1_score(y_test, test_preds, average='macro', zero_division=0)
+    # print(f"Average Test Macro F1 Score: {f1_macro:.4f}")
+    # print(f"Precision (macro): {precision_macro:.4f}")
+    # print(f"Recall (macro): {recall_macro:.4f}")
+
+elif sys.argv[4]=='c':
+    print("Loading Part C model...")
+    model = NeuralNetwork(input_size=input_size, hidden_layers=[512, 256, 128, 64], 
+                          num_classes=num_classes, learning_rate=learning_rate, seed=42)
+    model.train(X_train, y_train, epochs=190, batch_size=batch_size, patience=10, min_delta=1e-4, verbose=True)
+    test_preds = model.predict(X_test)
+    # print(np.mean(test_preds==y_test))
+    output_filename = f"prediction_c.csv"
+    output_file_path = os.path.join(output_path, output_filename)
+
+    prediction_df = pd.DataFrame({'prediction': test_preds})
+    prediction_df.to_csv(output_file_path, index=False)
+
+    print(f"Predictions saved to {output_file_path}")
+    # print("\nClassification Report on Test Data:")
+    # print(classification_report(y_test, test_preds, digits=4))
+    # precision_macro = precision_score(y_test, test_preds, average='macro', zero_division=0)
+    # recall_macro = recall_score(y_test, test_preds, average='macro', zero_division=0)
+    # f1_macro = f1_score(y_test, test_preds, average='macro', zero_division=0)
+    # print(f"Average Test Macro F1 Score: {f1_macro:.4f}")
+    # print(f"Precision (macro): {precision_macro:.4f}")
+    # print(f"Recall (macro): {recall_macro:.4f}")
+
+elif sys.argv[4]=='d':
+    print("Loading Part D model...")
+    model = NeuralNetwork(input_size=input_size, hidden_layers=[512, 256, 128, 64], 
+                          num_classes=num_classes, learning_rate=learning_rate, seed=42)
+    model.train(X_train, y_train, epochs=190, batch_size=batch_size, patience=10, min_delta=1e-4, verbose=True,adaptive=True)
+    test_preds = model.predict(X_test)
+    # print(np.mean(test_preds==y_test))
+    output_filename = f"prediction_d.csv"
+    output_file_path = os.path.join(output_path, output_filename)
+
+    prediction_df = pd.DataFrame({'prediction': test_preds})
+    prediction_df.to_csv(output_file_path, index=False)
+
+    print(f"Predictions saved to {output_file_path}")
+    # print("\nClassification Report on Test Data:")
+    # print(classification_report(y_test, test_preds, digits=4))
+    # precision_macro = precision_score(y_test, test_preds, average='macro', zero_division=0)
+    # recall_macro = recall_score(y_test, test_preds, average='macro', zero_division=0)
+    # f1_macro = f1_score(y_test, test_preds, average='macro', zero_division=0)
+    # print(f"Average Test Macro F1 Score: {f1_macro:.4f}")
+    # print(f"Precision (macro): {precision_macro:.4f}")
+    # print(f"Recall (macro): {recall_macro:.4f}")
+elif sys.argv[4]=='e':
+    print("Loading Part E model...")
+    model = NeuralNetwork(input_size=input_size, hidden_layers=[512, 256, 128], 
+                          num_classes=num_classes, learning_rate=learning_rate, seed=42,is_relu=True)
+    model.train(X_train, y_train, epochs=190, batch_size=batch_size, patience=10, min_delta=1e-4, verbose=True,adaptive=True)
+    test_preds = model.predict(X_test)
+    # print(np.mean(test_preds==y_test))
+    output_filename = f"prediction_e.csv"
+    output_file_path = os.path.join(output_path, output_filename)
+
+    prediction_df = pd.DataFrame({'prediction': test_preds})
+    prediction_df.to_csv(output_file_path, index=False)
+
+    print(f"Predictions saved to {output_file_path}")
+    # print("\nClassification Report on Test Data:")
+    # print(classification_report(y_test, test_preds, digits=4))
+    # precision_macro = precision_score(y_test, test_preds, average='macro', zero_division=0)
+    # recall_macro = recall_score(y_test, test_preds, average='macro', zero_division=0)
+    # f1_macro = f1_score(y_test, test_preds, average='macro', zero_division=0)
+    # print(f"Average Test Macro F1 Score: {f1_macro:.4f}")
+    # print(f"Precision (macro): {precision_macro:.4f}")
+    # print(f"Recall (macro): {recall_macro:.4f}")
+elif sys.argv[4]=='f':
+    print("Loading Part F model...")
+    model = MLPClassifier(hidden_layer_sizes=tuple([512, 256, 128, 64]), 
+                        activation='relu',
+                        solver='sgd',
+                        alpha=0,
+                        batch_size=32,
+                        learning_rate='invscaling',
+                        early_stopping=True,
+                        n_iter_no_change=10,
+                        random_state=42,
+                        max_iter=500)
+    model.fit(X_train, y_train)
+    test_preds = model.predict(X_test)
+    # print(np.mean(test_preds==y_test))
+    output_filename = f"prediction_f.csv"
+    output_file_path = os.path.join(output_path, output_filename)
+
+    prediction_df = pd.DataFrame({'prediction': test_preds})
+    prediction_df.to_csv(output_file_path, index=False)
+
+    print(f"Predictions saved to {output_file_path}")
+    
+
+
+
+
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>

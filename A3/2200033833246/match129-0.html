@@ -1,0 +1,1433 @@
+<HTML>
+<HEAD>
+<TITLE>./A3_processed_new_hash/combined_7EOU1.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A3_processed_new_hash/combined_7EOU1.py<p><PRE>
+
+
+import argparse
+import os
+import numpy as np
+import pandas as pd
+
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+
+class Node:
+    def __init__(self, depth, data_idx):
+        self.children = {}
+        self.depth = depth
+        self.data_idx = data_idx
+        self.prediction = None
+        self.best_feature = None
+        self.split_value = None  # for continuous feature
+        self.is_leaf = False
+        self.val_samples = []  # Track validation indices reaching this node
+
+class DecisionTree:
+    def __init__(self, maxDepth):
+        self.maxDepth = maxDepth
+        self.root = None
+
+    def find_value_counts(self, idx):
+        return pd.Series(self.y[idx]).value_counts().to_dict()
+
+    def entropy(self, idx):
+        value_counts = self.find_value_counts(idx)
+        n = len(idx)
+        return -sum((count/n) * np.log2(count/n) for count in value_counts.values())
+
+    def info_gain(self, idx, feature):
+        target_X = self.X.iloc[idx, feature]
+        unique_vals = set(np.unique(target_X))
+
+        is_categorical = (not np.issubdtype(target_X.dtype, np.number)) or (unique_vals &lt;= {0,1})
+        if is_categorical:
+            splits = [idx[target_X == value] for value in target_X.unique()]
+            median = None
+        else:
+            median = target_X.median()
+            splits = [idx[target_X &lt;= median], idx[target_X &gt; median]]
+        
+        H_idx = self.entropy(idx)
+        H2 = sum((len(split)/len(idx)) * self.entropy(split) for split in splits)
+        return H_idx - H2, splits, median
+
+    def build(self, idx, depth):
+        node = Node(depth, idx)
+        if depth == self.maxDepth or len(np.unique(self.y[idx])) == 1:
+            node.is_leaf = True
+            node.prediction = pd.Series(self.y[idx]).mode()[0]
+            return node
+        
+        best_feature = (-np.inf, None, None, None)
+        for feature in range(self.X.shape[1]):
+            info_gain, splits, median = self.info_gain(idx, feature)
+            if info_gain &gt; best_feature[0]:
+                best_feature = (info_gain, feature, splits, median)
+        
+        if best_feature[0] &lt;= 0:
+            node.is_leaf = True
+            node.prediction = pd.Series(self.y[idx]).mode()[0]
+            return node
+
+        node.best_feature = best_feature[1]
+        node.split_value = best_feature[3]
+        for i, split in enumerate(best_feature[2]):
+            child = self.build(split, depth + 1)
+            node.children[i] = child
+        return node
+
+    def fit(self, X, y):
+        self.X = X
+        self.y = y
+        self.root = self.build(np.arange(len(y)), 0)
+
+    def predict_one(self, x, node=None):
+        node = node or self.root
+        if node.is_leaf:
+            return node.prediction
+        
+        value = x.iloc[node.best_feature]
+        child_node_key = None
+        if node.split_value is not None:
+            child_node_key = 0 if value &lt;= node.split_value else 1
+        else:
+            existing_vals = list(self.X.iloc[node.data_idx, node.best_feature].unique())
+            if value in existing_vals:
+                child_node_key = existing_vals.index(value)
+
+        if child_node_key is not None and child_node_key in node.children:
+            return self.predict_one(x, node.children[child_node_key])
+        else:
+            if node.prediction is None:
+                node.prediction = pd.Series(self.y[node.data_idx]).mode()[0]
+            return node.prediction
+
+    def predict(self, X):
+        return X.apply(self.predict_one, axis=1)
+
+    # New optimization methods
+    def _track_validation_paths(self, X_valid):
+        def reset_paths(node):
+            node.val_samples = []
+            for child in node.children.values():
+                reset_paths(child)
+        reset_paths(self.root)
+        
+        for i, (_, row) in enumerate(X_valid.iterrows()):
+            node = self.root
+            while True:
+                node.val_samples.append(i)
+                if node.is_leaf:
+                    break
+                value = row.iloc[node.best_feature]
+                if node.split_value is not None:
+                    child = 0 if value &lt;= node.split_value else 1
+                else:
+                    existing_vals = list(self.X.iloc[node.data_idx, node.best_feature].unique())
+                    child = existing_vals.index(value) if value in existing_vals else None
+                if child is None or child not in node.children:
+                    break
+                node = node.children[child]
+
+    def get_post_order_nodes(self):
+        nodes = []
+        def traverse(node):
+            if not node.is_leaf:
+                for child in node.children.values():
+                    traverse(child)
+                nodes.append(node)
+        traverse(self.root)
+        return nodes
+
+    def post_prune(self, X_valid, y_valid, X_train=None, y_train=None, X_test=None, y_test=None):
+        """Optimized pruning implementation"""
+        # Precompute original predictions and paths
+        original_val_preds = self.predict(X_valid)
+        original_correct = np.sum(original_val_preds == y_valid)
+        self._track_validation_paths(X_valid)
+        y_valid = y_valid.values if isinstance(y_valid, pd.Series) else y_valid
+        
+        history = []
+        current_val_acc = original_correct / len(y_valid)
+        current_train_acc = self.validate_accuracy(X_train, y_train) if X_train is not None else None
+        current_test_acc = self.validate_accuracy(X_test, y_test) if X_test is not None else None
+        history.append((self.count_nodes(), current_train_acc, current_val_acc, current_test_acc))
+        
+        improvement = True
+        while improvement:
+            improvement = False
+            best_delta = 0
+            best_node = None
+            best_backup = None
+            
+            # Process nodes in post-order (bottom-up)
+            for node in self.get_post_order_nodes():
+                if node.is_leaf:
+                    continue
+                
+                # Calculate pruning impact
+                val_indices = node.val_samples
+                if not val_indices:
+                    continue
+                
+                # Backup node state
+                backup = {
+                    'children': node.children.copy(),
+                    'best_feature': node.best_feature,
+                    'split_value': node.split_value,
+                    'is_leaf': node.is_leaf,
+                    'prediction': node.prediction
+                }
+                
+                # Temporary pruning
+                value_counts = self.find_value_counts(node.data_idx)
+                majority = max(value_counts, key=value_counts.get)
+                node.children = {}
+                node.best_feature = None
+                node.split_value = None
+                node.is_leaf = True
+                node.prediction = majority
+                
+                # Calculate delta
+                new_correct = np.sum(y_valid[val_indices] == majority)
+                delta = new_correct - np.sum(original_val_preds[val_indices] == y_valid[val_indices])
+                
+                # Restore node
+                node.children = backup['children']
+                node.best_feature = backup['best_feature']
+                node.split_value = backup['split_value']
+                node.is_leaf = backup['is_leaf']
+                node.prediction = backup['prediction']
+                
+                if delta &gt; best_delta:
+                    best_delta = delta
+                    best_node = node
+                    best_backup = backup
+
+            if best_delta &gt; 0 and best_node:
+                # Permanently prune
+                value_counts = self.find_value_counts(best_node.data_idx)
+                majority = max(value_counts, key=value_counts.get)
+                best_node.children = {}
+                best_node.best_feature = None
+                best_node.split_value = None
+                best_node.is_leaf = True
+                best_node.prediction = majority
+                
+                # Update predictions incrementally
+                val_indices = best_node.val_samples
+                original_val_preds[val_indices] = majority
+                original_correct += best_delta
+                
+                # Record metrics
+                current_val_acc = original_correct / len(y_valid)
+                current_train_acc = self.validate_accuracy(X_train, y_train) if X_train is not None else None
+                current_test_acc = self.validate_accuracy(X_test, y_test) if X_test is not None else None
+                history.append((self.count_nodes(), current_train_acc, current_val_acc, current_test_acc))
+                print(f"Pruned node, remaining: {history[-1][0]}, val_acc: {current_val_acc:.4f}")
+                improvement = True
+                
+        return history
+
+    # Existing helper methods
+    def count_nodes(self, node=None):
+        node = node or self.root
+        return 1 + sum(self.count_nodes(child) for child in node.children.values()) if not node.is_leaf else 1
+
+    def validate_accuracy(self, X_val, y_val):
+        if X_val is None or y_val is None:
+            return None
+        return np.mean(self.predict(X_val) == y_val)
+
+
+def Q1():
+    df_train = pd.read_csv("Q1/train.csv")
+    df_train["income"] = df_train["income"].map({" &lt;=50K": 0, " &gt;50K": 1})
+    df_valid = pd.read_csv("Q1/valid.csv")
+    df_valid["income"] = df_valid["income"].map({" &lt;=50K": 0, " &gt;50K": 1})
+    df_test = pd.read_csv("Q1/test.csv")
+    df_test["income"] = df_test["income"].map({" &lt;=50K": 0, " &gt;50K": 1})
+
+    X_train = df_train.iloc[:, :-1]
+    y_train = df_train.iloc[:, -1]
+    X_valid = df_valid.iloc[:, :-1]
+    y_valid = df_valid.iloc[:, -1]
+    X_test = df_test.iloc[:, :-1]
+    y_test = df_test.iloc[:, -1]
+
+    depths = [5, 10, 15, 20]
+    acc_train = [0] * 4
+    acc_valid = [0] * 4
+    acc_test = [0] * 4
+    for i in range(4):
+        tree = DecisionTree(depths[i])
+        tree.fit(X_train, y_train)
+        acc_train[i] = (tree.predict(X_train) == y_train).mean()
+        acc_valid[i] = (tree.predict(X_valid)==y_valid).mean()
+        acc_test[i]  = (tree.predict(X_test)==y_test).mean()
+        print(acc_test[i])
+    
+    plt.plot(depths, acc_train, label="Train")
+    plt.plot(depths, acc_test, label="Test")
+    plt.xlabel("Max Depth")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.show()
+
+def pre_process_Q2(df: pd.DataFrame, train_cols = None, one_hot_encode = True):
+    # stripping whitespaces
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].str.strip()
+    
+    # mapping target
+    if "income" in df.columns:
+        df["income"] = df["income"].map({"&lt;=50K": 0, "&gt;50K": 1})
+
+    if one_hot_encode:
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match129-1.html#1" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        cat_cols = [c for c in df.columns if df[c].dtype == "object" and c != "income"]
+
+        # pick ones with &gt; 2 catgeories
+        multi_cat = [c for c in cat_cols if df[c].nunique() &gt; 2]
+
+        # one-hot encoding
+        df = pd.get_dummies(df, columns=multi_cat, prefix=multi_cat)
+</FONT>
+    y = None
+    if "income" in df.columns:
+        y = df.pop("income")
+    X = df
+
+    if train_cols is None:
+        train_cols = df.columns
+        flag = False
+    else:
+        flag = True
+        X = X.reindex(columns=train_cols, fill_value=0)
+
+    if flag:
+        return X, y
+    else:
+        return X, y, train_cols
+
+
+def Q2():
+    df_train = pd.read_csv("Q1/train.csv") 
+    df_valid = pd.read_csv("Q1/valid.csv")
+    df_test = pd.read_csv("Q1/test.csv")
+
+    X_train, y_train, train_cols = pre_process_Q2(df_train)
+    X_valid, y_valid = pre_process_Q2(df_valid, train_cols)
+    X_test, y_test = pre_process_Q2(df_test, train_cols)
+
+    depths = [25, 35, 45, 55]
+    acc_train = [0] * 4
+    acc_valid = [0] * 4
+    acc_test = [0] * 4
+    for i in range(4):
+        tree = DecisionTree(depths[i])
+        tree.fit(X_train, y_train)
+        acc_train[i] = (tree.predict(X_train) == y_train).mean()
+        acc_valid[i] = (tree.predict(X_valid)==y_valid).mean()
+        acc_test[i]  = (tree.predict(X_test)==y_test).mean()
+        print(acc_test[i])
+    
+    plt.plot(depths, acc_train, label="Train")
+    plt.plot(depths, acc_test, label="Test")
+    plt.xlabel("Max Depth")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.show()
+
+def Q3():
+    df_train = pd.read_csv("Q1/train.csv") 
+    df_valid = pd.read_csv("Q1/valid.csv")
+    df_test = pd.read_csv("Q1/test.csv")
+
+    X_train, y_train, train_cols = pre_process_Q2(df_train)
+    X_valid, y_valid = pre_process_Q2(df_valid, train_cols)
+    X_test, y_test = pre_process_Q2(df_test, train_cols)
+
+    depths = [25, 35, 45, 55]
+    for depth in depths:
+        tree = DecisionTree(maxDepth=depth)
+        tree.fit(X_train, y_train)
+
+        pruning_history = tree.post_prune(X_valid, y_valid, X_train, y_train, X_test, y_test)
+        nodes, train_acc, val_acc, test_acc = zip(*pruning_history)
+
+        plt.plot(nodes, train_acc, label="Train Accuracy")
+        plt.plot(nodes, val_acc, label="Validation Accuracy")
+        plt.plot(nodes, test_acc, label="Test Accuracy")
+        plt.xlabel("Number of Nodes in the Tree")
+        plt.ylabel("Accuracy")
+        plt.legend()
+        plt.title("Post-pruning: Accuracy vs. Tree Size")
+        plt.show()
+        plt.savefig(f"Pruning_depth_{depth}")
+
+def pre_process_Q4(df: pd.DataFrame, train_cols = None):
+    # stripping whitespaces
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].str.strip()
+    
+    # mapping target
+    df["income"] = df["income"].map({"&lt;=50K": 0, "&gt;50K": 1})
+
+    cat_cols = [c for c in df.columns if df[c].dtype == "object" and c != "income"]
+
+    # one-hot encoding
+    df = pd.get_dummies(df, columns=cat_cols, prefix=cat_cols)
+
+    y = None
+    if "income" in df.columns:
+        y = df.pop("income")
+    X = df
+
+    if train_cols is None:
+        train_cols = df.columns
+        flag = False
+    else:
+        flag = True
+        X = X.reindex(columns=train_cols, fill_value=0)
+
+    if flag:
+        return X, y
+    else:
+        return X, y, train_cols
+
+def Q4():
+    df_train = pd.read_csv("/kaggle/input/dectreedataset/train.csv") 
+    df_valid = pd.read_csv("/kaggle/input/dectreedataset/valid.csv")
+    df_test = pd.read_csv("/kaggle/input/dectreedataset/test.csv")
+
+    X_train, y_train, train_cols = pre_process_Q4(df_train)
+    X_valid, y_valid = pre_process_Q4(df_valid, train_cols)
+    X_test, y_test = pre_process_Q4(df_test, train_cols)
+
+    # Part-1
+    depths = [25, 35, 45, 55]
+    train_accs = [0] * 4
+    valid_accs = [0] * 4
+    test_accs  = [0] * 4
+
+    for i, d in enumerate(depths):
+        tree = DecisionTreeClassifier(criterion='entropy', max_depth=d, random_state=42)
+        tree.fit(X_train, y_train)
+        
+        train_acc = accuracy_score(y_train, tree.predict(X_train))
+        valid_acc = accuracy_score(y_valid, tree.predict(X_valid))
+        test_acc  = accuracy_score(y_test, tree.predict(X_test))
+        
+        train_accs[i] = train_acc
+        valid_accs[i] = valid_acc
+        test_accs[i] = test_acc
+        print(f"Max_depth = {d} : Train {train_acc:.4f}, Valid {valid_acc:.4f}, Test {test_acc:.4f}")
+
+    # Plotting Train and Test accuracy against max_depth:
+    plt.figure(figsize=(8, 6))
+    plt.plot(depths, train_accs, label="Train Accuracy")
+    plt.plot(depths, valid_accs, label="Valid Accuracy")
+    plt.plot(depths, test_accs, label="Test Accuracy")
+    plt.xlabel("Maximum Depth")
+    plt.ylabel("Accuracy")
+    plt.title("Decision Tree Accuracy vs. Maximum Depth")
+    plt.legend()
+    plt.show()
+
+    # Determine best max_depth based on validation accuracy:
+    best_depth = depths[np.argmax(valid_accs)]
+    print("Best max_depth according to validation set:", best_depth)
+
+    ccp_alphas = [0.001, 0.01, 0.1, 0.2]
+    train_accs_alpha = [0] * 4
+    valid_accs_alpha = [0] * 4
+    test_accs_alpha  = [0] * 4
+
+    for i, alpha in enumerate(ccp_alphas):
+        tree = DecisionTreeClassifier(criterion='entropy', ccp_alpha=alpha, random_state=42)
+        tree.fit(X_train, y_train)
+        
+        train_acc = accuracy_score(y_train, tree.predict(X_train))
+        valid_acc = accuracy_score(y_valid, tree.predict(X_valid))
+        test_acc  = accuracy_score(y_test, tree.predict(X_test))
+        
+        train_accs_alpha[i] = train_acc
+        valid_accs_alpha[i] = valid_acc
+        test_accs_alpha[i] = test_acc
+
+        print(f"ccp_alpha = {alpha} : Train {train_acc:.4f}, Valid {valid_acc:.4f}, Test {test_acc:.4f}")
+
+    # Plotting Train and Test accuracy against ccp_alpha:
+    plt.figure(figsize=(8, 6))
+    plt.plot(ccp_alphas, train_accs_alpha, label="Train Accuracy")
+    plt.plot(ccp_alphas, valid_accs_alpha, label="Valid Accuracy")
+    plt.plot(ccp_alphas, test_accs_alpha, label="Test Accuracy")
+    plt.xlabel("ccp_alpha")
+    plt.ylabel("Accuracy")
+    plt.title("Decision Tree Accuracy vs. ccp_alpha")
+    plt.legend()
+    plt.show()
+
+    # Determine best ccp_alpha based on validation accuracy:
+    best_alpha = ccp_alphas[np.argmax(valid_accs_alpha)]
+    print("Best ccp_alpha according to validation set:", best_alpha)
+
+def Q4_best_model():
+    df_train = pd.read_csv("/kaggle/input/dectreedataset/train.csv") 
+    df_valid = pd.read_csv("/kaggle/input/dectreedataset/valid.csv")
+    df_test = pd.read_csv("/kaggle/input/dectreedataset/test.csv")
+
+    X_train, y_train, train_cols = pre_process_Q4(df_train)
+    X_valid, y_valid = pre_process_Q4(df_valid, train_cols)
+    X_test, y_test = pre_process_Q4(df_test, train_cols)
+
+    best_depth = 25
+    best_ccp = 0.001
+
+    tree = DecisionTreeClassifier(criterion='entropy', ccp_alpha=best_ccp, random_state=42, max_depth=best_depth)
+    tree.fit(X_train, y_train)
+
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match129-1.html#3" TARGET="1"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    train_acc = accuracy_score(y_train, tree.predict(X_train))
+    valid_acc = accuracy_score(y_valid, tree.predict(X_valid))
+    test_acc  = accuracy_score(y_test, tree.predict(X_test))
+    print(f"Best Model combined for Q4, Training acc: {train_acc}, Validation acc: {valid_acc}, Test acc: {test_acc}")
+</FONT>
+def Q5():
+    df_train = pd.read_csv("/kaggle/input/dectreedataset/train.csv") 
+    df_valid = pd.read_csv("/kaggle/input/dectreedataset/valid.csv")
+    df_test = pd.read_csv("/kaggle/input/dectreedataset/test.csv")
+
+    X_train, y_train, train_cols = pre_process_Q4(df_train)
+    X_valid, y_valid = pre_process_Q4(df_valid, train_cols)
+    X_test, y_test = pre_process_Q4(df_test, train_cols)
+
+    # Define parameter grid:
+    n_estimators_grid = [50, 150, 250, 350]
+    max_features_grid = [0.1, 0.3, 0.5, 0.7, 1.0]
+    min_samples_split_grid = [2, 4, 6, 8, 10]
+
+    best_params = None
+    best_oob_score = -np.inf
+
+    grid_results = []  # store all combinations for plotting or inspection
+    
+    for n_estimators in n_estimators_grid:
+        for max_features in max_features_grid:
+            for min_samples_split in min_samples_split_grid:
+                forest = RandomForestClassifier(
+                    criterion='entropy',
+                    n_estimators=n_estimators,
+                    max_features=max_features,
+                    min_samples_split=min_samples_split,
+                    oob_score=True,
+                    random_state=42,
+                    n_jobs=-1
+                )
+
+                forest.fit(X_train, y_train)
+                oob_score = forest.oob_score_
+                valid_acc = accuracy_score(y_valid, forest.predict(X_valid))
+                
+                grid_results.append({
+                    'n_estimators': n_estimators,
+                    'max_features': max_features,
+                    'min_samples_split': min_samples_split,
+                    'oob_score': oob_score,
+                    'valid_acc': valid_acc
+                })
+                
+                # Selecting best model based on oob_score
+                if oob_score &gt; best_oob_score:
+                    best_oob_score = oob_score
+                    best_params = {
+                        'n_estimators': n_estimators,
+                        'max_features': max_features,
+                        'min_samples_split': min_samples_split
+                    }
+                    best_forest = forest  # save the best model
+    
+    # Reporting best parameters and performance
+    print("Best Parameters found:")
+    print(best_params)
+    print(f"Best out-of-bag (OOB) score: {best_oob_score:.4f}")
+
+    train_acc = accuracy_score(y_train, best_forest.predict(X_train))
+    valid_acc = accuracy_score(y_valid, best_forest.predict(X_valid))
+    test_acc  = accuracy_score(y_test, best_forest.predict(X_test))
+
+    print(f"Training Accuracy: {train_acc:.4f}")
+    print(f"Validation Accuracy: {valid_acc:.4f}")
+    print(f"Test Accuracy: {test_acc:.4f}")
+
+    grid_df = pd.DataFrame(grid_results)
+
+    mask = (grid_df['max_features'] == best_params['max_features']) & (grid_df['min_samples_split'] == best_params['min_samples_split'])
+    subset = grid_df[mask]
+    plt.plot(subset['n_estimators'], subset['valid_acc'], marker='o')
+    plt.xlabel("n_estimators")
+    plt.ylabel("Validation Accuracy")
+    plt.title("Validation Accuracy vs. n_estimators")
+    plt.show()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Training and evaluating Decision Tree/Random Forest.")
+    parser.add_argument("train_data_path", help="Path to the directory containing training data.")
+    parser.add_argument("validation_data_path", help="Path to the directory containing validation data.")
+    parser.add_argument("test_data_path", help="Path to the directory containing test data")
+    parser.add_argument("output_folder_path", help="Path to the folder where prediction CSV files will be saved.")
+    parser.add_argument("question_part", choices=['a', 'b', 'c', 'd', 'e'], help="The specific question part being run (a, b, c, d, or e).")
+
+    args = parser.parse_args()
+
+    train_path = args.train_data_path
+    valid_path = args.validation_data_path
+    test_path = args.test_data_path
+    output_folder = args.output_folder_path
+    part = args.question_part
+
+    print("--- Running Decision Tree ---")
+    print(f"Training Data Path:   {train_path}")
+    print(f"Validation Data Path: {valid_path}")
+    print(f"Test Data Path:       {test_path}")
+    print(f"Output Folder Path:   {output_folder}")
+    print(f"Question Part:        {part}")
+    print("-" * 30)
+
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+        print(f"Created output directory: {output_folder}")
+    
+    df_train = pd.read_csv(os.path.join(train_path, "train.csv"))
+    df_valid = pd.read_csv(os.path.join(valid_path, "valid.csv"))
+    df_test = pd.read_csv(os.path.join(test_path, "test.csv"))
+
+    if part == 'a':
+        X_train, y_train, train_cols = pre_process_Q2(df_train, None, False)
+        X_valid, y_valid = pre_process_Q2(df_valid, train_cols, False)
+        X_test, _ = pre_process_Q2(df_test, train_cols, False)
+
+        tree = DecisionTree(20)
+        tree.fit(X_train, y_train)
+
+        df = pd.DataFrame(tree.predict(X_test), columns=["prediction"])
+        df["prediction"] = df["prediction"].map({0: "&lt;=50K", 1: "&gt;50K"})
+        df.to_csv(os.path.join(output_folder, "prediction_a.csv"), index=False)
+
+    elif part == 'b':
+        X_train, y_train, train_cols = pre_process_Q2(df_train)
+        X_valid, y_valid = pre_process_Q2(df_valid, train_cols)
+        X_test, _ = pre_process_Q2(df_test, train_cols)
+
+        tree = DecisionTree(55)
+        tree.fit(X_train, y_train)
+
+        df = pd.DataFrame(tree.predict(X_test), columns=["prediction"])
+        df["prediction"] = df["prediction"].map({0: "&lt;=50K", 1: "&gt;50K"})
+        df.to_csv(os.path.join(output_folder, "prediction_b.csv"), index=False)
+
+    elif part == 'c':
+        X_train, y_train, train_cols = pre_process_Q2(df_train)
+        X_valid, y_valid = pre_process_Q2(df_valid, train_cols)
+        X_test, _ = pre_process_Q2(df_test, train_cols)
+
+        tree = DecisionTree(55)
+        tree.fit(X_train, y_train)
+
+        pruning_history = tree.post_prune(X_valid, y_valid, X_train, y_train)
+
+        df = pd.DataFrame(tree.predict(X_test), columns=["prediction"])
+        df["prediction"] = df["prediction"].map({0: "&lt;=50K", 1: "&gt;50K"})
+        df.to_csv(os.path.join(output_folder, "prediction_c.csv"), index=False)
+
+    elif part == 'd':
+        X_train, y_train, train_cols = pre_process_Q4(df_train)
+        X_valid, y_valid = pre_process_Q4(df_valid, train_cols)
+        X_test, _ = pre_process_Q4(df_test, train_cols)
+
+        # Part-1
+        depths = [25, 35, 45, 55]
+        train_accs = [0] * 4
+        valid_accs = [0] * 4
+        test_accs  = [0] * 4
+
+        for i, d in enumerate(depths):
+            tree = DecisionTreeClassifier(criterion='entropy', max_depth=d, random_state=42)
+            tree.fit(X_train, y_train)
+            
+            train_acc = accuracy_score(y_train, tree.predict(X_train))
+            valid_acc = accuracy_score(y_valid, tree.predict(X_valid))
+            
+            train_accs[i] = train_acc
+            valid_accs[i] = valid_acc
+
+        # Determine best max_depth based on validation accuracy:
+        best_depth = depths[np.argmax(valid_accs)]
+        print("Best max_depth according to validation set:", best_depth)
+
+        ccp_alphas = [0.001, 0.01, 0.1, 0.2]
+        train_accs_alpha = [0] * 4
+        valid_accs_alpha = [0] * 4
+        test_accs_alpha  = [0] * 4
+
+        for i, alpha in enumerate(ccp_alphas):
+            tree = DecisionTreeClassifier(criterion='entropy', ccp_alpha=alpha, random_state=42)
+            tree.fit(X_train, y_train)
+            
+            train_acc = accuracy_score(y_train, tree.predict(X_train))
+            valid_acc = accuracy_score(y_valid, tree.predict(X_valid))
+            
+            train_accs_alpha[i] = train_acc
+            valid_accs_alpha[i] = valid_acc
+
+        # Determine best ccp_alpha based on validation accuracy:
+        best_alpha = ccp_alphas[np.argmax(valid_accs_alpha)]
+        print("Best ccp_alpha according to validation set:", best_alpha)
+
+        tree = DecisionTreeClassifier(criterion='entropy', ccp_alpha=best_alpha, random_state=42, max_depth=best_depth)
+        tree.fit(X_train, y_train)
+
+        df = pd.DataFrame(tree.predict(X_test), columns=["prediction"])
+        df["prediction"] = df["prediction"].map({0: "&lt;=50K", 1: "&gt;50K"})
+        df.to_csv(os.path.join(output_folder, "prediction_d.csv"), index=False)
+    
+    elif part == 'e':
+        X_train, y_train, train_cols = pre_process_Q4(df_train)
+        X_valid, y_valid = pre_process_Q4(df_valid, train_cols)
+        X_test, _ = pre_process_Q4(df_test, train_cols)
+
+        # Define parameter grid:
+        n_estimators_grid = [50, 150, 250, 350]
+        max_features_grid = [0.1, 0.3, 0.5, 0.7, 1.0]
+        min_samples_split_grid = [2, 4, 6, 8, 10]
+
+        best_oob_score = -np.inf
+        best_forest = None
+        
+        for n_estimators in n_estimators_grid:
+            for max_features in max_features_grid:
+                for min_samples_split in min_samples_split_grid:
+                    forest = RandomForestClassifier(
+                        criterion='entropy',
+                        n_estimators=n_estimators,
+                        max_features=max_features,
+                        min_samples_split=min_samples_split,
+                        oob_score=True,
+                        random_state=42,
+                        n_jobs=-1
+                    )
+
+                    forest.fit(X_train, y_train)
+                    oob_score = forest.oob_score_
+                    
+                    # Selecting best model based on oob_score
+                    if oob_score &gt; best_oob_score:
+                        best_forest = forest  # save the best model
+                        best_oob_score = oob_score
+
+        df = pd.DataFrame(best_forest.predict(X_test), columns=["prediction"])
+        df["prediction"] = df["prediction"].map({0: "&lt;=50K", 1: "&gt;50K"})
+        df.to_csv(os.path.join(output_folder, "prediction_e.csv"), index=False)
+
+    else:
+        raise ValueError("Wrong part")
+
+
+
+
+import numpy as np
+import os, cv2, argparse
+from glob import glob
+import pandas as pd
+from sklearn.preprocessing import OneHotEncoder # used only for y_true conversion in loss/backprop
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.neural_network import MLPClassifier
+
+import matplotlib.pyplot as plt
+
+np.random.seed(0)
+
+class NeuralNetwork:
+    def __init__(self, input_size, hidden_layers_config, output_size, activation_func):
+        self.input_size = input_size
+        self.hidden_layers_config = hidden_layers_config
+        self.output_size = output_size
+        self.num_layers = len(hidden_layers_config) + 1 # Extra for output layer
+        self.activation_func = activation_func
+
+        self.weights = []
+        self.biases = []
+        self.best_weights = None
+        self.best_biases = None
+
+        # Initializing params
+        last_layer_units = input_size
+        for layer_units in hidden_layers_config:
+            limit = np.sqrt(6 / (last_layer_units + layer_units))
+            self.weights.append(np.random.uniform(-limit, limit, (last_layer_units, layer_units)))
+            self.biases.append(np.zeros((1, layer_units)))
+            last_layer_units = layer_units
+
+        # for output layer
+        limit = np.sqrt(6 / (last_layer_units + output_size))
+        self.weights.append(np.random.uniform(-limit, limit, (last_layer_units, output_size)))
+        self.biases.append(np.zeros((1, output_size)))
+
+        # One hot encoder for converting labels
+        self.one_hot_encoder = OneHotEncoder(sparse_output=False, categories=[range(output_size)])
+    
+    def sigmoid(self, z):
+        z = np.clip(z, -500, 500) # to avoid overflow
+        return 1 / (1 + np.exp(-z))
+    
+    def sigmoid_delta(self, z):
+        return z * (1 - z)
+    
+    def relu(self, z):
+        return np.maximum(0, z)
+
+    def relu_delta(self, z):
+        return (z &gt; 0).astype(float) # 1 for z &gt; 0 otherwise 0
+
+    def softmax(self, z):
+        z = z - np.max(z, axis=1, keepdims=True) # To avoid overflow issues
+        exp_z = np.exp(z)
+        return exp_z / np.sum(exp_z, axis=1, keepdims=True)
+
+    def one_hot(self, y):
+        # Converting integer labels to one-hot encoded vectors for easier computation
+        y = y.reshape(-1, 1)
+        # Fit only once if not
+        if not hasattr(self.one_hot_encoder, "categories_"):
+            self.one_hot_encoder.fit(np.arange(self.output_size).reshape(-1, 1))
+        return self.one_hot_encoder.transform(y)
+
+    def forward(self, X):
+        activations = {'a': {}, 'z': {}} # Storing z(output) and a(activation)
+        activations['a'][0] = X # input activation
+        a = X # Rolling over
+        activ_func = self.sigmoid if self.activation_func == "sigmoid" else self.relu
+        # Computing over hidden layers
+        for i in range(self.num_layers - 1):
+            W = self.weights[i]
+            b = self.biases[i]
+            z = a @ W + b   # Everything computed in transpose
+            a = activ_func(z) # applying activation
+            activations['z'][i] = z
+            activations['a'][i+1] = a
+
+        # Output layer
+        W_out = self.weights[-1]
+        b_out = self.biases[-1]
+        z_out = a @ W_out + b_out
+        a_out = self.softmax(z_out)
+        activations['z'][self.num_layers - 1] = z_out
+        activations['a'][self.num_layers] = a_out
+
+        return a_out, activations
+
+    def compute_loss(self, y_true, y_pred):
+        # For calculating cross-entropy loss
+        m = y_true.shape[0]
+        y_true_one_hot = self.one_hot(y_true)
+
+        # To avoid overflow i.e. log(0)
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match129-1.html#2" TARGET="1"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        epsilon = 1e-12
+        y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
+
+        loss = -np.sum(y_true_one_hot * np.log(y_pred)) / m
+</FONT>        return loss
+
+    def backward(self, y_true, y_pred, activations):
+        m = y_true.shape[0]
+        y_true_one_hot = self.one_hot(y_true)
+
+        grads_W = [None] * self.num_layers
+        grads_b = [None] * self.num_layers
+
+        # Output layer
+        d_net_L = y_pred - y_true_one_hot # (o - y_true)
+        d_net_L /= m
+
+        a_prev = activations['a'][self.num_layers - 1]
+        dW_L = a_prev.T @ d_net_L
+        db_L = np.sum(d_net_L, axis=0, keepdims=True)
+
+        grads_W[-1] = dW_L 
+        grads_b[-1] = db_L
+        d_net_curr = d_net_L # For backpropagation
+
+        for l in range(self.num_layers - 2, -1, -1):
+            W_next_l = self.weights[l+1]
+            d_a_l = d_net_curr @ W_next_l.T
+
+            if self.activation_func == "sigmoid":
+                a_l = activations['a'][l+1]
+                d_net_l = d_a_l * self.sigmoid_delta(a_l)
+            elif self.activation_func == "relu":
+                z_l = activations['z'][l]
+                d_net_l = d_a_l * self.relu_delta(z_l)
+            else:
+                raise ValueError(f"Unsupported activated func: {self.activation_func}")
+
+            a_prev = activations['a'][l]
+            dW_l = a_prev.T @ d_net_l
+            db_l = np.sum(d_net_l, axis=0, keepdims=True)
+
+            grads_W[l] = dW_l
+            grads_b[l] = db_l
+
+            d_net_curr = d_net_l
+            
+        return grads_W, grads_b
+
+    def update_weights(self, grads_W, grads_b, alpha):
+        for i in range(self.num_layers):
+            self.weights[i] -= alpha * grads_W[i]
+            self.biases[i] -= alpha * grads_b[i]
+
+    def fit(self, X_train, y_train, epochs, batch_size, eta0, X_val=None, y_val=None, validation_freq=1, patience=10, adaptive_lr = False):
+        # Validation_freq is the frequency(in epochs) to perform validation
+        m_train = X_train.shape[0]
+        num_batches = m_train // batch_size + ((m_train % batch_size) != 0)
+        
+        train_loss_history = []
+        val_loss_history = []
+        val_acc_history = []    # For early stopping
+        best_val_loss = float('inf')
+        patience_cnt = 0
+
+        print(f"Starting training for {epochs} epochs...")
+        print(f"Input size: {self.input_size}, Hidden config: {self.hidden_layers_config}, Output size: {self.output_size}")
+        print(f"Batch size: {batch_size}, Initial LR: {eta0}")
+
+        for epoch in range(epochs):
+            if(adaptive_lr):
+                eta_e = eta0 / np.sqrt(epoch + 1)
+            else:
+                eta_e = eta0
+            permu = np.random.permutation(m_train)
+            X_train_shuffled = X_train[permu]
+            y_train_shuffled = y_train[permu]
+
+            epoch_loss = 0
+            for i in range(num_batches):
+                X_batch = X_train_shuffled[i * batch_size: (i+1) * batch_size]
+                y_batch = y_train_shuffled[i * batch_size: (i+1) * batch_size]
+
+                # Forward
+                y_pred, activations = self.forward(X_batch)
+                loss = self.compute_loss(y_batch, y_pred)
+                epoch_loss += loss
+
+                # Backward
+                grads_W, grads_b = self.backward(y_batch, y_pred, activations)
+
+                self.update_weights(grads_W, grads_b, eta_e)
+            
+            avg_epoch_loss = epoch_loss / num_batches
+            train_loss_history.append(avg_epoch_loss)
+
+            print(f"Epoch {epoch+1}/{epochs} - Training Loss: {avg_epoch_loss:.4f}", end="")
+
+            # Early stopping
+            if X_val is not None and y_val is not None and (epoch + 1) % validation_freq == 0:
+                val_probs, _ = self.forward(X_val)
+                val_loss = self.compute_loss(y_val, val_probs)
+                val_preds = np.argmax(val_probs, axis=1)
+                val_acc = np.mean(val_preds == y_val)
+                val_loss_history.append(val_loss)
+                val_acc_history.append(val_acc)
+
+                print(f" - Val Loss: {val_loss:.4f} - Val Acc: {val_acc:.4f}", end="")
+
+                if val_loss &lt; best_val_loss:
+                    best_val_loss = val_loss
+                    self.best_weights = [w.copy() for w in self.weights]
+                    self.best_biases = [b.copy() for b in self.biases]
+                    patience_cnt = 0
+                    print(" (*)", end = "") # Improvement found
+                else:
+                    patience_cnt += 1
+                    print(f" (No improvement: {patience_cnt}/{patience})", end="")
+
+                if patience_cnt &gt;= patience:
+                    print("\nEarly Stopping.")
+                    break
+            print()
+        
+        # If no validation data given
+        if self.best_weights is not None and X_val is not None:
+            print("Restoring best weights found during validation.")
+            self.weights = self.best_weights
+            self.biases = self.best_biases
+
+        return train_loss_history, val_loss_history, val_acc_history
+    
+    def predict(self, X):
+        prob, _ = self.forward(X)
+        return np.argmax(prob, axis=1)
+
+def process_train_images(train_path):
+    images = []
+    labels = []
+
+    for class_id in range(43):
+        class_folder = os.path.join(train_path, f"{class_id:05d}")
+
+        if not os.path.exists(class_folder):
+            print(f"Class folder {class_folder} not found")
+            continue
+        
+        image_paths = glob(os.path.join(class_folder, "*.png")) + glob(os.path.join(class_folder, "*.jpg"))
+
+        print(f"Processing images from class {class_id}")
+
+        for img_path in image_paths:
+            img = cv2.imread(img_path)
+            img = cv2.resize(img, (28, 28))
+
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = img.astype(np.float32) / 255.0
+
+            images.append(img)
+            labels.append(class_id)
+    
+    X = np.array(images)
+    y = np.array(labels)
+    X = X.reshape(X.shape[0], -1)
+    print(f"X shape: {X.shape}, y shape: {y.shape}")
+
+    return X, y
+
+def process_test_images(test_path, label_path = None):
+    images = []
+    labels = []
+
+    if not os.path.exists(test_path):
+        print(f"Test path {test_path} not found")
+        return
+    if label_path is not None and not os.path.exists(label_path):
+        print(f"Label path {label_path} not found")
+        return
+
+    image_paths = glob(os.path.join(test_path, "*.png")) + glob(os.path.join(test_path, "*.jpg"))
+    image_paths.sort() # Because glob doesn't return in order
+    for img_path in image_paths:
+        img = cv2.imread(img_path)
+        img = cv2.resize(img, (28, 28))
+
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img.astype(np.float32) / 255.0
+
+        images.append(img)
+        
+    print("Processed Test Images")
+    X = np.array(images)
+    X = X.reshape(X.shape[0], -1)
+    y = None
+    if(label_path):
+        label_file = os.path.join(label_path, "test_labels.csv")
+        y = pd.read_csv(label_file)["label"].to_numpy()
+    
+    return X, y
+
+def write_per_class_data(partQ2, num_classes, iters, num_iters, reports):
+    # reports is of size (iters, 3)
+    df = pd.DataFrame({})
+    if not os.path.exists(partQ2):
+        os.makedirs(partQ2)
+    for class_ind in range(num_classes):
+        label = str(class_ind)
+        f1s = np.zeros((3, num_iters))
+        precisions = np.zeros((3, num_iters))
+        recalls = np.zeros((3, num_iters))
+        for i in range(num_iters):
+            for j in range(3):
+                report = reports[i*3 + j]
+
+                if label in report:
+                    class_metrics = report[label]
+                    f1 = class_metrics['f1-score']
+                    precision = class_metrics['precision']
+                    recall = class_metrics['recall']
+
+                    f1s[j][i] = f1
+                    precisions[j][i] = precision
+                    recalls[j][i] = recall
+                else:
+                    raise ValueError(f"{i}, {j} report doesn't have label: {label}")
+        
+        if(partQ2 == "b"):
+            df["Hidden Layer Units"] = iters
+        else:
+            df["Depths"] = iters
+        
+        types = ["TRAIN", "VALID", "TEST"]
+        metrics = ["f1", "precision", "recall"]
+        net = [f1s, precisions, recalls]
+        for j, metric in enumerate(net):
+            for i in range(3):
+                df[f"{metrics[j]}_{types[i]}"] = metric[i]
+        
+        df.to_csv(os.path.join(partQ2, f"{class_ind}.csv"), index=False)
+        
+
+def Q2():
+    X_full, y_full = process_train_images("/kaggle/input/col-nndata/train")
+    X_train, X_val, y_train, y_val = train_test_split(X_full, y_full, test_size=0.2, random_state=0, stratify=y_full)
+    X_test, y_test = process_test_images("/kaggle/input/col-nndata/test", "/kaggle/input/col-nndata")
+    
+    y_true = [y_train, y_val, y_test]
+    
+    print(X_train.shape, y_train.shape, X_val.shape, y_val.shape)
+    hidden_layer_config = [1, 5, 10, 50, 100]
+
+    f1s = np.zeros((3, 5)) # for train, valid and test
+    reports = [] # (n_iters, 3)
+    for ind, i in enumerate(hidden_layer_config):
+        nn = NeuralNetwork(28 * 28 * 3, [i], 43, "sigmoid")
+        nn.fit(X_train, y_train, 100, 32, 0.01, X_val, y_val) # No adaptive
+
+        y_pred_train = nn.predict(X_train)
+        y_pred_val = nn.predict(X_val)
+        y_pred_test = nn.predict(X_test)
+
+        y_pred = [y_pred_train, y_pred_val, y_pred_test]
+        types = ["TRAIN", "VALID", "TEST"]
+        metrics = ["accuracy", "f1-score", "precision", "recall"]
+        for j, type_ in enumerate(types):
+            report = classification_report(y_true[j], y_pred[j], output_dict=True, zero_division=0)
+            reports.append(report)
+            for metric in metrics:
+                if metric == "accuracy":
+                    acc = report[metric]
+                    print(f"HIDDEN UNITS: {i}, {type_}_ACC: {acc}")
+                    continue
+                weighted_avg = report["weighted avg"][metric]
+                print(f"HIDDEN UNITS: {i}, {type_}_{metric}: {weighted_avg}")
+
+                if metric == "f1-score":
+                    f1s[j][ind] = weighted_avg
+    
+    write_per_class_data("b", 43, hidden_layer_config, 5, reports)
+
+    plt.figure(figsize=(8, 6))
+    plt.plot(hidden_layer_config, f1s[0], label="Train F1-Score")
+    plt.plot(hidden_layer_config, f1s[1],  label="Valid F1-Score")
+    plt.plot(hidden_layer_config, f1s[2], label="Test F1-Score")
+    plt.xlabel("Hidden Layer Units")
+    plt.ylabel("F1-Score")
+    plt.title("F1-Score vs Hidden Layer Units")
+    plt.legend()
+    plt.show()
+    plt.savefig("2_2.png")
+
+def Q3():
+    X_full, y_full = process_train_images("/kaggle/input/col-nndata/train")
+    X_train, X_val, y_train, y_val = train_test_split(X_full, y_full, test_size=0.2, random_state=0, stratify=y_full)
+    X_test, y_test = process_test_images("/kaggle/input/col-nndata/test", "/kaggle/input/col-nndata")
+    
+    y_true = [y_train, y_val, y_test]
+    
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match129-1.html#4" TARGET="1"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    print(X_train.shape, y_train.shape, X_val.shape, y_val.shape)
+    hidden_layer_config = [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]
+</FONT>    depths = [1, 2, 3, 4]
+
+    f1s = np.zeros((3, 4)) # for train, valid and test
+    reports = [] # (n_iters, 3)
+    for ind, i in enumerate(hidden_layer_config):
+        nn = NeuralNetwork(28 * 28 * 3, i, 43, "sigmoid")
+        nn.fit(X_train, y_train, 100, 32, 0.01, X_val, y_val) # No adaptive
+
+        y_pred_train = nn.predict(X_train)
+        y_pred_val = nn.predict(X_val)
+        y_pred_test = nn.predict(X_test)
+
+        y_pred = [y_pred_train, y_pred_val, y_pred_test]
+        types = ["TRAIN", "VALID", "TEST"]
+        metrics = ["accuracy", "f1-score", "precision", "recall"]
+        for j, type_ in enumerate(types):
+            report = classification_report(y_true[j], y_pred[j], output_dict=True, zero_division=0)
+            reports.append(report)
+            for metric in metrics:
+                if metric == "accuracy":
+                    acc = report[metric]
+                    print(f"DEPTHS: {depths[ind]}, {type_}_ACC: {acc}")
+                    continue
+                weighted_avg = report["weighted avg"][metric]
+                print(f"DEPTHS: {depths[ind]}, {type_}_{metric}: {weighted_avg}")
+
+                if metric == "f1-score":
+                    f1s[j][ind] = weighted_avg
+
+    write_per_class_data("c", 43, depths, 4, reports)
+
+    plt.figure(figsize=(8, 6))
+    plt.plot(depths, f1s[0], label="Train F1-Score")
+    plt.plot(depths, f1s[1],  label="Valid F1-Score")
+    plt.plot(depths, f1s[2], label="Test F1-Score")
+    plt.xlabel("Network Depth")
+    plt.ylabel("F1-Score")
+    plt.title("F1-Score vs Network Depth")
+    plt.legend()
+    plt.show()
+    plt.savefig("2_3.png")
+
+def Q4():
+    X_full, y_full = process_train_images("/kaggle/input/col-nndata/train")
+    X_train, X_val, y_train, y_val = train_test_split(X_full, y_full, test_size=0.2, random_state=0, stratify=y_full)
+    X_test, y_test = process_test_images("/kaggle/input/col-nndata/test", "/kaggle/input/col-nndata")
+    
+    y_true = [y_train, y_val, y_test]
+    
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match129-1.html#5" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    print(X_train.shape, y_train.shape, X_val.shape, y_val.shape)
+    hidden_layer_config = [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]
+</FONT>    depths = [1, 2, 3, 4]
+
+    f1s = np.zeros((3, 4)) # for train, valid and test
+    reports = []
+    for ind, i in enumerate(hidden_layer_config):
+        nn = NeuralNetwork(28 * 28 * 3, i, 43, "sigmoid")
+        nn.fit(X_train, y_train, 100, 32, 0.01, X_val, y_val, 1, 10, True) # adaptive
+
+        y_pred_train = nn.predict(X_train)
+        y_pred_val = nn.predict(X_val)
+        y_pred_test = nn.predict(X_test)
+
+        y_pred = [y_pred_train, y_pred_val, y_pred_test]
+        types = ["TRAIN", "VALID", "TEST"]
+        metrics = ["accuracy", "f1-score", "precision", "recall"]
+        for j, type_ in enumerate(types):
+            report = classification_report(y_true[j], y_pred[j], output_dict=True, zero_division=0)
+            reports.append(report)
+            for metric in metrics:
+                if metric == "accuracy":
+                    acc = report[metric]
+                    print(f"DEPTHS: {depths[ind]}, {type_}_ACC: {acc}")
+                    continue
+                weighted_avg = report["weighted avg"][metric]
+                print(f"DEPTHS: {depths[ind]}, {type_}_{metric}: {weighted_avg}")
+
+                if metric == "f1-score":
+                    f1s[j][ind] = weighted_avg
+
+    write_per_class_data("d", 43, depths, 4, reports)
+
+    plt.figure(figsize=(8, 6))
+    plt.plot(depths, f1s[0], label="Train F1-Score")
+    plt.plot(depths, f1s[1],  label="Valid F1-Score")
+    plt.plot(depths, f1s[2], label="Test F1-Score")
+    plt.xlabel("Network Depth")
+    plt.ylabel("F1-Score")
+    plt.title("F1-Score vs Network Depth")
+    plt.legend()
+    plt.show()
+    plt.savefig("2_4.png")
+
+def Q5():
+    X_full, y_full = process_train_images("/kaggle/input/col-nndata/train")
+    X_train, X_val, y_train, y_val = train_test_split(X_full, y_full, test_size=0.2, random_state=0, stratify=y_full)
+    X_test, y_test = process_test_images("/kaggle/input/col-nndata/test", "/kaggle/input/col-nndata")
+    
+    y_true = [y_train, y_val, y_test]
+    
+<A NAME="6"></A><FONT color = #00FF00><A HREF="match129-1.html#6" TARGET="1"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    print(X_train.shape, y_train.shape, X_val.shape, y_val.shape)
+    hidden_layer_config = [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]
+</FONT>    depths = [1, 2, 3, 4]
+
+    f1s = np.zeros((3, 4)) # for train, valid and test
+    reports = []
+    for ind, i in enumerate(hidden_layer_config):
+        nn = NeuralNetwork(28 * 28 * 3, i, 43, "relu")
+        nn.fit(X_train, y_train, 100, 32, 0.01, X_val, y_val, 1, 10, True) # adaptive
+
+        y_pred_train = nn.predict(X_train)
+        y_pred_val = nn.predict(X_val)
+        y_pred_test = nn.predict(X_test)
+
+        y_pred = [y_pred_train, y_pred_val, y_pred_test]
+        types = ["TRAIN", "VALID", "TEST"]
+        metrics = ["accuracy", "f1-score", "precision", "recall"]
+        for j, type_ in enumerate(types):
+            report = classification_report(y_true[j], y_pred[j], output_dict=True, zero_division=0)
+            reports.append(report)
+            for metric in metrics:
+                if metric == "accuracy":
+                    acc = report[metric]
+                    print(f"DEPTHS: {depths[ind]}, {type_}_ACC: {acc}")
+                    continue
+                weighted_avg = report["weighted avg"][metric]
+                print(f"DEPTHS: {depths[ind]}, {type_}_{metric}: {weighted_avg}")
+
+                if metric == "f1-score":
+                    f1s[j][ind] = weighted_avg
+
+    write_per_class_data("e", 43, depths, 4, reports)
+
+    plt.figure(figsize=(8, 6))
+    plt.plot(depths, f1s[0], label="Train F1-Score")
+    plt.plot(depths, f1s[1],  label="Valid F1-Score")
+    plt.plot(depths, f1s[2], label="Test F1-Score")
+    plt.xlabel("Network Depth")
+    plt.ylabel("F1-Score")
+    plt.title("F1-Score vs Network Depth")
+    plt.legend()
+    plt.show()
+    plt.savefig("2_5.png")
+
+def Q6():
+    X_full, y_full = process_train_images("/kaggle/input/col-nndata/train")
+    X_train, X_val, y_train, y_val = train_test_split(X_full, y_full, test_size=0.2, random_state=0, stratify=y_full)
+    X_test, y_test = process_test_images("/kaggle/input/col-nndata/test", "/kaggle/input/col-nndata")
+    
+    y_true = [y_train, y_val, y_test]
+    
+    print(X_train.shape, y_train.shape, X_val.shape, y_val.shape)
+    hidden_layer_config = [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]
+    depths = [1, 2, 3, 4]
+
+    f1s = np.zeros((3, 4)) # for train, valid and test
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match129-1.html#0" TARGET="1"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+    reports = []
+    for ind, i in enumerate(hidden_layer_config):
+        mlp = MLPClassifier(
+            hidden_layer_sizes=i,
+            activation='relu',
+            solver='sgd',
+            alpha=0,
+            batch_size=32,
+            learning_rate="invscaling",
+            max_iter=100,
+            learning_rate_init=0.01
+</FONT>        )
+
+        mlp.fit(X_train, y_train)
+
+        y_pred_train = mlp.predict(X_train)
+        y_pred_val = mlp.predict(X_val)
+        y_pred_test = mlp.predict(X_test)
+
+        y_pred = [y_pred_train, y_pred_val, y_pred_test]
+        types = ["TRAIN", "VALID", "TEST"]
+        metrics = ["accuracy", "f1-score", "precision", "recall"]
+        for j, type_ in enumerate(types):
+            report = classification_report(y_true[j], y_pred[j], output_dict=True, zero_division=0)
+            reports.append(report)
+            for metric in metrics:
+                if metric == "accuracy":
+                    acc = report[metric]
+                    print(f"DEPTHS: {depths[ind]}, {type_}_ACC: {acc}")
+                    continue
+                weighted_avg = report["weighted avg"][metric]
+                print(f"DEPTHS: {depths[ind]}, {type_}_{metric}: {weighted_avg}")
+
+                if metric == "f1-score":
+                    f1s[j][ind] = weighted_avg
+
+    write_per_class_data("f", 43, depths, 4, reports)
+
+    plt.figure(figsize=(8, 6))
+    plt.plot(depths, f1s[0], label="Train F1-Score")
+    plt.plot(depths, f1s[1],  label="Valid F1-Score")
+    plt.plot(depths, f1s[2], label="Test F1-Score")
+    plt.xlabel("Network Depth")
+    plt.ylabel("F1-Score")
+    plt.title("F1-Score vs Network Depth")
+    plt.legend()
+    plt.show()
+    plt.savefig("2_3.png")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Training and evaluating Neural network.")
+    parser.add_argument("train_data_path", help="Path to the directory containing training images and labels.")
+    parser.add_argument("test_data_path", help="Path to the directory containing test images")
+    parser.add_argument("output_folder_path", help="Path to the folder where prediction CSV files will be saved.")
+    parser.add_argument("question_part", choices=['b', 'c', 'd', 'e', 'f'], help="The specific question part being run (b, c, d, e, or f).")
+
+    args = parser.parse_args()
+
+    train_path = args.train_data_path
+    test_path = args.test_data_path
+    output_folder = args.output_folder_path
+    part = args.question_part
+
+    print("--- Running Neural Network ---")
+    print(f"Training Data Path: {train_path}")
+    print(f"Test Data Path:     {test_path}")
+    print(f"Output Folder Path: {output_folder}")
+    print(f"Question Part:      {part}")
+    print("-" * 30)
+
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+        print(f"Created output directory: {output_folder}")
+    
+    X_full, y_full = process_train_images(train_path)
+    X_train, X_val, y_train, y_val = train_test_split(X_full, y_full, test_size=0.2, random_state=0, stratify=y_full)
+    X_test, _ = process_test_images(test_path)
+
+    if part == 'b':
+        nn = NeuralNetwork(28 * 28 * 3, [100], 43, "sigmoid")
+        nn.fit(X_train, y_train, 100, 32, 0.01, X_val, y_val) # No adaptive
+
+        df = pd.DataFrame(nn.predict(X_test), columns=["prediction"])
+        df.to_csv(os.path.join(output_folder, "prediction_b.csv"), index=False)
+    elif part == 'c':
+        nn = NeuralNetwork(28 * 28 * 3, [512, 256, 128, 64], 43, "sigmoid")
+        nn.fit(X_train, y_train, 100, 32, 0.01, X_val, y_val) # No adaptive
+
+        df = pd.DataFrame(nn.predict(X_test), columns=["prediction"])
+        df.to_csv(os.path.join(output_folder, "prediction_c.csv"), index=False)
+    elif part == 'd':
+        nn = NeuralNetwork(28 * 28 * 3, [512, 256, 128, 64], 43, "sigmoid")
+        nn.fit(X_train, y_train, 100, 32, 0.01, X_val, y_val, 1, 10, True) # adaptive
+
+        df = pd.DataFrame(nn.predict(X_test), columns=["prediction"])
+        df.to_csv(os.path.join(output_folder, "prediction_d.csv"), index=False)
+    elif part == 'e':
+        nn = NeuralNetwork(28 * 28 * 3, [512, 256, 128, 64], 43, "relu")
+        nn.fit(X_train, y_train, 100, 32, 0.01, X_val, y_val, 1, 10, True) # adaptive
+
+        df = pd.DataFrame(nn.predict(X_test), columns=["prediction"])
+        df.to_csv(os.path.join(output_folder, "prediction_e.csv"), index=False)
+    elif part == 'f':
+        mlp = MLPClassifier(
+            hidden_layer_sizes=[512, 256, 128, 64],
+            activation='relu',
+            solver='sgd',
+            alpha=0,
+            batch_size=32,
+            learning_rate="invscaling"
+        )
+        mlp.fit(X_full, y_full)
+
+        df = pd.DataFrame(mlp.predict(X_test), columns=["prediction"])
+        df.to_csv(os.path.join(output_folder, "prediction_f.csv"), index=False)
+    else:
+        raise ValueError("Wrong part")
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
