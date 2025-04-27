@@ -1,0 +1,2327 @@
+<HTML>
+<HEAD>
+<TITLE>./A3_processed_new_hash/combined_4CB6J.py</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+<HR>
+./A3_processed_new_hash/combined_7N54O.py<p><PRE>
+
+
+import numpy as np
+from sklearn import tree
+from sklearn import ensemble
+import pandas as pd
+import sys
+
+
+<A NAME="3"></A><FONT color = #00FFFF><A HREF="match193-0.html#3" TARGET="0"><IMG SRC="../../../bitmaps/tm_3_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+class TreeNode:
+    def __init__(self):
+        self.depth = None
+        self.leaf = None
+
+        self.numeric = None
+        self.feature_idx = None
+
+        self.split = (
+</FONT>            None  ##Holds median for numeric, possible feature values for categorical
+        )
+<A NAME="1"></A><FONT color = #00FF00><A HREF="match193-0.html#1" TARGET="0"><IMG SRC="../../../bitmaps/tm_1_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        self.children = []
+
+        self.features_num = None
+        self.features_cat = None
+        self.target = None
+        self.num_samples = None
+
+        self.accuracy = None
+</FONT>        self.predict = None
+
+        self.incorrect = 0
+        self.parent = None
+        self.num_node = 0
+
+    def BestAttrb(self):
+        _, counts = np.unique(self.target, return_counts=True)
+        class_prob = counts / self.num_samples
+        if np.sum(class_prob) != 1:
+            raise ValueError("BestAttrb Error")
+        entropy = -1 * np.sum(class_prob * np.log(class_prob))
+        information_gain = float("-inf")  ##0
+        is_numeric = None
+        index = None
+        decision_var = None
+
+        for idx in range(self.features_num.shape[1]):
+            cond_entropy = 0
+            median = np.median(self.features_num[:, idx])
+            indices = np.where(self.features_num[:, idx] &lt; median)[0]
+            num_feature = indices.shape[0]
+            if num_feature == 0 or num_feature == self.num_samples:
+                continue
+            target = self.target[indices]
+            _, feature_count = np.unique(target, return_counts=True)
+            feature_prob = feature_count / num_feature
+            cond_entropy -= (
+                num_feature * np.sum(feature_prob * np.log(feature_prob))
+            ) / self.num_samples
+            # #print(feature_prob)
+            indices = np.where(self.features_num[:, idx] &gt;= median)[0]
+            num_feature = indices.shape[0]
+            if num_feature == 0:
+                continue
+            target = self.target[indices]
+            _, feature_count = np.unique(target, return_counts=True)
+            feature_prob = feature_count / num_feature  ##Division by zero
+            cond_entropy -= (
+                num_feature * np.sum(feature_prob * np.log(feature_prob))
+            ) / self.num_samples
+            # #print(feature_prob)
+
+            MI = entropy - cond_entropy
+            # #print(MI)
+            if MI &gt; information_gain:
+                information_gain = MI
+                is_numeric = True
+                index = idx
+                decision_var = median
+
+        for idx in range(self.features_cat.shape[1]):
+            cond_entropy = 0
+            class_values = np.unique(self.features_cat[:, idx])
+            for category in class_values:
+                indices = np.where(self.features_cat[:, idx] == category)[0]
+                num_feature = indices.shape[0]
+                if num_feature == 0:  ##Useless
+                    continue
+                target = self.target[indices]
+                _, feature_count = np.unique(target, return_counts=True)
+                feature_prob = feature_count / num_feature
+                cond_entropy -= (
+                    num_feature * np.sum(feature_prob * np.log(feature_prob))
+                ) / self.num_samples
+                # #print(feature_prob,category)
+            MI = entropy - cond_entropy
+            # #print(MI)
+            if MI &gt; information_gain:
+                information_gain = MI
+                is_numeric = False
+                index = idx
+                decision_var = class_values
+        # #print(information_gain,is_numeric,index)
+        ## Return 0 True 0, max depth = 15, means max info gain is zero sometimes
+        return is_numeric, index, decision_var
+
+    def GrowTree(self, max_depth):
+        # #print("Evaluating Node")
+        if self.depth == max_depth:
+            # #print("Hit MAX DEPTH")
+            self.leaf = True
+            self.predict = np.bincount(self.target).argmax()
+            self.accuracy = (self.target == self.predict).sum() / self.num_samples
+            self.num_node = 1
+            return 1
+        elif (
+            np.unique(self.target).shape[0] &lt;= 1
+        ):  ##Should it instead be &lt;=1 if data is empty
+            # #print("All Example of given class")
+            self.leaf = True
+            self.predict = self.target[0]  ##Assuming target is 1D array
+            self.accuracy = 1
+            self.num_node = 1
+            return 1
+        else:
+            self.leaf = False
+            self.predict = np.bincount(self.target).argmax()
+            self.accuracy = (self.target == self.predict).sum() / self.num_samples
+
+            is_numeric, index, decision_var = self.BestAttrb()
+            if is_numeric == None:
+                self.leaf = True
+                # self.predict = np.bincount(self.target).argmax()
+                # self.accuracy = (self.target == self.predict).sum() / self.num_samples
+                self.num_node = 1
+                return 1
+            elif is_numeric == True:
+                cnt = 0
+                # #print("Splitting Numeric")
+                self.numeric = True
+                self.feature_idx = index
+                self.split = decision_var
+                ## If we are splitting about numeric, we are sure that both child have non-zero data
+                left_child = TreeNode()
+                left_child.depth = self.depth + 1
+                indices = np.where(self.features_num[:, index] &lt; decision_var)[0]
+
+                left_child.features_num = self.features_num[indices]
+                left_child.features_cat = self.features_cat[indices]
+                left_child.target = self.target[indices]
+                left_child.num_samples = indices.shape[0]
+                left_child.parent = self
+                self.children.append(left_child)
+                cnt += left_child.GrowTree(max_depth)
+
+                right_child = TreeNode()
+                right_child.depth = self.depth + 1
+                indices = np.where(self.features_num[:, index] &gt;= decision_var)[0]
+                right_child.features_num = self.features_num[indices]
+                right_child.features_cat = self.features_cat[indices]
+                right_child.target = self.target[indices]
+                right_child.num_samples = indices.shape[0]
+                right_child.parent = self
+                self.children.append(right_child)
+                cnt += right_child.GrowTree(max_depth)
+                self.num_node = 1 + cnt
+                return 1 + cnt
+
+            else:
+                # #print("Splitting Categorical")
+                self.numeric = False
+                self.feature_idx = index
+                self.split = decision_var
+                cnt = 0
+                for feature_val in decision_var:
+                    child = TreeNode()
+                    child.depth = self.depth + 1
+                    indices = np.where(self.features_cat[:, index] == feature_val)[0]
+                    child.features_num = self.features_num[indices]
+                    child.features_cat = self.features_cat[indices]
+                    child.target = self.target[indices]
+                    child.num_samples = indices.shape[0]
+                    child.parent = self
+                    self.children.append(child)
+
+                for child in self.children:
+                    cnt += child.GrowTree(max_depth)
+
+                self.num_node = 1 + cnt
+                return 1 + cnt
+        ## Growing Tree via DFS search
+
+    def Infer_Node(self, X_num, X_cat):
+        # #print("Infer", X_num.shape[0],self.predict)
+        if self.leaf:
+            num_cases = X_num.shape[0]
+            y_pred = self.predict * np.ones(num_cases)
+            indices = X_num[:, 0].astype(int)
+            return np.column_stack((indices, y_pred))
+        else:
+            if self.numeric:
+                ##Numeric is sure to have two child
+                indices = np.where(X_num[:, self.feature_idx + 1] &lt; self.split)[0]
+                if indices.shape[0] != 0:
+                    y_f0 = self.children[0].Infer_Node(X_num[indices], X_cat[indices])
+                else:
+                    y_f0 = np.empty((0, 2))
+
+                indices = np.where(X_num[:, self.feature_idx + 1] &gt;= self.split)[0]
+                if indices.shape[0] != 0:
+                    y_f1 = self.children[1].Infer_Node(X_num[indices], X_cat[indices])
+                else:
+                    y_f1 = np.empty((0, 2))
+                return np.vstack((y_f0, y_f1))
+            else:
+                Y = np.empty((0, 2))
+                Y_list = []
+                for labels in np.unique(X_cat[:, self.feature_idx + 1]):
+                    if labels in self.split:
+                        idx = np.argmax(self.split == labels)
+
+                        indices = np.where(X_cat[:, self.feature_idx + 1] == labels)[0]
+                        if indices.shape[0] != 0:
+                            y = self.children[idx].Infer_Node(
+                                X_num[indices], X_cat[indices]
+                            )
+                            Y_list.append(y)
+                    else:
+                        indices = np.where(X_cat[:, self.feature_idx + 1] == labels)[0]
+                        if indices.shape[0] != 0:
+                            y_pred = self.predict * np.ones(indices.shape[0])
+                            row_index = (X_cat[indices])[:, 0].astype(int)
+                            Y_list.append(np.column_stack((row_index, y_pred)))
+                        # Y = np.vstack((Y,y))
+                # if Y_list != []:
+                #     Y = np.vstack(Y_list)
+                Y = np.vstack(Y_list)
+                return Y
+
+    def Infer_Prune(self, X_num, X_cat, y):
+        self.incorrect = 0
+        if self.leaf:
+            return (y != self.predict).sum()
+        else:
+            if self.numeric:
+                ##Numeric is sure to have two child
+                indices = np.where(X_num[:, self.feature_idx] &lt; self.split)[0]
+                if indices.shape[0] != 0:
+                    self.incorrect += self.children[0].Infer_Prune(
+                        X_num[indices], X_cat[indices], y[indices]
+                    )
+
+                indices = np.where(X_num[:, self.feature_idx] &gt;= self.split)[0]
+                if indices.shape[0] != 0:
+                    self.incorrect += self.children[1].Infer_Prune(
+                        X_num[indices], X_cat[indices], y[indices]
+                    )
+                num_incorrect = self.incorrect
+                self.incorrect = num_incorrect - (y != self.predict).sum()
+                return num_incorrect
+            else:
+                for labels in np.unique(X_cat[:, self.feature_idx]):
+                    if labels in self.split:
+                        idx = np.argmax(self.split == labels)
+
+                        indices = np.where(X_cat[:, self.feature_idx] == labels)[0]
+                        if (
+                            indices.shape[0] != 0
+                        ):  ##Look this up, won't it be equal to 1 and 0?
+                            self.incorrect += self.children[idx].Infer_Prune(
+                                X_num[indices], X_cat[indices], y[indices]
+                            )
+                    else:
+                        indices = np.where(X_cat[:, self.feature_idx] == labels)[0]
+                        if indices.shape[0] != 0:
+                            self.incorrect += (y[indices] != self.predict).sum()
+                num_incorrect = self.incorrect
+                self.incorrect = num_incorrect - (y != self.predict).sum()
+                return num_incorrect
+
+    def DFS_max_improve(self):
+        ##print(self.incorrect)
+        if self.leaf:
+            return self
+        else:
+            max_improve = self.incorrect
+            node_to_be_pruned = self
+            for child in self.children:
+                max_improve_node = child.DFS_max_improve()
+                if max_improve_node.incorrect &gt; max_improve:
+                    max_improve = max_improve_node.incorrect
+                    node_to_be_pruned = max_improve_node
+            return node_to_be_pruned
+
+
+class DecisionTree:
+    def __init__(self, MAX_DEPTH):
+        self.max_depth = MAX_DEPTH
+        self.root = TreeNode()
+        self.root.depth = 0
+
+    def fit(self, X_num, X_cat, y):
+        ## The data may or may not be encoded
+
+        self.root.features_cat = X_cat
+        self.root.features_num = X_num
+        self.root.target = y
+        self.root.num_samples = y.shape[0]
+        return self.root.GrowTree(self.max_depth)
+
+    def predict(self, X_num, X_cat):
+        row_indices = np.arange(X_num.shape[0]).reshape(-1, 1)
+        numeric_feature = np.hstack((row_indices, X_num))
+        category_feature = np.hstack((row_indices, X_cat))
+        y_pred = self.root.Infer_Node(numeric_feature, category_feature)
+        Y = y_pred[np.argsort(y_pred[:, 0])]
+        return Y[:, 1]
+
+
+train_path = sys.argv[1]
+val_path = sys.argv[2]
+test_path = sys.argv[3]
+output_path = sys.argv[4]
+
+part = sys.argv[5].lower()
+num_indices = [0, 2, 4, 10, 11, 12]
+cat_indices = [1, 3, 5, 6, 7, 8, 9, 13]
+
+
+if part == "a":
+
+    train_data = np.genfromtxt(train_path, delimiter=",", dtype=str, skip_header=1)
+    test_data = np.genfromtxt(test_path, delimiter=",", dtype=str, skip_header=1)
+
+    X_train_num = train_data[:, num_indices].astype(int)
+    X_train_cat = train_data[:, cat_indices]
+
+    X_test_num = test_data[:, num_indices].astype(int)
+    X_test_cat = test_data[:, cat_indices]
+
+    mapping = {" &gt;50K": 1, " &lt;=50K": 0}
+
+    y_train = np.vectorize(mapping.get)(train_data[:, 14])
+    # y_test = np.vectorize(mapping.get)(test_data[:, 14])
+    # print("Data Generated")
+
+    depth = 20
+    model = DecisionTree(depth)
+    model.fit(X_train_num, X_train_cat, y_train)
+    # print("Trained")
+
+    y_pred = model.predict(X_test_num, X_test_cat)
+    mapped_y = np.where(y_pred == 1, "&gt;50K", "&lt;=50K")
+    df = pd.DataFrame(mapped_y, columns=["prediction"])
+    out = output_path + f"/prediction_{part}.csv"
+    df.to_csv(out, index=False)
+    ##Write to CSV
+
+
+elif part == "b":
+    ##One Hot encoding categorical data
+    train_data = np.genfromtxt(train_path, delimiter=",", dtype=str, skip_header=1)
+    test_data = np.genfromtxt(test_path, delimiter=",", dtype=str, skip_header=1)
+    # print("Data Read")
+
+    X_train_num = train_data[:, num_indices].astype(int)
+    X_train_cat = train_data[:, cat_indices]
+
+    X_test_num = test_data[:, num_indices].astype(int)
+    X_test_cat = test_data[:, cat_indices]
+
+    mapping = {" &gt;50K": 1, " &lt;=50K": 0}
+
+    y_train = np.vectorize(mapping.get)(train_data[:, 14])
+    # y_test = np.vectorize(mapping.get)(test_data[:, 14])
+    # print("Data Generated")
+
+    OneHotEncoding = {}
+    num_data = X_train_cat.shape[0]
+    X_train_cat_enc = np.empty((num_data, 0))
+    for idx in range(X_train_cat.shape[1]):
+        data = X_train_cat[:, idx]
+        categories = np.unique(data)
+        category_to_index = {
+            category: index for index, category in enumerate(categories)
+        }
+        OneHotEncoding[idx] = category_to_index
+        encoded_array = np.vectorize(category_to_index.get)(data)
+        one_hot_encoded = np.eye(categories.shape[0])[encoded_array]
+        X_train_cat_enc = np.hstack((X_train_cat_enc, one_hot_encoded))
+    # print(X_train_cat_enc.shape)
+
+    test_data = X_test_cat.shape[0]
+    X_test_cat_enc = np.empty((test_data, 0))
+    for idx in range(X_test_cat.shape[1]):
+        data = X_test_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((test_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_test_cat_enc = np.hstack((X_test_cat_enc, one_hot))
+    # print(X_test_cat_enc.shape)
+    # print("Encoded")
+
+    depth = 55
+
+    model = DecisionTree(depth)
+    model.fit(X_train_num, X_train_cat_enc, y_train)
+    # print("Trained")
+    y_pred = model.predict(X_test_num, X_test_cat_enc)
+    mapped_y = np.where(y_pred == 1, "&gt;50K", "&lt;=50K")
+    df = pd.DataFrame(mapped_y, columns=["prediction"])
+    out = output_path + f"/prediction_{part}.csv"
+    df.to_csv(out, index=False)
+
+elif part == "c":
+    train_data = np.genfromtxt(train_path, delimiter=",", dtype=str, skip_header=1)
+    test_data = np.genfromtxt(test_path, delimiter=",", dtype=str, skip_header=1)
+    val_data = np.genfromtxt(val_path, delimiter=",", dtype=str, skip_header=1)
+    # print("Data Read")
+
+    X_train_num = train_data[:, num_indices].astype(int)
+    X_train_cat = train_data[:, cat_indices]
+
+    X_test_num = test_data[:, num_indices].astype(int)
+    X_test_cat = test_data[:, cat_indices]
+
+    X_val_num = val_data[:, num_indices].astype(int)
+    X_val_cat = val_data[:, cat_indices]
+
+    mapping = {" &gt;50K": 1, " &lt;=50K": 0}
+
+    y_train = np.vectorize(mapping.get)(train_data[:, 14])
+    # y_test = np.vectorize(mapping.get)(test_data[:, 14])
+    y_val = np.vectorize(mapping.get)(val_data[:, 14])
+    # print("Data Generated")
+
+    OneHotEncoding = {}
+    num_data = X_train_cat.shape[0]
+    X_train_cat_enc = np.empty((num_data, 0))
+    for idx in range(X_train_cat.shape[1]):
+        data = X_train_cat[:, idx]
+        categories = np.unique(data)
+        category_to_index = {
+            category: index for index, category in enumerate(categories)
+        }
+        OneHotEncoding[idx] = category_to_index
+        encoded_array = np.vectorize(category_to_index.get)(data)
+        one_hot_encoded = np.eye(categories.shape[0])[encoded_array]
+        X_train_cat_enc = np.hstack((X_train_cat_enc, one_hot_encoded))
+    # print(X_train_cat_enc.shape)
+
+    test_data = X_test_cat.shape[0]
+    X_test_cat_enc = np.empty((test_data, 0))
+    for idx in range(X_test_cat.shape[1]):
+        data = X_test_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((test_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_test_cat_enc = np.hstack((X_test_cat_enc, one_hot))
+    # print(X_test_cat_enc.shape)
+
+    val_data = X_val_cat.shape[0]
+    X_val_cat_enc = np.empty((val_data, 0))
+    for idx in range(X_val_cat.shape[1]):
+        data = X_val_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((val_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_val_cat_enc = np.hstack((X_val_cat_enc, one_hot))
+    # print(X_val_cat_enc.shape)
+
+    # print("Encoded")
+
+    depth = 55
+    model = DecisionTree(depth)
+    num_nodes = model.fit(X_train_num, X_train_cat_enc, y_train)
+
+    model.root.Infer_Prune(X_val_num, X_val_cat_enc, y_val)
+
+    while True:
+        node_to_be_pruned = model.root.DFS_max_improve()
+        if node_to_be_pruned.incorrect &lt;= 0:
+            break
+        else:
+            node = node_to_be_pruned
+            improvement = node_to_be_pruned.incorrect
+            node_pruned = node_to_be_pruned.num_node - 1
+            while node.parent != None:
+                node.parent.incorrect -= improvement
+                node.parent.num_node -= node_pruned
+                node = node.parent
+            node_to_be_pruned.leaf = True
+            node_to_be_pruned.incorrect = 0
+            node_to_be_pruned.num_node = 1
+            num_nodes -= node_pruned
+
+    y_pred = model.predict(X_test_num, X_test_cat_enc)
+    mapped_y = np.where(y_pred == 1, "&gt;50K", "&lt;=50K")
+    df = pd.DataFrame(mapped_y, columns=["prediction"])
+    out = output_path + f"/prediction_{part}.csv"
+    df.to_csv(out, index=False)
+
+
+elif part == "d":
+    train_data = np.genfromtxt(train_path, delimiter=",", dtype=str, skip_header=1)
+    test_data = np.genfromtxt(test_path, delimiter=",", dtype=str, skip_header=1)
+    val_data = np.genfromtxt(val_path, delimiter=",", dtype=str, skip_header=1)
+    # print("Data Read")
+
+    X_train_num = train_data[:, num_indices].astype(int)
+    X_train_cat = train_data[:, cat_indices]
+
+    X_test_num = test_data[:, num_indices].astype(int)
+    X_test_cat = test_data[:, cat_indices]
+
+    X_val_num = val_data[:, num_indices].astype(int)
+    X_val_cat = val_data[:, cat_indices]
+
+    mapping = {" &gt;50K": 1, " &lt;=50K": 0}
+
+    y_train = np.vectorize(mapping.get)(train_data[:, 14])
+    # y_test = np.vectorize(mapping.get)(test_data[:, 14])
+    y_val = np.vectorize(mapping.get)(val_data[:, 14])
+    # print("Data Generated")
+
+    OneHotEncoding = {}
+    num_data = X_train_cat.shape[0]
+    X_train_cat_enc = np.empty((num_data, 0))
+    for idx in range(X_train_cat.shape[1]):
+        data = X_train_cat[:, idx]
+        categories = np.unique(data)
+        category_to_index = {
+            category: index for index, category in enumerate(categories)
+        }
+        OneHotEncoding[idx] = category_to_index
+        encoded_array = np.vectorize(category_to_index.get)(data)
+        one_hot_encoded = np.eye(categories.shape[0])[encoded_array]
+        X_train_cat_enc = np.hstack((X_train_cat_enc, one_hot_encoded))
+    # print(X_train_cat_enc.shape)
+
+    test_data = X_test_cat.shape[0]
+    X_test_cat_enc = np.empty((test_data, 0))
+    for idx in range(X_test_cat.shape[1]):
+        data = X_test_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((test_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_test_cat_enc = np.hstack((X_test_cat_enc, one_hot))
+    # print(X_test_cat_enc.shape)
+
+    val_data = X_val_cat.shape[0]
+    X_val_cat_enc = np.empty((val_data, 0))
+    for idx in range(X_val_cat.shape[1]):
+        data = X_val_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((val_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_val_cat_enc = np.hstack((X_val_cat_enc, one_hot))
+    # print(X_val_cat_enc.shape)
+
+    # print("Encoded")
+    X_train = np.hstack((X_train_num, X_train_cat_enc))
+    X_val = np.hstack((X_val_num, X_val_cat_enc))
+    X_test = np.hstack((X_test_num, X_test_cat_enc))
+
+    max_depth = [25, 35, 45, 55]
+    sel_depth = None
+    max_accuracy = 0
+    for depth in max_depth:
+        Decs_Tree = tree.DecisionTreeClassifier(criterion="entropy", max_depth=depth)
+        Decs_Tree.fit(X_train, y_train)
+        y_pred = Decs_Tree.predict(X_val)
+        accuracy = np.mean(y_pred == y_val)
+        if accuracy &gt; max_accuracy:
+            max_accuracy = accuracy
+            sel_depth = depth
+
+    alpha_param = [0.001, 0.01, 0.1, 0.2]
+    sel_alpha = None
+    max_accuracy = 0
+    for alpha in alpha_param:
+        Decs_Tree = tree.DecisionTreeClassifier(criterion="entropy", ccp_alpha=alpha)
+        Decs_Tree.fit(X_train, y_train)
+        y_pred = Decs_Tree.predict(X_val)
+        accuracy = np.mean(y_pred == y_val)
+        if accuracy &gt; max_accuracy:
+            max_accuracy = accuracy
+            sel_alpha = alpha
+
+    Decs_Tree = tree.DecisionTreeClassifier(
+        criterion="entropy", ccp_alpha=sel_alpha, max_depth=sel_depth
+    )
+    Decs_Tree.fit(X_train, y_train)
+    y_pred = Decs_Tree.predict(X_test)
+    mapped_y = np.where(y_pred == 1, "&gt;50K", "&lt;=50K")
+    df = pd.DataFrame(mapped_y, columns=["prediction"])
+    out = output_path + f"/prediction_{part}.csv"
+    df.to_csv(out, index=False)
+
+elif part == "e":
+    train_data = np.genfromtxt(train_path, delimiter=",", dtype=str, skip_header=1)
+    test_data = np.genfromtxt(test_path, delimiter=",", dtype=str, skip_header=1)
+    val_data = np.genfromtxt(val_path, delimiter=",", dtype=str, skip_header=1)
+    # print("Data Read")
+
+    X_train_num = train_data[:, num_indices].astype(int)
+    X_train_cat = train_data[:, cat_indices]
+
+    X_test_num = test_data[:, num_indices].astype(int)
+    X_test_cat = test_data[:, cat_indices]
+
+    X_val_num = val_data[:, num_indices].astype(int)
+    X_val_cat = val_data[:, cat_indices]
+
+    mapping = {" &gt;50K": 1, " &lt;=50K": 0}
+
+    y_train = np.vectorize(mapping.get)(train_data[:, 14])
+    # y_test = np.vectorize(mapping.get)(test_data[:, 14])
+    y_val = np.vectorize(mapping.get)(val_data[:, 14])
+    # print("Data Generated")
+
+    OneHotEncoding = {}
+    num_data = X_train_cat.shape[0]
+    X_train_cat_enc = np.empty((num_data, 0))
+    for idx in range(X_train_cat.shape[1]):
+        data = X_train_cat[:, idx]
+        categories = np.unique(data)
+        category_to_index = {
+            category: index for index, category in enumerate(categories)
+        }
+        OneHotEncoding[idx] = category_to_index
+        encoded_array = np.vectorize(category_to_index.get)(data)
+        one_hot_encoded = np.eye(categories.shape[0])[encoded_array]
+        X_train_cat_enc = np.hstack((X_train_cat_enc, one_hot_encoded))
+    # print(X_train_cat_enc.shape)
+
+    test_data = X_test_cat.shape[0]
+    X_test_cat_enc = np.empty((test_data, 0))
+    for idx in range(X_test_cat.shape[1]):
+        data = X_test_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((test_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_test_cat_enc = np.hstack((X_test_cat_enc, one_hot))
+    # print(X_test_cat_enc.shape)
+
+    val_data = X_val_cat.shape[0]
+    X_val_cat_enc = np.empty((val_data, 0))
+    for idx in range(X_val_cat.shape[1]):
+        data = X_val_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((val_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_val_cat_enc = np.hstack((X_val_cat_enc, one_hot))
+    # print(X_val_cat_enc.shape)
+
+    X_train = np.hstack((X_train_num, X_train_cat_enc))
+    X_val = np.hstack((X_val_num, X_val_cat_enc))
+    X_test = np.hstack((X_test_num, X_test_cat_enc))
+
+    param_grid = {
+        "n_estimators": [50, 150, 250, 350],
+        "max_features": [0.1, 0.3, 0.5, 0.7, 0.9],
+        "min_samples_split": [2, 4, 6, 8, 10],
+    }
+    max_score = 0
+    best_params = None
+    for n_estm in param_grid["n_estimators"]:
+        for features in param_grid["max_features"]:
+            for sample_split in param_grid["min_samples_split"]:
+                Random_Forest = ensemble.RandomForestClassifier(
+                    criterion="entropy",
+                    n_estimators=n_estm,
+                    max_features=features,
+                    min_samples_split=sample_split,
+                    oob_score=True,
+                    bootstrap=True,
+                    random_state=42,
+                )
+                Random_Forest.fit(X_train, y_train)
+                if Random_Forest.oob_score_ &gt; max_score:
+                    max_score = Random_Forest.oob_score_
+                    best_params = [n_estm, features, sample_split]
+                # print("Done")
+    # print(best_params,max_score)
+    Final_Model = ensemble.RandomForestClassifier(
+        criterion="entropy",
+        n_estimators=best_params[0],
+        max_features=best_params[1],
+        min_samples_split=best_params[2],
+        oob_score=True,
+        bootstrap=True,
+        random_state=42,
+    )
+    Final_Model.fit(X_train, y_train)
+
+    y_pred = Final_Model.predict(X_test)
+    mapped_y = np.where(y_pred == 1, "&gt;50K", "&lt;=50K")
+    df = pd.DataFrame(mapped_y, columns=["prediction"])
+    out = output_path + f"/prediction_{part}.csv"
+    df.to_csv(out, index=False)
+else:
+    pass
+
+
+###y_test won't be given change it
+
+
+
+
+import numpy as np
+import os
+from PIL import Image
+from sklearn import neural_network
+import sys
+import pandas as pd
+
+
+class Sigmoid:
+    def __init__(self):
+        self.out = None  ##Output of the given layer
+
+    def __call__(self, x, is_train=False):
+        x = np.clip(x, -500, 500)
+        output = 1.0 / (1 + np.exp(-x))
+        if is_train:
+            self.out = output
+        return output
+
+    def backward(self, dx):
+        gradient = dx * self.out * (1 - self.out)
+        return gradient
+
+
+class ReLU:
+    def __init__(self):
+        self.out = None  ##Output of the given layer
+
+    def __call__(self, x, is_train=False):
+        output = np.maximum(0, x)
+        if is_train:
+            self.out = output
+        return output
+
+    def backward(self, dx):
+        gradient = dx * (self.out &gt; 0).astype(int)
+        return gradient
+
+
+class Softmax:
+    def __init__(self):
+        self.out = None
+
+    def __call__(self, x, is_train=False):
+        un_norm_output = np.exp(x - np.max(x, axis=0, keepdims=True))
+        output = un_norm_output / np.sum(un_norm_output, axis=0, keepdims=True)
+        if is_train:
+            self.out = output
+        return output
+
+    def backward(self, y):
+        return self.out - y
+
+
+class Linear:
+    def __init__(self, num_input, num_neuron):
+        self.weights = np.random.randn(num_neuron, num_input) * np.sqrt(
+            1.0 / num_input
+        )  ##Each kernel has weights along row (num0f kernels- dimension of output of given layer, n_dim of previous layer)
+        self.bias = np.random.randn(num_neuron, 1) * np.sqrt(1.0 / num_input)
+        self.input = None
+
+    def __call__(self, x, is_train):
+        output = (self.weights @ x) + self.bias  # X samples arranged columnwise
+        if is_train:
+            self.input = x
+        return output
+
+    def backward(self, dx, lr=0.01):
+        # np.clip(self.weights, -1e5, 1e5, out=self.weights)
+        # np.clip(dx, -1e5, 1e5, out=dx)
+        # if np.max(self.input) &gt; 1000:
+        #     print(np.max(self.input),np.min(self.input))
+        # if np.max(dx) &gt; 1000:
+        #     print(np.max(dx),np.min(dx))
+        num_sample = dx.shape[1]
+        self.weights -= (
+            lr * (dx @ self.input.T) / num_sample
+        )  # product not defined 3D matrix then sum up
+        self.bias -= lr * dx.sum(axis=1, keepdims=True) / num_sample
+        return self.weights.T @ dx
+
+
+class NeuralNetwork:
+    def __init__(
+        self,
+        batch_size,
+        num_features,
+        hidden_layer_size,
+        num_classes,
+        activation="sigmoid",
+        learning_rate="constant",
+    ):
+        self.batch_size = batch_size
+        self.output = num_classes
+        self.class_labels = None
+        self.lr = learning_rate
+        self.activation = activation
+        self.blocks = []
+        self.softmax = Softmax()
+        input_size = num_features
+        output_size = hidden_layer_size[0]
+        for layer in range(len(hidden_layer_size)):
+            self.blocks.append(Linear(input_size, output_size))
+            if activation == "ReLU":
+                self.blocks.append(ReLU())
+            else:
+                self.blocks.append(Sigmoid())
+            input_size = output_size
+            if layer != len(hidden_layer_size) - 1:
+                output_size = hidden_layer_size[layer + 1]
+            else:
+                output_size = num_classes
+        self.blocks.append(Linear(input_size, output_size))
+
+    def forward(self, X_train, is_train=False):
+
+        x = X_train
+        for layer in self.blocks:
+            x = layer(x, is_train)
+        x = self.softmax(x, is_train)
+        return x
+
+    def backward(self, y, lr=0.01):
+        gradient = self.softmax.backward(y)
+        for layer_num in range(-1, 1 - len(self.blocks), -2):
+            gradient = self.blocks[layer_num].backward(gradient, lr)
+            gradient = self.blocks[layer_num - 1].backward(gradient)
+        gradient = self.blocks[0].backward(gradient, lr)
+        return
+
+    def fit(self, X, y):
+        class_labels = np.unique(y)
+        label_to_index = {
+            category: index for index, category in enumerate(class_labels)
+        }
+        index_to_label = {value: key for key, value in label_to_index.items()}
+        self.class_labels = index_to_label
+        lr = 0.01
+        lr0 = 0.01
+        dataset = np.hstack((X, y.reshape(-1, 1)))
+        np.random.shuffle(dataset)
+        num_batches = int(np.ceil(dataset.shape[0] / self.batch_size))
+        batch_data_X = []
+        batch_data_Y = []
+        for i in range(num_batches):
+            batch_data_X.append(
+                (dataset[i * self.batch_size : (i + 1) * self.batch_size, :-1]).T
+            )
+            y = dataset[i * self.batch_size : (i + 1) * self.batch_size, -1]
+            encoded_array = np.vectorize(label_to_index.get)(y)
+            batch_data_Y.append((np.eye(self.output)[encoded_array]).T)
+
+        epoch = 0
+        BCE_loss = float("inf")
+        threshold = (1e-3) * X.shape[0]
+        if self.lr == "adaptive":
+            threshold = (1e-4) * X.shape[0]
+        if self.activation == "ReLU":
+            lr0 = 0.001
+        epsilon = 1e-12
+        improvement = 255
+        max_epoch = 150
+        while improvement != 0 and epoch &lt; max_epoch:
+            # while epoch &lt; max_epoch and BCE_loss &gt; 7000:
+            epoch += 1
+            total__loss = 0
+            if self.lr == "adaptive":
+                lr = lr0 / (epoch**0.5)
+            for batch_num in range(num_batches):
+                y_out = self.forward(batch_data_X[batch_num], True)
+                y = batch_data_Y[batch_num]
+                loss = -1 * np.sum(y * np.log(y_out + epsilon))
+                total__loss += loss
+                self.backward(y, lr)
+
+            # print(epoch, total__loss)
+            optimized = BCE_loss - total__loss
+            improvement = (improvement & 0x7F) &lt;&lt; 1
+            if optimized &gt; threshold:
+                improvement += 1
+            BCE_loss = total__loss
+        return BCE_loss
+
+    def predict(self, X):
+        # X.T is of shape (num_features, num_examples)
+        y = self.forward(X.T)
+        label_index = np.argmax(y, axis=0)
+        y_pred = np.vectorize(self.class_labels.get)(label_index)
+        return y_pred
+
+
+train_folder = sys.argv[1]
+test_folder = sys.argv[2]
+output_path = sys.argv[3]
+
+part = sys.argv[4].lower()
+
+
+folders = [
+    f for f in os.listdir(train_folder) if os.path.isdir(os.path.join(train_folder, f))
+]
+folders = sorted(folders)
+
+images = []
+labels = []
+for class_label in range(len(folders)):
+    path = train_folder + "/" + folders[class_label]
+    cnt = 0
+    for file in os.listdir(path):
+        img_path = os.path.join(path, file)
+        img = Image.open(img_path).convert("RGB")
+        # img = img.resize((128, 128))
+        img_array = np.array(img).flatten()
+        img_array = img_array / 255.0
+        images.append(img_array)
+        cnt += 1
+    y = np.ones((cnt,)) * class_label
+    labels.extend(y)
+
+X_train = np.stack(images)
+X_mean = np.mean(X_train, axis=0)
+variance = np.mean(X_train**2, axis=0) - (X_mean**2)
+std_dev = variance**0.5
+Y_train = np.stack(labels)
+
+
+files = sorted([f for f in os.listdir(test_folder)])
+images = []
+
+
+for file in files:
+    img_path = os.path.join(test_folder, file)
+    img = Image.open(img_path).convert("RGB")
+    # img = img.resize((128, 128))
+    img_array = np.array(img).flatten()
+    img_array = img_array / 255.0
+    images.append(img_array)
+
+
+X_test = np.stack(images)
+
+# Determine convergence criteria
+
+if part == "b":
+    model = NeuralNetwork(32, 2352, [100], 43, activation="sigmoid")
+    model.fit(X_train, Y_train)
+    y_pred = model.predict(X_test)
+    df = pd.DataFrame(y_pred.astype(int), columns=["prediction"])
+    out = output_path + f"/prediction_{part}.csv"
+    df.to_csv(out, index=False)
+
+elif part == "c":
+    model = NeuralNetwork(32, 2352, [512, 256, 128, 64], 43, activation="sigmoid")
+    model.fit(X_train, Y_train)
+    y_pred = model.predict(X_test)
+    df = pd.DataFrame(y_pred.astype(int), columns=["prediction"])
+    out = output_path + f"/prediction_{part}.csv"
+    df.to_csv(out, index=False)
+
+elif part == "d":
+    model = NeuralNetwork(
+        32,
+        2352,
+        [512, 256, 128, 64],
+        43,
+        activation="sigmoid",
+        learning_rate="adaptive",
+    )
+    model.fit(X_train, Y_train)
+    y_pred = model.predict(X_test)
+    df = pd.DataFrame(y_pred.astype(int), columns=["prediction"])
+    out = output_path + f"/prediction_{part}.csv"
+    df.to_csv(out, index=False)
+
+elif part == "e":
+    X_train = (X_train - X_mean) / std_dev
+    X_test = (X_test - X_mean) / std_dev
+    model = NeuralNetwork(
+        32, 2352, [512, 256, 128, 64], 43, activation="ReLU", learning_rate="adaptive"
+    )
+    model.fit(X_train, Y_train)
+    y_pred = model.predict(X_test)
+    df = pd.DataFrame(y_pred.astype(int), columns=["prediction"])
+    out = output_path + f"/prediction_{part}.csv"
+    df.to_csv(out, index=False)
+
+elif part == "f":
+    X_train = (X_train - X_mean) / std_dev
+    X_test = (X_test - X_mean) / std_dev
+    model = neural_network.MLPClassifier(
+        hidden_layer_sizes=(512, 256, 128, 64),
+        solver="sgd",
+        activation="relu",
+        alpha=0,
+        batch_size=32,
+        learning_rate="invscaling",
+        tol=1e-3,
+        max_iter=100,
+    )
+    model.fit(X_train, Y_train)
+    y_pred = model.predict(X_test)
+    df = pd.DataFrame(y_pred.astype(int), columns=["prediction"])
+    out = output_path + f"/prediction_{part}.csv"
+    df.to_csv(out, index=False)
+
+else:
+    pass
+
+
+
+
+import matplotlib.pyplot as plt 
+<A NAME="0"></A><FONT color = #FF0000><A HREF="match193-0.html#0" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+train= [0.04,0.52,0.77,0.94,0.95]
+test = [0.04,0.50,0.72,0.85,0.85]
+num = [1,5,10,50,100]
+</FONT>
+<A NAME="4"></A><FONT color = #FF00FF><A HREF="match193-0.html#4" TARGET="0"><IMG SRC="../../../bitmaps/tm_4_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+train= [0.95,0.93,0.87,0.47]
+test = [0.81,0.77,0.7,0.41]
+num = [1,2,3,4]
+</FONT>
+train= [0.86,0.87,0.86,0.82]
+test = [0.64,0.62,0.64,0.59]
+
+train= [0.88,0.9,0.92,0.93]
+test = [0.66,0.68,0.69,0.69]
+
+train = [0.65,0.27,0.04,0.01]
+test = [0.57,0.23,0.03,0.01]
+
+plt.plot(num, test, color = 'green', marker = 'x', label ='Test F1 score')
+plt.plot(num, train, color = 'blue', marker = 'o', label ='Train F1 score')
+plt.xlabel("Number of Hidden Layer")
+plt.ylabel("F1 score")
+# plt.title("Decision Tree Accuracy Q4")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+
+import numpy as np
+from sklearn import tree
+from sklearn import ensemble
+import matplotlib.pyplot as plt
+
+
+<A NAME="5"></A><FONT color = #FF0000><A HREF="match193-0.html#5" TARGET="0"><IMG SRC="../../../bitmaps/tm_0_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+class TreeNode:
+    def __init__(self):
+        self.depth = None
+        self.leaf = None
+
+        self.numeric = None
+        self.feature_idx = None
+
+        self.split = (
+</FONT>            None  ##Holds median for numeric, possible feature values for categorical
+        )
+<A NAME="2"></A><FONT color = #0000FF><A HREF="match193-0.html#2" TARGET="0"><IMG SRC="../../../bitmaps/tm_2_0.gif" ALT="other" BORDER="0" ALIGN=left></A>
+
+        self.children = []
+
+        self.features_num = None
+        self.features_cat = None
+        self.target = None
+        self.num_samples = None
+
+        self.accuracy = None
+</FONT>        self.predict = None
+
+        self.incorrect = 0
+        self.parent = None
+        self.num_node = 0
+
+    def BestAttrb(self):
+        _, counts = np.unique(self.target, return_counts=True)
+        class_prob = counts / self.num_samples
+        if np.sum(class_prob) != 1:
+            raise ValueError("BestAttrb Error")
+        entropy = -1 * np.sum(class_prob * np.log(class_prob))
+        information_gain = float("-inf")  ##0
+        is_numeric = None
+        index = None
+        decision_var = None
+
+        for idx in range(self.features_num.shape[1]):
+            cond_entropy = 0
+            median = np.median(self.features_num[:, idx])
+            indices = np.where(self.features_num[:, idx] &lt; median)[0]
+            num_feature = indices.shape[0]
+            if num_feature == 0 or num_feature == self.num_samples:
+                continue
+            target = self.target[indices]
+            _, feature_count = np.unique(target, return_counts=True)
+            feature_prob = feature_count / num_feature
+            cond_entropy -= (
+                num_feature * np.sum(feature_prob * np.log(feature_prob))
+            ) / self.num_samples
+            # print(feature_prob)
+            indices = np.where(self.features_num[:, idx] &gt;= median)[0]
+            num_feature = indices.shape[0]
+            if num_feature == 0:
+                continue
+            target = self.target[indices]
+            _, feature_count = np.unique(target, return_counts=True)
+            feature_prob = feature_count / num_feature  ##Division by zero
+            cond_entropy -= (
+                num_feature * np.sum(feature_prob * np.log(feature_prob))
+            ) / self.num_samples
+            # print(feature_prob)
+
+            MI = entropy - cond_entropy
+            # print(MI)
+            if MI &gt; information_gain:
+                information_gain = MI
+                is_numeric = True
+                index = idx
+                decision_var = median
+
+        for idx in range(self.features_cat.shape[1]):
+            cond_entropy = 0
+            class_values = np.unique(self.features_cat[:, idx])
+            for category in class_values:
+                indices = np.where(self.features_cat[:, idx] == category)[0]
+                num_feature = indices.shape[0]
+                if num_feature == 0:  ##Useless
+                    continue
+                target = self.target[indices]
+                _, feature_count = np.unique(target, return_counts=True)
+                feature_prob = feature_count / num_feature
+                cond_entropy -= (
+                    num_feature * np.sum(feature_prob * np.log(feature_prob))
+                ) / self.num_samples
+                # print(feature_prob,category)
+            MI = entropy - cond_entropy
+            # print(MI)
+            if MI &gt; information_gain:
+                information_gain = MI
+                is_numeric = False
+                index = idx
+                decision_var = class_values
+        # print(information_gain,is_numeric,index)
+        ## Return 0 True 0, max depth = 15, means max info gain is zero sometimes
+        return is_numeric, index, decision_var
+
+    def GrowTree(self, max_depth):
+        # print("Evaluating Node")
+        if self.depth == max_depth:
+            # print("Hit MAX DEPTH")
+            self.leaf = True
+            self.predict = np.bincount(self.target).argmax()
+            self.accuracy = (self.target == self.predict).sum() / self.num_samples
+            self.num_node = 1
+            return 1
+        elif (
+            np.unique(self.target).shape[0] &lt;= 1
+        ):  ##Should it instead be &lt;=1 if data is empty
+            # print("All Example of given class")
+            self.leaf = True
+            self.predict = self.target[0]  ##Assuming target is 1D array
+            self.accuracy = 1
+            self.num_node = 1
+            return 1
+        else:
+            self.leaf = False
+            self.predict = np.bincount(self.target).argmax()
+            self.accuracy = (self.target == self.predict).sum() / self.num_samples
+
+            is_numeric, index, decision_var = self.BestAttrb()
+            if is_numeric == None:
+                self.leaf = True
+                # self.predict = np.bincount(self.target).argmax()
+                # self.accuracy = (self.target == self.predict).sum() / self.num_samples
+                self.num_node = 1
+                return 1
+            elif is_numeric == True:
+                cnt = 0
+                # print("Splitting Numeric")
+                self.numeric = True
+                self.feature_idx = index
+                self.split = decision_var
+                ## If we are splitting about numeric, we are sure that both child have non-zero data
+                left_child = TreeNode()
+                left_child.depth = self.depth + 1
+                indices = np.where(self.features_num[:, index] &lt; decision_var)[0]
+
+                left_child.features_num = self.features_num[indices]
+                left_child.features_cat = self.features_cat[indices]
+                left_child.target = self.target[indices]
+                left_child.num_samples = indices.shape[0]
+                left_child.parent = self
+                self.children.append(left_child)
+                cnt += left_child.GrowTree(max_depth)
+
+                right_child = TreeNode()
+                right_child.depth = self.depth + 1
+                indices = np.where(self.features_num[:, index] &gt;= decision_var)[0]
+                right_child.features_num = self.features_num[indices]
+                right_child.features_cat = self.features_cat[indices]
+                right_child.target = self.target[indices]
+                right_child.num_samples = indices.shape[0]
+                right_child.parent = self
+                self.children.append(right_child)
+                cnt += right_child.GrowTree(max_depth)
+                self.num_node = 1 + cnt
+                return 1 + cnt
+
+            else:
+                # print("Splitting Categorical")
+                self.numeric = False
+                self.feature_idx = index
+                self.split = decision_var
+                cnt = 0
+                for feature_val in decision_var:
+                    child = TreeNode()
+                    child.depth = self.depth + 1
+                    indices = np.where(self.features_cat[:, index] == feature_val)[0]
+                    child.features_num = self.features_num[indices]
+                    child.features_cat = self.features_cat[indices]
+                    child.target = self.target[indices]
+                    child.num_samples = indices.shape[0]
+                    child.parent = self
+                    self.children.append(child)
+
+                for child in self.children:
+                    cnt += child.GrowTree(max_depth)
+
+                self.num_node = 1 + cnt
+                return 1 + cnt
+        ## Growing Tree via DFS search
+
+    def Infer_Node(self, X_num, X_cat):
+        # print("Infer", X_num.shape[0],self.predict)
+        if self.leaf:
+            num_cases = X_num.shape[0]
+            y_pred = self.predict * np.ones(num_cases)
+            indices = X_num[:, 0].astype(int)
+            return np.column_stack((indices, y_pred))
+        else:
+            if self.numeric:
+                ##Numeric is sure to have two child
+                indices = np.where(X_num[:, self.feature_idx + 1] &lt; self.split)[0]
+                if indices.shape[0] != 0:
+                    y_f0 = self.children[0].Infer_Node(X_num[indices], X_cat[indices])
+                else:
+                    y_f0 = np.empty((0, 2))
+
+                indices = np.where(X_num[:, self.feature_idx + 1] &gt;= self.split)[0]
+                if indices.shape[0] != 0:
+                    y_f1 = self.children[1].Infer_Node(X_num[indices], X_cat[indices])
+                else:
+                    y_f1 = np.empty((0, 2))
+                return np.vstack((y_f0, y_f1))
+            else:
+                Y = np.empty((0, 2))
+                Y_list = []
+                for labels in np.unique(X_cat[:, self.feature_idx + 1]):
+                    if labels in self.split:
+                        idx = np.argmax(self.split == labels)
+
+                        indices = np.where(X_cat[:, self.feature_idx + 1] == labels)[0]
+                        if indices.shape[0] != 0:
+                            y = self.children[idx].Infer_Node(
+                                X_num[indices], X_cat[indices]
+                            )
+                            Y_list.append(y)
+                    else:
+                        indices = np.where(X_cat[:, self.feature_idx + 1] == labels)[0]
+                        if indices.shape[0] != 0:
+                            y_pred = self.predict * np.ones(indices.shape[0])
+                            row_index = (X_cat[indices])[:, 0].astype(int)
+                            Y_list.append(np.column_stack((row_index, y_pred)))
+                        # Y = np.vstack((Y,y))
+                # if Y_list != []:
+                #     Y = np.vstack(Y_list)
+                Y = np.vstack(Y_list)
+                return Y
+
+    def Infer_Prune(self, X_num, X_cat, y):
+        self.incorrect = 0
+        if self.leaf:
+            return (y != self.predict).sum()
+        else:
+            if self.numeric:
+                ##Numeric is sure to have two child
+                indices = np.where(X_num[:, self.feature_idx] &lt; self.split)[0]
+                if indices.shape[0] != 0:
+                    self.incorrect += self.children[0].Infer_Prune(
+                        X_num[indices], X_cat[indices], y[indices]
+                    )
+
+                indices = np.where(X_num[:, self.feature_idx] &gt;= self.split)[0]
+                if indices.shape[0] != 0:
+                    self.incorrect += self.children[1].Infer_Prune(
+                        X_num[indices], X_cat[indices], y[indices]
+                    )
+                num_incorrect = self.incorrect
+                self.incorrect = num_incorrect - (y != self.predict).sum()
+                return num_incorrect
+            else:
+                for labels in np.unique(X_cat[:, self.feature_idx]):
+                    if labels in self.split:
+                        idx = np.argmax(self.split == labels)
+
+                        indices = np.where(X_cat[:, self.feature_idx] == labels)[0]
+                        if (
+                            indices.shape[0] != 0
+                        ):  ##Look this up, won't it be equal to 1 and 0?
+                            self.incorrect += self.children[idx].Infer_Prune(
+                                X_num[indices], X_cat[indices], y[indices]
+                            )
+                    else:
+                        indices = np.where(X_cat[:, self.feature_idx] == labels)[0]
+                        if indices.shape[0] != 0:
+                            self.incorrect += (y[indices] != self.predict).sum()
+                num_incorrect = self.incorrect
+                self.incorrect = num_incorrect - (y != self.predict).sum()
+                return num_incorrect
+
+    def DFS_max_improve(self):
+        # print(self.incorrect)
+        if self.leaf:
+            return self
+        else:
+            max_improve = self.incorrect
+            node_to_be_pruned = self
+            for child in self.children:
+                max_improve_node = child.DFS_max_improve()
+                if max_improve_node.incorrect &gt; max_improve:
+                    max_improve = max_improve_node.incorrect
+                    node_to_be_pruned = max_improve_node
+            return node_to_be_pruned
+
+
+class DecisionTree:
+    def __init__(self, MAX_DEPTH):
+        self.max_depth = MAX_DEPTH
+        self.root = TreeNode()
+        self.root.depth = 0
+
+    def fit(self, X_num, X_cat, y):
+        ## The data may or may not be encoded
+
+        self.root.features_cat = X_cat
+        self.root.features_num = X_num
+        self.root.target = y
+        self.root.num_samples = y.shape[0]
+        return self.root.GrowTree(self.max_depth)
+
+    def predict(self, X_num, X_cat):
+        row_indices = np.arange(X_num.shape[0]).reshape(-1, 1)
+        numeric_feature = np.hstack((row_indices, X_num))
+        category_feature = np.hstack((row_indices, X_cat))
+        y_pred = self.root.Infer_Node(numeric_feature, category_feature)
+        Y = y_pred[np.argsort(y_pred[:, 0])]
+        return Y[:, 1]
+
+
+part = "a"
+num_indices = [0, 2, 4, 10, 11, 12]
+cat_indices = [1, 3, 5, 6, 7, 8, 9, 13]
+
+
+if part == "a":
+
+    train_data = np.genfromtxt("Q1/train.csv", delimiter=",", dtype=str, skip_header=1)
+    test_data = np.genfromtxt("Q1/test.csv", delimiter=",", dtype=str, skip_header=1)
+    print("Data Read")
+
+    X_train_num = train_data[:, num_indices].astype(int)
+    X_train_cat = train_data[:, cat_indices]
+
+    X_test_num = test_data[:, num_indices].astype(int)
+    X_test_cat = test_data[:, cat_indices]
+
+    mapping = {" &gt;50K": 1, " &lt;=50K": 0}
+
+    y_train = np.vectorize(mapping.get)(train_data[:, 14])
+    y_test = np.vectorize(mapping.get)(test_data[:, 14])
+    print("Data Generated")
+
+    test = []
+    train = []
+    lst = [5, 10, 15, 20]
+    for depth in lst:
+        model = DecisionTree(depth)
+        model.fit(X_train_num, X_train_cat, y_train)
+        print("Trained")
+
+        y_pred = model.predict(X_test_num, X_test_cat)
+        print("Predicted")
+        print(y_pred, y_test)
+        accuracy = np.mean(y_pred == y_test)
+        test.append(accuracy)
+        print(accuracy)
+        y_pred = model.predict(X_train_num, X_train_cat)
+        print("Predicted")
+        print(y_pred, y_train)
+        accuracy = np.mean(y_pred == y_train)
+        train.append(accuracy)
+        print(accuracy)
+        print("Done")
+    print(test, train)
+    plt.plot(lst, test, color="green", marker="x", label="Test Accuracy")
+    plt.plot(lst, train, color="blue", marker="o", label="Train Accuracy")
+    plt.xlabel("Maximum Depth")
+    plt.ylabel("Accuracy")
+    plt.title("Decision Tree Accuracy Q1")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+elif part == "b":
+    ##One Hot encoding categorical data
+    model = DecisionTree(25)
+    train_data = np.genfromtxt("Q1/train.csv", delimiter=",", dtype=str, skip_header=1)
+    test_data = np.genfromtxt("Q1/test.csv", delimiter=",", dtype=str, skip_header=1)
+    print("Data Read")
+
+    X_train_num = train_data[:, num_indices].astype(int)
+    X_train_cat = train_data[:, cat_indices]
+
+    X_test_num = test_data[:, num_indices].astype(int)
+    X_test_cat = test_data[:, cat_indices]
+
+    mapping = {" &gt;50K": 1, " &lt;=50K": 0}
+
+    y_train = np.vectorize(mapping.get)(train_data[:, 14])
+    y_test = np.vectorize(mapping.get)(test_data[:, 14])
+    print("Data Generated")
+
+    OneHotEncoding = {}
+    num_data = X_train_cat.shape[0]
+    X_train_cat_enc = np.empty((num_data, 0))
+    for idx in range(X_train_cat.shape[1]):
+        data = X_train_cat[:, idx]
+        categories = np.unique(data)
+        category_to_index = {
+            category: index for index, category in enumerate(categories)
+        }
+        OneHotEncoding[idx] = category_to_index
+        encoded_array = np.vectorize(category_to_index.get)(data)
+        one_hot_encoded = np.eye(categories.shape[0])[encoded_array]
+        X_train_cat_enc = np.hstack((X_train_cat_enc, one_hot_encoded))
+    print(X_train_cat_enc.shape)
+
+    test_data = X_test_cat.shape[0]
+    X_test_cat_enc = np.empty((test_data, 0))
+    for idx in range(X_test_cat.shape[1]):
+        data = X_test_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((test_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_test_cat_enc = np.hstack((X_test_cat_enc, one_hot))
+    print(X_test_cat_enc.shape)
+    print("Encoded")
+
+    test = []
+    train = []
+    lst = [25, 35, 45, 55]
+    for depth in lst:
+        model = DecisionTree(depth)
+        model.fit(X_train_num, X_train_cat_enc, y_train)
+        print("Trained")
+
+        y_pred = model.predict(X_test_num, X_test_cat_enc)
+        print("Predicted")
+        print(y_pred, y_test)
+        accuracy = np.mean(y_pred == y_test)
+        test.append(accuracy)
+        print(accuracy)
+        y_pred = model.predict(X_train_num, X_train_cat_enc)
+        print("Predicted")
+        print(y_pred, y_train)
+        accuracy = np.mean(y_pred == y_train)
+        train.append(accuracy)
+        print(accuracy)
+        print("Done")
+    plt.plot(lst, test, color="green", marker="x", label="Test Accuracy")
+    plt.plot(lst, train, color="blue", marker="o", label="Train Accuracy")
+    plt.xlabel("Maximum Depth")
+    plt.ylabel("Accuracy")
+    plt.title("Decision Tree Accuracy Q2")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+elif part == "c":
+    train_data = np.genfromtxt("Q1/train.csv", delimiter=",", dtype=str, skip_header=1)
+    test_data = np.genfromtxt("Q1/test.csv", delimiter=",", dtype=str, skip_header=1)
+    val_data = np.genfromtxt("Q1/valid.csv", delimiter=",", dtype=str, skip_header=1)
+    print("Data Read")
+
+    X_train_num = train_data[:, num_indices].astype(int)
+    X_train_cat = train_data[:, cat_indices]
+
+    X_test_num = test_data[:, num_indices].astype(int)
+    X_test_cat = test_data[:, cat_indices]
+
+    X_val_num = val_data[:, num_indices].astype(int)
+    X_val_cat = val_data[:, cat_indices]
+
+    mapping = {" &gt;50K": 1, " &lt;=50K": 0}
+
+    y_train = np.vectorize(mapping.get)(train_data[:, 14])
+    y_test = np.vectorize(mapping.get)(test_data[:, 14])
+    y_val = np.vectorize(mapping.get)(val_data[:, 14])
+    print("Data Generated")
+
+    OneHotEncoding = {}
+    num_data = X_train_cat.shape[0]
+    X_train_cat_enc = np.empty((num_data, 0))
+    for idx in range(X_train_cat.shape[1]):
+        data = X_train_cat[:, idx]
+        categories = np.unique(data)
+        category_to_index = {
+            category: index for index, category in enumerate(categories)
+        }
+        OneHotEncoding[idx] = category_to_index
+        encoded_array = np.vectorize(category_to_index.get)(data)
+        one_hot_encoded = np.eye(categories.shape[0])[encoded_array]
+        X_train_cat_enc = np.hstack((X_train_cat_enc, one_hot_encoded))
+    print(X_train_cat_enc.shape)
+
+    test_data = X_test_cat.shape[0]
+    X_test_cat_enc = np.empty((test_data, 0))
+    for idx in range(X_test_cat.shape[1]):
+        data = X_test_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((test_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_test_cat_enc = np.hstack((X_test_cat_enc, one_hot))
+    print(X_test_cat_enc.shape)
+
+    val_data = X_val_cat.shape[0]
+    X_val_cat_enc = np.empty((val_data, 0))
+    for idx in range(X_val_cat.shape[1]):
+        data = X_val_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((val_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_val_cat_enc = np.hstack((X_val_cat_enc, one_hot))
+    print(X_val_cat_enc.shape)
+
+    print("Encoded")
+
+    lst = [25, 35, 45, 55]
+    for depth in lst:
+        test = []
+        train = []
+        val = []
+        cnt = []
+        model = DecisionTree(depth)
+        num_nodes = model.fit(X_train_num, X_train_cat_enc, y_train)
+        cnt.append(num_nodes)
+        print("Trained")
+
+        model.root.Infer_Prune(X_val_num, X_val_cat_enc, y_val)
+        print("Prune SetUp Done")
+
+        y_pred = model.predict(X_test_num, X_test_cat_enc)
+        print("Predicted")
+        accuracy = np.mean(y_pred == y_test)
+        test.append(accuracy)
+
+        y_pred = model.predict(X_train_num, X_train_cat_enc)
+        print("Predicted")
+        accuracy = np.mean(y_pred == y_train)
+        train.append(accuracy)
+
+        y_pred = model.predict(X_val_num, X_val_cat_enc)
+        print("Predicted")
+        accuracy = np.mean(y_pred == y_val)
+        val.append(accuracy)
+
+        while True:
+            node_to_be_pruned = model.root.DFS_max_improve()
+            if node_to_be_pruned.incorrect &lt;= 0:
+                break
+            else:
+                node = node_to_be_pruned
+                improvement = node_to_be_pruned.incorrect
+                node_pruned = node_to_be_pruned.num_node - 1
+                while node.parent != None:
+                    node.parent.incorrect -= improvement
+                    node.parent.num_node -= node_pruned
+                    node = node.parent
+                node_to_be_pruned.leaf = True
+                node_to_be_pruned.incorrect = 0
+                node_to_be_pruned.num_node = 1
+                num_nodes -= node_pruned
+                cnt.append(num_nodes)
+
+            y_pred = model.predict(X_test_num, X_test_cat_enc)
+            accuracy = np.mean(y_pred == y_test)
+            test.append(accuracy)
+
+            y_pred = model.predict(X_train_num, X_train_cat_enc)
+            accuracy = np.mean(y_pred == y_train)
+            train.append(accuracy)
+
+            y_pred = model.predict(X_val_num, X_val_cat_enc)
+            accuracy = np.mean(y_pred == y_val)
+            val.append(accuracy)
+
+        print("Pruning Done")
+
+        # print(cnt, train[0],val[0],test[0],train[-1],val[-1],test[-1])
+        plt.plot(cnt, test, color="green", marker="x", label="Test Accuracy")
+        plt.plot(cnt, train, color="red", marker="o", label="Train Accuracy")
+        plt.plot(cnt, val, color="blue", marker="*", label="Validation Accuracy")
+        plt.xlabel("Number Of Nodes")
+        plt.ylabel("Accuracy")
+        plt.title("Decision Tree Accuracy Q3")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+
+elif part == "d":
+    train_data = np.genfromtxt("Q1/train.csv", delimiter=",", dtype=str, skip_header=1)
+    test_data = np.genfromtxt("Q1/test.csv", delimiter=",", dtype=str, skip_header=1)
+    val_data = np.genfromtxt("Q1/valid.csv", delimiter=",", dtype=str, skip_header=1)
+    print("Data Read")
+
+    X_train_num = train_data[:, num_indices].astype(int)
+    X_train_cat = train_data[:, cat_indices]
+
+    X_test_num = test_data[:, num_indices].astype(int)
+    X_test_cat = test_data[:, cat_indices]
+
+    X_val_num = val_data[:, num_indices].astype(int)
+    X_val_cat = val_data[:, cat_indices]
+
+    mapping = {" &gt;50K": 1, " &lt;=50K": 0}
+
+    y_train = np.vectorize(mapping.get)(train_data[:, 14])
+    y_test = np.vectorize(mapping.get)(test_data[:, 14])
+    y_val = np.vectorize(mapping.get)(val_data[:, 14])
+    print("Data Generated")
+
+    OneHotEncoding = {}
+    num_data = X_train_cat.shape[0]
+    X_train_cat_enc = np.empty((num_data, 0))
+    for idx in range(X_train_cat.shape[1]):
+        data = X_train_cat[:, idx]
+        categories = np.unique(data)
+        category_to_index = {
+            category: index for index, category in enumerate(categories)
+        }
+        OneHotEncoding[idx] = category_to_index
+        encoded_array = np.vectorize(category_to_index.get)(data)
+        one_hot_encoded = np.eye(categories.shape[0])[encoded_array]
+        X_train_cat_enc = np.hstack((X_train_cat_enc, one_hot_encoded))
+    print(X_train_cat_enc.shape)
+
+    test_data = X_test_cat.shape[0]
+    X_test_cat_enc = np.empty((test_data, 0))
+    for idx in range(X_test_cat.shape[1]):
+        data = X_test_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((test_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_test_cat_enc = np.hstack((X_test_cat_enc, one_hot))
+    print(X_test_cat_enc.shape)
+
+    val_data = X_val_cat.shape[0]
+    X_val_cat_enc = np.empty((val_data, 0))
+    for idx in range(X_val_cat.shape[1]):
+        data = X_val_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((val_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_val_cat_enc = np.hstack((X_val_cat_enc, one_hot))
+    print(X_val_cat_enc.shape)
+
+    print("Encoded")
+    X_train = np.hstack((X_train_num, X_train_cat_enc))
+    X_val = np.hstack((X_val_num, X_val_cat_enc))
+    X_test = np.hstack((X_test_num, X_test_cat_enc))
+
+    max_depth = [25, 35, 45, 55]
+    train = []
+    test = []
+    val = []
+    for depth in max_depth:
+        Decs_Tree = tree.DecisionTreeClassifier(criterion="entropy", max_depth=depth)
+        Decs_Tree.fit(X_train, y_train)
+        print("Trained")
+        y_pred = Decs_Tree.predict(X_test)
+        accuracy = np.mean(y_pred == y_test)
+        test.append(accuracy)
+
+        y_pred = Decs_Tree.predict(X_train)
+        accuracy = np.mean(y_pred == y_train)
+        train.append(accuracy)
+
+        y_pred = Decs_Tree.predict(X_val)
+        accuracy = np.mean(y_pred == y_val)
+        val.append(accuracy)
+        print("Done")
+    print(train, test, val)
+    plt.plot(max_depth, test, color="green", marker="x", label="Test Accuracy")
+    plt.plot(max_depth, train, color="blue", marker="o", label="Train Accuracy")
+    plt.xlabel("Max Depth")
+    plt.ylabel("Accuracy")
+    plt.title("Decision Tree Accuracy Q4")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    alpha_param = [0.001, 0.01, 0.1, 0.2]
+    # alpha_param = [0.001]
+    train = []
+    test = []
+    val = []
+    for alpha in alpha_param:
+        Decs_Tree = tree.DecisionTreeClassifier(criterion="entropy", ccp_alpha=alpha)
+        Decs_Tree.fit(X_train, y_train)
+        print("Trained")
+        y_pred = Decs_Tree.predict(X_test)
+        accuracy = np.mean(y_pred == y_test)
+        test.append(accuracy)
+
+        y_pred = Decs_Tree.predict(X_train)
+        accuracy = np.mean(y_pred == y_train)
+        train.append(accuracy)
+
+        y_pred = Decs_Tree.predict(X_val)
+        accuracy = np.mean(y_pred == y_val)
+        val.append(accuracy)
+        print("Done")
+    print(train, test, val)
+    plt.plot(alpha_param, test, color="green", marker="x", label="Test Accuracy")
+    plt.plot(alpha_param, train, color="blue", marker="o", label="Train Accuracy")
+    plt.xlabel("ccp_alpha")
+    plt.ylabel("Accuracy")
+    plt.title("Decision Tree Accuracy Q4")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    Decs_Tree = tree.DecisionTreeClassifier(
+        criterion="entropy", ccp_alpha=0.001, max_depth=25
+    )
+    Decs_Tree.fit(X_train, y_train)
+    y_pred = Decs_Tree.predict(X_test)
+
+    accuracy = np.mean(y_pred == y_test)
+    print(accuracy)
+
+    # y_pred = Decs_Tree.predict(X_val)
+    # accuracy = np.mean(y_pred == y_val)
+    # print(accuracy)
+
+elif part == "e":
+    train_data = np.genfromtxt("Q1/train.csv", delimiter=",", dtype=str, skip_header=1)
+    test_data = np.genfromtxt("Q1/test.csv", delimiter=",", dtype=str, skip_header=1)
+    val_data = np.genfromtxt("Q1/valid.csv", delimiter=",", dtype=str, skip_header=1)
+    print("Data Read")
+
+    X_train_num = train_data[:, num_indices].astype(int)
+    X_train_cat = train_data[:, cat_indices]
+
+    X_test_num = test_data[:, num_indices].astype(int)
+    X_test_cat = test_data[:, cat_indices]
+
+    X_val_num = val_data[:, num_indices].astype(int)
+    X_val_cat = val_data[:, cat_indices]
+
+    mapping = {" &gt;50K": 1, " &lt;=50K": 0}
+
+    y_train = np.vectorize(mapping.get)(train_data[:, 14])
+    y_test = np.vectorize(mapping.get)(test_data[:, 14])
+    y_val = np.vectorize(mapping.get)(val_data[:, 14])
+    print("Data Generated")
+
+    OneHotEncoding = {}
+    num_data = X_train_cat.shape[0]
+    X_train_cat_enc = np.empty((num_data, 0))
+    for idx in range(X_train_cat.shape[1]):
+        data = X_train_cat[:, idx]
+        categories = np.unique(data)
+        category_to_index = {
+            category: index for index, category in enumerate(categories)
+        }
+        OneHotEncoding[idx] = category_to_index
+        encoded_array = np.vectorize(category_to_index.get)(data)
+        one_hot_encoded = np.eye(categories.shape[0])[encoded_array]
+        X_train_cat_enc = np.hstack((X_train_cat_enc, one_hot_encoded))
+    print(X_train_cat_enc.shape)
+
+    test_data = X_test_cat.shape[0]
+    X_test_cat_enc = np.empty((test_data, 0))
+    for idx in range(X_test_cat.shape[1]):
+        data = X_test_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((test_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_test_cat_enc = np.hstack((X_test_cat_enc, one_hot))
+    print(X_test_cat_enc.shape)
+
+    val_data = X_val_cat.shape[0]
+    X_val_cat_enc = np.empty((val_data, 0))
+    for idx in range(X_val_cat.shape[1]):
+        data = X_val_cat[:, idx]
+        num_labels = len(OneHotEncoding[idx])
+        encoded_array = np.vectorize(lambda key: OneHotEncoding[idx].get(key, -1))(data)
+        one_hot = np.zeros((val_data, num_labels))
+        valid_mask = encoded_array &gt;= 0
+        one_hot[valid_mask] = np.eye(num_labels)[encoded_array[valid_mask]]
+        X_val_cat_enc = np.hstack((X_val_cat_enc, one_hot))
+    print(X_val_cat_enc.shape)
+
+    X_train = np.hstack((X_train_num, X_train_cat_enc))
+    X_val = np.hstack((X_val_num, X_val_cat_enc))
+    X_test = np.hstack((X_test_num, X_test_cat_enc))
+
+    param_grid = {
+        "n_estimators": [50, 150, 250, 350],
+        "max_features": [0.1, 0.3, 0.5, 0.7, 0.9],
+        "min_samples_split": [2, 4, 6, 8, 10],
+    }
+    max_score = 0
+    best_params = None
+    for n_estm in param_grid["n_estimators"]:
+        for features in param_grid["max_features"]:
+            for sample_split in param_grid["min_samples_split"]:
+                Random_Forest = ensemble.RandomForestClassifier(
+                    criterion="entropy",
+                    n_estimators=n_estm,
+                    max_features=features,
+                    min_samples_split=sample_split,
+                    oob_score=True,
+                    bootstrap=True,
+                    random_state=42,
+                )
+                Random_Forest.fit(X_train, y_train)
+                if Random_Forest.oob_score_ &gt; max_score:
+                    max_score = Random_Forest.oob_score_
+                    best_params = [n_estm, features, sample_split]
+                print("Done")
+    print(best_params, max_score)
+    Final_Model = ensemble.RandomForestClassifier(
+        criterion="entropy",
+        n_estimators=best_params[0],
+        max_features=best_params[1],
+        min_samples_split=best_params[2],
+        oob_score=True,
+        bootstrap=True,
+        random_state=42,
+    )
+    Final_Model.fit(X_train, y_train)
+    train_pred = Final_Model.predict(X_train)
+    accuracy = np.mean(train_pred == y_train)
+    print(accuracy)
+    test_pred = Final_Model.predict(X_test)
+    accuracy = np.mean(test_pred == y_test)
+    print(accuracy)
+    val_pred = Final_Model.predict(X_val)
+    accuracy = np.mean(val_pred == y_val)
+    print(accuracy)
+else:
+    pass
+
+
+
+
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
+
+
+# This Python 3 environment comes with many helpful analytics libraries installed
+# It is defined by the kaggle/python Docker image: https://github.com/kaggle/docker-python
+# For example, here's several helpful packages to load
+
+import numpy as np # linear algebra
+import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+
+# Input data files are available in the read-only "../input/" directory
+# For example, running this (by clicking run or pressing Shift+Enter) will list all files under the input directory
+
+import os
+# for dirname, _, filenames in os.walk('/kaggle/input'):
+#     for filename in filenames:
+#         print(os.path.join(dirname, filename))
+get_ipython().system('cp -r /kaggle/input/q2-data/Q2 /kaggle/working/')
+
+# You can write up to 20GB to the current directory (/kaggle/working/) that gets preserved as output when you create a version using "Save & Run All" 
+# You can also write temporary files to /kaggle/temp/, but they won't be saved outside of the current session
+
+
+# In[ ]:
+
+
+import numpy as np
+import os
+from PIL import Image
+from sklearn import neural_network
+from sklearn.metrics import classification_report
+
+
+# In[ ]:
+
+
+train_folder = "/kaggle/working/Q2/train"
+
+
+
+
+folders = [f for f in os.listdir(train_folder) if os.path.isdir(os.path.join(train_folder, f))]
+folders = sorted(folders)
+
+images = []
+labels = []
+for class_label in range(len(folders)):
+#for class_label in range(8):
+    path = train_folder + '/' + folders[class_label]
+    cnt = 0
+    for file in os.listdir(path):
+        img_path = os.path.join(path, file)
+        img = Image.open(img_path).convert('RGB')  
+        #img = img.resize((128, 128))
+        img_array = np.array(img).flatten()
+        img_array = img_array / 255.0
+        images.append(img_array)
+        cnt += 1
+    y = np.ones((cnt,)) * class_label
+    labels.extend(y)
+    
+X_train = np.stack(images)
+X_mean = np.mean(X_train, axis = 0)
+variance = np.mean(X_train ** 2, axis = 0) - (X_mean ** 2)
+std_dev = variance ** 0.5
+#X_train = (X_train - X_mean)/std_dev
+Y_train = np.stack(labels)
+print(X_train.shape, Y_train.shape)
+
+
+
+
+
+# In[ ]:
+
+
+test_folder = "/kaggle/working/Q2/test"
+
+files = sorted([f for f in os.listdir(test_folder)])
+images = []
+
+cnt = 0
+for file in files:
+    img_path = os.path.join(test_folder, file)
+    img = Image.open(img_path).convert('RGB')  
+    #img = img.resize((128, 128))
+    img_array = np.array(img).flatten()
+    img_array = img_array / 255.0
+    images.append(img_array)
+    cnt +=1
+    # if cnt == 50:
+    #     break
+
+    
+X_test = np.stack(images)
+#X_test = (X_test - X_mean)/std_dev
+
+
+# In[ ]:
+
+
+test_labels = "/kaggle/working/Q2/test_labels.csv"
+test_label = np.genfromtxt(test_labels, delimiter=',', skip_header=1, dtype=str, encoding=None)
+
+Y_test = test_label[:, -1].astype(int)
+print(X_test.shape, Y_test.shape)
+
+
+# In[ ]:
+
+
+
+
+
+class Sigmoid:
+    def __init__(self):
+        self.out = None ##Output of the given layer
+    
+    def __call__(self, x, is_train = False):
+        x = np.clip(x, -500, 500)
+        output = 1.0 / (1 + np.exp(-x))
+        if is_train:
+            self.out = output
+        return output
+    
+    def backward(self, dx):
+        gradient = dx * self.out * (1 - self.out)
+        return gradient
+
+class ReLU:
+    def __init__(self):
+        self.out = None ##Output of the given layer
+    
+    def __call__(self, x, is_train = False):
+        output = np.maximum(0,x)
+        if is_train:
+            self.out = output
+        return output
+    
+    def backward(self, dx):
+        gradient = dx * (self.out &gt; 0).astype(int)
+        return gradient
+
+
+class Softmax:
+    def __init__(self):
+        self.out = None
+
+    def __call__(self, x, is_train = False):
+        un_norm_output = np.exp(x - np.max(x, axis = 0, keepdims= True))
+        output = un_norm_output/np.sum(un_norm_output, axis = 0, keepdims = True)
+        if is_train:
+            self.out = output
+        return output
+
+    def backward(self, y):
+        return self.out - y
+        ## Here y is 2d matrix of dim n_class, n_sample entry in given col is 1 if sample belongs to that class
+        ## Samples are arranged column wise everywhere
+
+class Linear:
+    def __init__(self, num_input, num_neuron):
+        self.weights =   np.random.randn(num_neuron, num_input) * np.sqrt(1.0 / num_input) ##Each kernel has weights along row (num0f kernels- dimension of output of given layer, n_dim of previous layer)
+        self.bias = np.random.randn(num_neuron,1) * np.sqrt(1.0 / num_input)
+        self.input = None
+
+    def __call__(self, x, is_train):
+        output = (self.weights @ x) + self.bias  #X samples arranged columnwise
+        if is_train:
+            self.input = x
+        return output
+    
+    def backward(self, dx, lr = 0.01):
+        # np.clip(self.weights, -1e5, 1e5, out=self.weights)
+        # np.clip(dx, -1e5, 1e5, out=dx)
+        if np.max(self.input) &gt; 1000:
+            print(np.max(self.input),np.min(self.input))
+        if np.max(dx) &gt; 1000:
+            print(np.max(dx),np.min(dx))
+        num_sample = dx.shape[1]
+        self.weights -= lr * (dx @ self.input.T)/num_sample
+        self.bias -= lr * dx.sum(axis = 1, keepdims = True)/num_sample
+        return (self.weights.T @ dx)
+    
+class NeuralNetwork:
+    def __init__(self, batch_size, num_features, hidden_layer_size, num_classes, activation = 'sigmoid', learning_rate = 'constant'):
+        self.batch_size = batch_size
+        self.output = num_classes
+        self.class_labels = None
+        self.lr = learning_rate
+        self.activation = activation
+        self.blocks = []
+        self.softmax = Softmax()
+        input_size = num_features
+        output_size = hidden_layer_size[0]
+        for layer in range(len(hidden_layer_size)):
+            self.blocks.append(Linear(input_size,output_size))
+            if activation == 'ReLU':
+                self.blocks.append(ReLU())
+            else:
+                self.blocks.append(Sigmoid())
+            input_size = output_size
+            if layer != len(hidden_layer_size) - 1:                
+                output_size = hidden_layer_size[layer + 1]
+            else:
+                output_size = num_classes
+        self.blocks.append(Linear(input_size,output_size))
+    
+
+
+    def forward(self, X_train, is_train = False):
+        
+        x = X_train
+        for layer in self.blocks:
+            x = layer(x, is_train)
+        x = self.softmax(x, is_train)
+
+        # max_prob_index = np.argmax(x, axis = 0)
+        # y_pred = np.zeros(x.shape)
+        # cols = np.arrange(y.shape[1])
+        # y_pred[max_prob_index : cols] = 1
+        return x
+        
+        
+    def backward(self, y, lr = 0.01):
+        gradient = self.softmax.backward(y)
+        for layer_num in range(-1,1 - len(self.blocks), -2):
+            gradient = self.blocks[layer_num].backward(gradient, lr)
+            gradient = self.blocks[layer_num - 1].backward(gradient)
+        gradient = self.blocks[0].backward(gradient, lr)
+        return
+
+    def fit(self, X, y):
+        class_labels = np.unique(y)
+        label_to_index = {category: index for index, category in enumerate(class_labels)}
+        index_to_label = {value : key for key, value in label_to_index.items()}
+        self.class_labels = index_to_label
+
+        dataset = np.hstack((X, y.reshape(-1,1)))
+        np.random.shuffle(dataset)
+        num_batches = int(np.ceil(dataset.shape[0] / self.batch_size))
+        batch_data_X = []
+        batch_data_Y = []
+        for i in range(num_batches):
+            batch_data_X.append((dataset[i*self.batch_size:(i+1)*self.batch_size, :-1]).T)
+            y = dataset[i*self.batch_size:(i+1)*self.batch_size, -1]
+            encoded_array = np.vectorize(label_to_index.get)(y)
+            batch_data_Y.append((np.eye(self.output)[encoded_array]).T)
+
+        epoch = 0
+        BCE_loss = float('inf')
+        threshold = (1e-3) * X.shape[0]
+        if self.lr == 'adaptive':
+            threshold = (1e-4) * X.shape[0]
+        lr = 0.01
+        lr0 = 0.01
+        if self.activation == 'ReLU':
+            lr0 = 0.001
+        epsilon = 1e-12
+        improvement = 255
+        max_epoch = 75 + (len(self.blocks) // 2)*25
+        while improvement != 0 and epoch &lt; max_epoch:
+            epoch+=1
+            total__loss = 0
+            if self.lr == 'adaptive':
+                lr = lr0 / (epoch ** 0.5)
+            for batch_num in range(num_batches):
+                y_out = self.forward(batch_data_X[batch_num], True)
+                y = batch_data_Y[batch_num]
+                loss = -1 * np.sum(y * np.log(y_out + epsilon))
+                total__loss += loss
+                self.backward(y, lr)
+                            
+            
+            print(epoch, total__loss)
+            optimized = BCE_loss - total__loss
+            improvement = ((improvement & 0x7F) &lt;&lt; 1)
+            if optimized &gt; threshold:
+                improvement += 1
+            BCE_loss = total__loss
+        return BCE_loss
+
+        
+    def predict(self, X):
+        # X.T is of shape (num_features, num_examples)
+        y = self.forward(X.T)
+        label_index = np.argmax(y, axis = 0)
+        y_pred = np.vectorize(self.class_labels.get)(label_index)
+        return y_pred
+    
+
+
+        
+            
+
+
+
+# In[ ]:
+
+
+for num in [1, 5, 10, 50, 100]:
+    model = NeuralNetwork(32, 2352, [num], 43, activation='sigmoid')
+    train_loss = model.fit(X_train, Y_train)    
+    y_pred_test = model.predict(X_test)
+    test_report = classification_report(Y_test, y_pred_test, output_dict = True)
+    y_pred_train = model.predict(X_train)
+    train_report = classification_report(Y_train, y_pred_train, output_dict = True)
+    df = pd.DataFrame(train_report).transpose().round(2)
+    df.to_csv(f"train_report{num}.csv")
+    df = pd.DataFrame(test_report).transpose().round(2)
+    df.to_csv(f"test_report{num}.csv")
+
+
+# In[ ]:
+
+
+num =0
+for layer in [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]:
+    num+=1
+    model = NeuralNetwork(32, 2352, layer, 43, activation='sigmoid')
+    train_loss = model.fit(X_train, Y_train)    
+    y_pred_test = model.predict(X_test)
+    test_report = classification_report(Y_test, y_pred_test, output_dict = True)
+    y_pred_train = model.predict(X_train)
+    train_report = classification_report(Y_train, y_pred_train, output_dict = True)
+    df = pd.DataFrame(train_report).transpose().round(2)
+    df.to_csv(f"train_report_depth{num}.csv")
+    df = pd.DataFrame(test_report).transpose().round(2)
+    df.to_csv(f"test_report_depth{num}.csv")
+            
+
+
+# In[ ]:
+
+
+num=0
+for layer in [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]:
+    num+=1
+    model = NeuralNetwork(32, 2352, layer, 43, activation='sigmoid', learning_rate = 'adaptive')
+    train_loss = model.fit(X_train, Y_train)    
+    y_pred_test = model.predict(X_test)
+    test_report = classification_report(Y_test, y_pred_test, output_dict = True)
+    y_pred_train = model.predict(X_train)
+    train_report = classification_report(Y_train, y_pred_train, output_dict = True)
+    df = pd.DataFrame(train_report).transpose().round(2)
+    df.to_csv(f"train_report_adsig{num}.csv")
+    df = pd.DataFrame(test_report).transpose().round(2)
+    df.to_csv(f"test_report_adsig{num}.csv")
+
+
+# In[ ]:
+
+
+num=0
+X_train = (X_train - X_mean)/std_dev
+X_test = (X_test - X_mean)/std_dev
+for layer in [[512], [512, 256], [512, 256, 128], [512, 256, 128, 64]]:
+    num+=1
+    model = NeuralNetwork(32, 2352, layer, 43, activation='ReLU', learning_rate = 'adaptive')
+    train_loss = model.fit(X_train, Y_train)    
+    y_pred_test = model.predict(X_test)
+    test_report = classification_report(Y_test, y_pred_test, output_dict = True)
+    y_pred_train = model.predict(X_train)
+    train_report = classification_report(Y_train, y_pred_train, output_dict = True)
+    df = pd.DataFrame(train_report).transpose().round(2)
+    df.to_csv(f"train_report_relu{num}.csv")
+    df = pd.DataFrame(test_report).transpose().round(2)
+    df.to_csv(f"test_report_relu{num}.csv")
+
+
+# In[ ]:
+
+
+X_train = (X_train - X_mean)/std_dev
+X_test = (X_test - X_mean)/std_dev
+hidden_layers = [(512,), (512,256) , (512,256,128), (512,256,128,64)]
+num =0
+for layer in hidden_layers:
+    model = neural_network.MLPClassifier(hidden_layer_sizes= layer,
+                                         solver='sgd',activation='relu',
+                                         alpha= 0, batch_size= 32, learning_rate='invscaling',
+                                         max_iter = 100, tol = 1e-3)
+    model.fit(X_train, Y_train)
+    num+=1
+    train_loss = model.fit(X_train, Y_train)    
+    y_pred_test = model.predict(X_test)
+    test_report = classification_report(Y_test, y_pred_test, output_dict = True)
+    y_pred_train = model.predict(X_train)
+    train_report = classification_report(Y_train, y_pred_train, output_dict = True)
+    df = pd.DataFrame(train_report).transpose().round(2)
+    df.to_csv(f"train_report_sk{num}.csv")
+    df = pd.DataFrame(test_report).transpose().round(2)
+    df.to_csv(f"test_report_sk{num}.csv")
+    
+
+    
+
+
+
+</PRE>
+</PRE>
+</BODY>
+</HTML>
